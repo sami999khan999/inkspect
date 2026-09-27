@@ -1,5 +1,7 @@
 # VS Code Browser Extension: Plan
 
+> **Repository layout:** the VS Code extension now lives in `vscode-extension/`. Paths in this plan are relative to it. The companion browser extension (toolbar on any page, two-way bookmark sync with VS Code) is planned in [`browser-extension-plan.md`](browser-extension-plan.md).
+
 ## Context
 
 The goal is a full web browser that runs inside a VS Code editor tab. It covers the normal browser features (tabs, navigation, bookmarks, history, downloads, and so on) plus tools that help when working with AI coding agents:

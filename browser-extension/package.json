@@ -1,0 +1,24 @@
+{
+  "name": "inkspect-browser-extension",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Inkspect for Chrome, Edge, Brave and Firefox: a shortcut toolbar with the element selector, drawing, screenshots, devices and console tools, plus two-way bookmark sync with VS Code.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:prod": "node scripts/build.mjs --production",
+    "watch": "node scripts/build.mjs --watch --browser chrome",
+    "typecheck": "tsc -p .",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:e2e": "node scripts/build.mjs --browser chrome --test && node test/e2e/run.mjs"
+  },
+  "dependencies": {
+    "@inkspect/shared": "*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.0"
+  }
+}

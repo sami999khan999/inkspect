@@ -4,14 +4,16 @@
     {
       "type": "npm",
       "script": "build",
-      "label": "npm: build",
+      "path": "vscode-extension",
+      "label": "npm: build - vscode-extension",
       "group": { "kind": "build", "isDefault": true },
       "problemMatcher": []
     },
     {
       "type": "npm",
       "script": "watch",
-      "label": "npm: watch",
+      "path": "vscode-extension",
+      "label": "npm: watch - vscode-extension",
       "isBackground": true,
       "problemMatcher": {
         "owner": "vscode-browser",

@@ -4,7 +4,17 @@ Guidance for AI coding agents working in this repository. Read it before changin
 
 ## What this project is
 
-**VS Code Browser** (working name, see the README) is a VS Code extension: a full web browser that runs inside an editor tab. It is built for working with AI agents. Its main features:
+**Inkspect** is a monorepo (npm workspaces) with two products:
+
+| Folder               | What it is                                                                                                                                                 | Status                                                    |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `vscode-extension/`  | **VS Code Browser** (working name): a full web browser inside a VS Code editor tab                                                                         | Built; see `plans/vscode-browser-plan.md`                 |
+| `browser-extension/` | **Inkspect** for Chrome/Edge/Brave/Firefox. A shortcut opens a toolbar with the same tools on any page, and it syncs bookmarks with the VS Code extension. | Built (Phases 0–9); see `plans/browser-extension-plan.md` |
+| `shared/`            | `@inkspect/shared`: code both products use                                                                                                                 | See **Shared package** below                              |
+
+Unless a section says otherwise, the rest of this file is about the VS Code extension, and **paths are relative to `vscode-extension/`**.
+
+The VS Code extension is built for working with AI agents. Its main features:
 
 - An **element selector** that copies element details as context for an agent.
 - **Drawing** on the page, then a screenshot of only the drawn area.
@@ -49,6 +59,21 @@ Webview (React 19 + Vite → dist/webview/)
 
 ## Repository layout
 
+The repository root:
+
+```
+package.json            npm workspaces root: scripts that run in every workspace
+vscode-extension/       the VS Code extension (below)
+browser-extension/      the browser extension (see "Browser extension" below)
+shared/                 @inkspect/shared, used by both
+plans/                  roadmaps with phase checklists, one per product
+.github/workflows/      CI (runs from the root)
+.vscode/                launch config ("Run VS Code Extension") and tasks for the workspace
+AGENTS.md, CLAUDE.md    this guidance
+```
+
+Inside `vscode-extension/`:
+
 ```
 src/extension.ts        activate(): wires services, commands, sidebar, agent tools, MCP
 src/commands.ts         every command registration (incl. hidden vscodeBrowser.debug.* ones)
@@ -66,10 +91,12 @@ test/e2e/               integration tests run inside a real VS Code (suite.ts, r
 test/fixtures/          fixture Chrome extension
 scripts/sync-tools.mjs  regenerates contributes.languageModelTools from src/agent/tools.ts
 media/                  icons, walkthrough Markdown
-plans/                  roadmap
+CHANGELOG.md, README.md the extension's changelog and marketplace README
 ```
 
 ## Commands
+
+Run `npm install` once at the **repository root**; workspaces install everything into the root `node_modules`. The root scripts `build`, `typecheck`, `lint`, `test`, `test:e2e`, `package` and `format` run the matching script in each workspace. Inside `vscode-extension/` (or with `-w vscode-extension` from the root):
 
 ```sh
 npm run build        # host (esbuild) + webview (Vite), development
@@ -82,12 +109,12 @@ npm run sync:tools   # after editing src/agent/tools.ts
 npm run package      # production build + .vsix
 ```
 
-**Before you call a change done**, run `npm run typecheck && npm run lint && npm test`. If the change touches the host/Chromium path, the webview protocol or commands, also run `npm run test:e2e`.
+**Before you call a change done**, run `npm run typecheck && npm run lint && npm test` (from the root or from the workspace). Changes to the browser extension or `shared/` also need `npm run test:e2e:browser`. If the change touches the host/Chromium path, the webview protocol or commands, also run `npm run test:e2e`.
 
 **Integration tests**
 
-- Results go to `out/e2e/results.log`.
-- Failure details are in `.vscode-test/user-data/logs/*/window1/renderer.log`.
+- Results go to `vscode-extension/out/e2e/results.log`.
+- Failure details are in `vscode-extension/.vscode-test/user-data/logs/*/window1/renderer.log`.
 - The test profile keeps its data between runs, so tests must not assume empty stores. For example, check for your own bookmark id, not `bookmarks.length === 0`.
 
 ## Module boundaries (hard rules)
@@ -192,9 +219,55 @@ npm run package      # production build + .vsix
   - Keep all of these checks.
 - No detection-evasion features. Sites that block automated browsers get the "Open in system browser" fallback, not workarounds.
 
+## Shared package (`shared/`, `@inkspect/shared`)
+
+- **What it holds:**
+  - element details and selectors (`elementInfo`, `collect`)
+  - drawing (`annotations`, `drawing/render`, `drawing/composite`, `ui/DrawingLayer`, `ui/DrawToolbar`)
+  - `devices`, Copy-for-AI formats (`devtools`), `color`
+  - the bookmark merge (`bookmarkSync`) and the link protocol (`bridge`)
+  - generic UI (`ui/Menu`, `ui/IconButton`, `ui/ui.css`)
+- **Imports:** `@inkspect/shared/<module>` or `@inkspect/shared/ui/<Component>`. The package exports TypeScript source; each product's bundler compiles it.
+- **No `vscode` or `chrome` imports, no Node-only APIs.** DOM APIs are fine, since both products run the code in pages or webviews.
+- **`collectElementDetails` must stay self-contained:** everything comes in through its parameters. The VS Code extension sends it to Chromium as source text (`toString()`), which only works for self-contained functions, including after minification.
+- **Tests and rules:**
+  - Unit tests live in `shared/test/`.
+  - Changes to `bookmarkSync` must keep the randomized convergence test passing.
+  - Changes to `bridge` must keep both ends validating every message.
+  - The VS Code extension's old paths (`src/shared/elementInfo.ts`, `webview/src/drawing/*`...) are one-line re-exports. Add new shared code to `shared/`, not there.
+
+## Browser extension (`browser-extension/`)
+
+**Architecture:**
+
+- **Background** (`src/background/`): the MV3 service worker (Firefox: background scripts). It handles:
+  - the shortcut and the toolbar button
+  - injecting the toolbar on demand (`activeTab` + `scripting`), including the MAIN-world helper
+  - `captureVisibleTab` (queued to Chrome's limit of about 2 per second)
+  - device emulation (`chrome.debugger`, or a device-sized window)
+  - the VS Code link client (`bridge.ts`) and the browser half of bookmark sync (`bookmarks.ts`)
+- **Content** (`src/content/`): the toolbar is React in a **closed** shadow root on `<inkspect-toolbar>`. It holds the inspector, drawing, region select, panels, and capture and stitching (`capture.ts`).
+- **MAIN world** (`src/main-world/`): runs in the page's own JS world. It collects element details (framework components are only visible there) and hooks console, errors, `fetch` and XHR.
+
+**Rules:**
+
+- **Messaging:**
+  - Content ↔ background: typed `chrome.runtime` messages (`src/messages.ts`, `toBackground()`).
+  - Content ↔ page: DOM events carrying JSON **strings** (`pageRequest()`), so nothing depends on how browsers share objects between worlds.
+  - Nothing is ever exposed to the page's JS.
+- **Styling:** stylesheets are bundled as text into the shadow root. The shared components use VS Code theme variables, defined in `toolbar.css` for light and dark. Icons are codicons, whose font is registered from bytes (`FontFace`), because `@font-face` doesn't work inside shadow roots and URLs can be blocked by page CSP.
+- **Hide the toolbar during captures** (`hideUi`), and never capture our own UI.
+- **Manifests:** `manifest/base.json` plus `chrome.json` / `firefox.json`, merged by `scripts/manifest.mjs` (unit-tested). Keep required permissions minimal. Chrome needs `debugger` only for full emulation.
+- **Test hooks:**
+  - The **test build** (`--test`, `dist/chrome-test`) adds host access (tests can't press the shortcut that grants `activeTab`) and opens the shadow root.
+  - `globalThis.__inkspectTest` in the background exposes `toggleToolbar`, `reconnect`, `pair`, `bridgeStatus` and `syncState`.
+  - Never ship the test build.
+- **Checks:** `npm run test:e2e:browser` must pass. It runs Chrome for Testing with the unpacked extension against a fixture site and a fake VS Code link that uses the real merge code.
+
 ## Housekeeping
 
-- Update `CHANGELOG.md` (Unreleased) and the relevant phase in `plans/vscode-browser-plan.md` when you add or finish a feature. Mark deferred items `[ ]` with a short reason.
+- Update the product's `CHANGELOG.md` (Unreleased) and the relevant phase in its plan under `plans/` when you add or finish a feature. Mark deferred items `[ ]` with a short reason.
+- **Shared code goes in `shared/`**, not copied between products (see **Shared package**).
 - **Never add yourself (the AI agent) as an author, co-author or contributor.** This applies to commits, pull requests, docs and `package.json`:
   - no `Co-Authored-By:` trailers
   - no "Generated with …" lines

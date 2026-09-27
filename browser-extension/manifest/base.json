@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Inkspect",
+  "description": "Element selector, drawing, screenshots, devices and console tools for AI agents, on any page. Syncs bookmarks with VS Code.",
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "action": {
+    "default_title": "Inkspect toolbar (Alt+Shift+I)",
+    "default_icon": { "16": "icons/16.png", "32": "icons/32.png" }
+  },
+  "commands": {
+    "toggle-toolbar": {
+      "suggested_key": { "default": "Alt+Shift+I" },
+      "description": "Show or hide the Inkspect toolbar"
+    }
+  },
+  "permissions": ["activeTab", "scripting", "storage", "bookmarks", "downloads", "clipboardWrite"],
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "web_accessible_resources": [{ "resources": ["codicon.ttf"], "matches": ["<all_urls>"] }]
+}

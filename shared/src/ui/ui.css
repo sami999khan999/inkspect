@@ -1,0 +1,272 @@
+/* Styles of the shared UI components (buttons, menus, drawing toolbar and layer, toast).
+   They use VS Code theme variables; the browser extension defines those in its shadow root. */
+
+.icon-button {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-icon-foreground, var(--vscode-foreground));
+  cursor: pointer;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.icon-button.active {
+  background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground));
+}
+
+.icon-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.icon-button:focus-visible,
+.button:focus-visible,
+.link-button:focus-visible,
+.menu-item:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+/* Buttons ---------------------------------------------------------------------------------- */
+
+.button {
+  height: 26px;
+  padding: 0 14px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.button.primary {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.button.primary:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.button.secondary {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+
+.button.secondary:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Menus and popovers ------------------------------------------------------------------------- */
+
+.menu,
+.popover {
+  position: fixed;
+  z-index: 100;
+  min-width: 200px;
+  max-width: 420px;
+  padding: 4px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, transparent));
+  border-radius: 6px;
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item:hover:not(:disabled),
+.menu-item:focus {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+  outline: none;
+}
+
+.menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.menu-label {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.menu-shortcut {
+  margin-left: 16px;
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(
+    --vscode-menu-separatorBackground,
+    var(--vscode-widget-border, rgba(128, 128, 128, 0.3))
+  );
+}
+
+/* Toast ------------------------------------------------------------------------------------ */
+
+.toast {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  z-index: 200;
+  max-width: calc(100% - 32px);
+  padding: 8px 16px;
+  transform: translateX(-50%);
+  background: var(--vscode-notifications-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-notifications-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-notifications-border, var(--vscode-widget-border, transparent));
+  border-radius: 6px;
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+  animation: toast-in 0.15s ease-out;
+}
+
+/* Internal pages: lists ------------------------------------------------------------------------ */
+
+.header-actions,
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.button.small {
+  height: 24px;
+  padding: 0 8px;
+}
+
+/* Drawing -------------------------------------------------------------------------------------- */
+
+.draw-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  border-top: 1px solid var(--vscode-widget-border, transparent);
+  border-bottom: 1px solid var(--vscode-widget-border, transparent);
+}
+
+.draw-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 6px;
+  border-right: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+}
+
+.draw-group.colors {
+  gap: 4px;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid rgba(128, 128, 128, 0.6);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.swatch.active {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.custom-color {
+  position: relative;
+  overflow: hidden;
+  background: conic-gradient(red, yellow, lime, aqua, blue, magenta, red);
+}
+
+.custom-color input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.draw-range {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.draw-range input {
+  width: 70px;
+}
+
+.draw-toolbar select {
+  height: 24px;
+  border: 1px solid var(--vscode-dropdown-border, transparent);
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  font: inherit;
+}
+
+.draw-capture {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.draw-close {
+  margin-left: auto;
+}
+
+.drawing-layer {
+  position: absolute;
+  z-index: 3;
+}
+
+.drawing-layer canvas {
+  display: block;
+  touch-action: none;
+}
+
+.drawing-text-input {
+  position: absolute;
+  min-width: 160px;
+  min-height: 1.6em;
+  padding: 2px 4px;
+  border: 1px dashed var(--vscode-focusBorder);
+  background: rgba(255, 255, 255, 0.85);
+  font-family: system-ui, sans-serif;
+  font-weight: 600;
+  resize: both;
+  outline: none;
+}

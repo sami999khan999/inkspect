@@ -1,11 +1,13 @@
 {
   "files.exclude": {
-    "dist": false
+    "**/dist": false
   },
   "search.exclude": {
-    "dist": true,
+    "**/dist": true,
+    "**/out": true,
     "package-lock.json": true
   },
   "typescript.tsdk": "node_modules/typescript/lib",
-  "editor.defaultFormatter": "esbenp.prettier-vscode"
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "eslint.workingDirectories": ["vscode-extension"]
 }

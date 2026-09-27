@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inkspect settings</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font:
+          14px system-ui,
+          sans-serif;
+      }
+      body {
+        max-width: 640px;
+        margin: 32px auto;
+        padding: 0 16px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      h2 {
+        margin-top: 28px;
+        font-size: 15px;
+      }
+      label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 8px 0;
+      }
+      input,
+      select,
+      button {
+        font: inherit;
+        padding: 4px 8px;
+      }
+      .status {
+        padding: 8px 12px;
+        border-radius: 6px;
+        background: rgba(127, 127, 127, 0.12);
+      }
+      .muted {
+        opacity: 0.75;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="options.js"></script>
+  </body>
+</html>

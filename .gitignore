@@ -6,3 +6,6 @@ coverage/
 *.vsix
 *.log
 .DS_Store
+# Screenshots and context files the extension writes into a workspace.
+.vscode-browser/
+.cache/

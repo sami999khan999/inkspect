@@ -22,17 +22,21 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      # npm workspaces: one install at the root for vscode-extension/ and browser-extension/.
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
-      # Downloads VS Code and Chrome for Testing, then runs test/e2e/suite.ts in VS Code.
+      # Downloads VS Code and Chrome for Testing, then runs the VS Code extension's integration tests.
       - name: Integration tests (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:e2e
       - name: Integration tests
         if: runner.os != 'Linux'
         run: npm run test:e2e
+      # Chrome for Testing (downloaded) with the unpacked browser extension, headless.
+      - name: Browser extension end-to-end tests
+        run: npm run test:e2e:browser
 
   package:
     needs: test
@@ -48,4 +52,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: vsix
-          path: '*.vsix'
+          path: vscode-extension/*.vsix
+      - name: Build the browser extension (Chrome and Firefox)
+        run: npm run build:prod -w browser-extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-extension
+          path: |
+            browser-extension/dist/chrome
+            browser-extension/dist/firefox

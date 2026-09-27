@@ -1,0 +1,23 @@
+{
+  "name": "@inkspect/shared",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Code shared by the Inkspect VS Code extension and browser extension: element details, selectors, drawing, devices, Copy-for-AI formats, bookmarks sync and the bridge protocol.",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts",
+    "./ui/ui.css": "./src/ui/ui.css",
+    "./ui/*": "./src/ui/*.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "perfect-freehand": "^1.2.3"
+  },
+  "peerDependencies": {
+    "react": "^19.3.0"
+  }
+}
