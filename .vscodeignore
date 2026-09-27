@@ -1,0 +1,10 @@
+**
+!dist/*.js
+!dist/webview/*.js
+!dist/webview/*.css
+!dist/webview/*.ttf
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+!media/**

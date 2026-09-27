@@ -1,0 +1,11 @@
+{
+  "files.exclude": {
+    "dist": false
+  },
+  "search.exclude": {
+    "dist": true,
+    "package-lock.json": true
+  },
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "editor.defaultFormatter": "esbenp.prettier-vscode"
+}

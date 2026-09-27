@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "npm",
+      "script": "build",
+      "label": "npm: build",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "type": "npm",
+      "script": "watch",
+      "label": "npm: watch",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vscode-browser",
+        "pattern": { "regexp": "^x^" },
+        "background": {
+          "activeBegins": true,
+          "beginsPattern": "\[watch\] build started",
+          "endsPattern": "\[watch\] build finished"
+        }
+      }
+    }
+  ]
+}
