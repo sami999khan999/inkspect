@@ -1,3 +1,4 @@
+import { CONTEXT_KINDS, type ContextKind } from './agentContext';
 import type { Shape } from './annotations';
 import type { BookmarkRoots } from './bookmarks';
 import type { ConsoleEntry, NetworkEntry } from './devtools';
@@ -383,9 +384,10 @@ export type WebviewToHost =
   /** A shortcut's VS Code command (only registry commands are run). */
   | { type: 'command'; command: string }
   /** Copies text for the webview (the host's clipboard handles every platform); `toast` confirms. */
-  | { type: 'copyText'; text: string; toast?: string }
-  /** Sends text (measurements, reports, CSS changes) to the agent. */
-  | { type: 'sendToAgent'; text: string; label: string }
+  /** Copies text; with `kind`, also adds it to the Agent Context list under `label`. */
+  | { type: 'copyText'; text: string; toast?: string; kind?: ContextKind; label?: string }
+  /** Sends text (measurements, reports, CSS changes) to the agent, through the Agent Context list. */
+  | { type: 'sendToAgent'; text: string; label: string; kind?: ContextKind }
   /** Measure mode: the boxes of the element at a point (viewport CSS pixels). */
   | { type: 'measure'; tabId: string; requestId: string; x: number; y: number }
   /** Accessibility check: scan the page. */
@@ -638,8 +640,13 @@ const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
   clearBrowsingData: {},
   toggleBookmarksBar: {},
   command: { command: isString },
-  copyText: { text: isShortText, toast: optional(isString) },
-  sendToAgent: { text: isShortText, label: isString },
+  copyText: {
+    text: isShortText,
+    toast: optional(isString),
+    kind: optional(oneOf(...CONTEXT_KINDS)),
+    label: optional(isString),
+  },
+  sendToAgent: { text: isShortText, label: isString, kind: optional(oneOf(...CONTEXT_KINDS)) },
   measure: { tabId: isString, requestId: isString, x: isNumber, y: isNumber },
   a11yScan: { tabId: isString },
   // Each tweak action has its own fields; see isValidTweak.

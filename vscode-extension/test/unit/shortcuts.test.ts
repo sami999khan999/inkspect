@@ -47,8 +47,23 @@ describe('shortcut registry', () => {
     }
   });
 
-  it('is the only source of browser keys (no static keybindings to fire twice)', () => {
-    expect(manifest.contributes.keybindings ?? []).toEqual([]);
+  it('declares VS Code keybindings only for the actions that work everywhere', () => {
+    const windows = effectiveShortcuts({}, false);
+    const mac = effectiveShortcuts({}, true);
+    const expected = SHORTCUT_ACTIONS.filter((a) => a.everywhere).map((a) => ({
+      command: a.command,
+      key: normalizeKey(windows[a.id]![0]!),
+      mac: normalizeKey(mac[a.id]![0]!),
+    }));
+    expect(expected.length).toBeGreaterThan(0);
+    const declared = (manifest.contributes.keybindings ?? []) as Record<string, string>[];
+    expect(
+      declared.map((k) => ({
+        command: k.command,
+        key: normalizeKey(k.key!),
+        mac: normalizeKey(k.mac!),
+      })),
+    ).toEqual(expected);
   });
 
   it('has no conflicting defaults on Windows, Linux or macOS', () => {

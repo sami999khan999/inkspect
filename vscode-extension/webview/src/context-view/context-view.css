@@ -1,0 +1,512 @@
+/* The Agent Context view in the Browser sidebar. Components and tokens come from @inkspect/shared/ui. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--vscode-sideBar-background, transparent);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+.context {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  container: context / inline-size;
+}
+
+/* The agent picker and filters, pinned at the top. */
+.context-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ink-space-2);
+  padding: var(--ink-space-2) var(--ink-space-3);
+  border-bottom: 1px solid var(--ink-border-subtle);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.agent-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+}
+
+.agent-dot.on {
+  background: var(--ink-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink-success) 22%, transparent);
+}
+
+.agent-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-value {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.agent-value-prefix {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+.no-agent {
+  display: flex;
+  gap: var(--ink-space-2);
+  padding: var(--ink-space-2) 10px;
+  border: 1px solid color-mix(in srgb, var(--ink-warning) 45%, transparent);
+  border-radius: var(--ink-radius);
+  background: color-mix(in srgb, var(--ink-warning) 8%, transparent);
+}
+
+.no-agent > .codicon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--ink-warning);
+}
+
+.no-agent > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.no-agent span {
+  color: var(--ink-muted);
+  font-size: var(--ink-font-sm);
+}
+
+.no-agent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* Filters fill the width; below 480px only their icons and counts show (names are tooltips). */
+.context-filter {
+  display: flex;
+  width: 100%;
+}
+
+.context-filter .segment {
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+@container context (max-width: 260px) {
+  .context-filter .segment-count:not(.error) {
+    display: none;
+  }
+}
+
+@container context (max-width: 480px) {
+  .context-filter .segment-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* Items. */
+.context-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ink-space-2);
+  margin: 0;
+  padding: var(--ink-space-2) var(--ink-space-3) var(--ink-space-3);
+  list-style: none;
+}
+
+.context-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--ink-border-subtle);
+  border-radius: var(--ink-radius-lg);
+  background: var(--ink-surface-sunken);
+  outline: none;
+  transition:
+    border-color var(--ink-fast) var(--ink-ease),
+    background var(--ink-fast) var(--ink-ease);
+}
+
+.context-card:hover {
+  border-color: var(--ink-border-strong);
+}
+
+.context-card:focus-visible {
+  border-color: var(--ink-focus);
+  box-shadow: 0 0 0 1px var(--ink-focus);
+}
+
+.context-card.latest {
+  border-color: color-mix(in srgb, var(--ink-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--ink-accent) 6%, var(--ink-surface-sunken));
+}
+
+/* Screenshots and recordings: a preview across the card's width. */
+.card-thumb {
+  display: block;
+  width: 100%;
+  max-height: 150px;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--ink-border-subtle);
+  border-radius: var(--ink-radius);
+  background:
+    repeating-conic-gradient(var(--ink-surface-sunken) 0 25%, transparent 0 50%) 0 0 / 12px 12px,
+    var(--ink-surface);
+  cursor: zoom-in;
+}
+
+.card-thumb:focus-visible {
+  outline: 1px solid var(--ink-focus);
+  outline-offset: 1px;
+}
+
+.card-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.card-icon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--ink-radius);
+  background: color-mix(in srgb, var(--ink-accent-fg) 14%, transparent);
+  color: var(--ink-accent-fg);
+}
+
+.kind-errors .card-icon,
+.kind-network .card-icon {
+  background: color-mix(in srgb, var(--ink-danger) 14%, transparent);
+  color: var(--ink-danger);
+}
+
+.kind-report .card-icon,
+.kind-measure .card-icon {
+  background: color-mix(in srgb, var(--ink-success) 14%, transparent);
+  color: var(--ink-success);
+}
+
+.card-heading {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.card-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.card-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: var(--ink-radius-pill);
+  background: var(--ink-accent);
+  color: var(--vscode-button-foreground, #fff);
+  font-size: var(--ink-font-xs);
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-xs);
+}
+
+.card-meta span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.card-meta span + span::before {
+  content: '·';
+  margin-right: 6px;
+}
+
+.card-preview {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: var(--ink-radius-sm);
+  background: var(--vscode-textCodeBlock-background, var(--ink-surface));
+  color: var(--vscode-descriptionForeground, var(--ink-muted));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--ink-font-xs);
+  line-height: 1.45;
+}
+
+/* Clamped inside the padding, so no half line shows below it. */
+.card-preview span {
+  display: -webkit-box;
+  overflow: hidden;
+  word-break: break-word;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+/* Send, and a chevron for another agent, joined into one control. */
+.send-split {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.send-split .send-more {
+  min-width: 0;
+  margin-left: 1px;
+  padding: 0 5px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.send-split .button:first-child:not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.card-tools {
+  display: inline-flex;
+  gap: 1px;
+  margin-left: auto;
+  opacity: 0.55;
+  transition: opacity var(--ink-fast) var(--ink-ease);
+}
+
+.context-card:hover .card-tools,
+.context-card:focus-within .card-tools {
+  opacity: 1;
+}
+
+.card-sent {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ink-success);
+  font-size: var(--ink-font-xs);
+}
+
+.card-sent .codicon {
+  flex-shrink: 0;
+  font-size: 12px !important;
+}
+
+.card-sent span:last-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Very narrow: the send button takes the whole row, the tools go below it. */
+@container context (max-width: 210px) {
+  .send-split,
+  .send-split .button:first-child {
+    flex: 1;
+  }
+
+  .card-tools {
+    margin-left: 0;
+  }
+}
+
+.context-none {
+  margin: var(--ink-space-4) var(--ink-space-3);
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+.context-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ink-space-2);
+  margin-top: auto;
+  padding: 6px var(--ink-space-3);
+  border-top: 1px solid var(--ink-border-subtle);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.context-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-xs);
+  white-space: nowrap;
+}
+
+@container context (max-width: 320px) {
+  .context-hint {
+    display: none;
+  }
+
+  .context-footer {
+    justify-content: flex-end;
+  }
+}
+
+/* Nothing captured yet. */
+.context-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--ink-space-5) var(--ink-space-4);
+  text-align: center;
+}
+
+.empty-icon {
+  margin-bottom: var(--ink-space-2);
+  color: var(--ink-accent-fg);
+  font-size: 28px !important;
+}
+
+.context-empty h2 {
+  margin: 0 0 4px;
+  font-size: var(--ink-font-lg);
+  font-weight: 600;
+}
+
+.context-empty p {
+  margin: 0 0 var(--ink-space-3);
+  color: var(--ink-muted);
+}
+
+.empty-tips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 300px;
+  margin: 0 0 var(--ink-space-3);
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+
+.empty-tips li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--ink-border-subtle);
+  border-radius: var(--ink-radius);
+  background: var(--ink-surface-sunken);
+  font-size: var(--ink-font-sm);
+}
+
+.empty-tips .codicon {
+  color: var(--ink-accent-fg);
+}
+
+.empty-keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 10px;
+  align-items: center;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-sm);
+  text-align: left;
+}
+
+.empty-keys dt {
+  justify-self: end;
+}
+
+.empty-keys dd {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-card,
+  .card-tools {
+    transition: none;
+  }
+}
+
+body.vscode-high-contrast .context-card,
+body.vscode-high-contrast .no-agent {
+  border-color: var(--vscode-contrastBorder);
+}
+
+body.vscode-high-contrast .context-card.latest,
+body.vscode-high-contrast .context-card:focus-visible {
+  border-color: var(--vscode-contrastActiveBorder, var(--ink-focus));
+}

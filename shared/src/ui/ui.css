@@ -625,6 +625,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   gap: 5px;
   min-width: 26px;
   padding: 0 10px;
@@ -1011,9 +1012,11 @@
   animation: ink-pop-in var(--ink-normal) var(--ink-ease);
 }
 
+/* Long menus (a big bookmarks folder) stay short and scroll, like Chrome's. */
 .menu {
-  max-height: calc(100vh - 8px);
+  max-height: min(420px, calc(100vh - 8px));
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* Submenus open without the pop animation, so they don't jump while the pointer moves. */

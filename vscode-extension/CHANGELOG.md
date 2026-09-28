@@ -18,7 +18,15 @@
 ### Send to Agent
 
 - **Every screenshot is copied to the clipboard**, including element screenshots (Alt+click) and screenshots from the browser extension. `vscodeBrowser.screenshots.saveFile` decides whether a file is also saved (it replaces `screenshots.defaultAction`).
-- **Send to Agent** replaces Send to Chat and Send to Terminal: it types into the agent running in a terminal (Claude Code, Codex, Gemini CLI...) without pressing Enter. The only agent terminal, or the one you chose last, is used without asking; **Browser: Choose Agent Terminal** changes it. Long text is written to `.vscode-browser/context/` and its path is typed. Set `vscodeBrowser.agent.sendTarget` to `chat` to use VS Code chat instead.
+- **Send to Agent** replaces Send to Chat and Send to Terminal: it types into the agent running in a terminal (Claude Code, Codex, Gemini CLI...) without pressing Enter and without focusing the terminal. Long text is written to `.vscode-browser/context/` and its path is typed. Set `vscodeBrowser.agent.sendTarget` to `chat` to use VS Code chat instead.
+- **Only real agents get sends.** A terminal counts as an agent when an agent CLI runs under its shell, was started in it, or shows in its title. Plain shells get nothing unless you pick them (**Browser: Choose Agent Terminal**). With no agent running, you can start one (`vscodeBrowser.agent.command`, `claude` by default).
+
+### Agent Context
+
+- A new **Agent Context** view in the Browser sidebar collects everything you capture: picked elements, screenshots and recordings (with thumbnails), console errors (gathered per page as they happen; `vscodeBrowser.agent.collectConsoleErrors`), failed requests, page context, accessibility reports, measurements, colors and CSS changes.
+- Each item has **Send** (to the default agent, or another from its menu), copy, open and remove. When several agents run, choose where sends go at the top of the view.
+- Agent CLIs get each part as a real paste (like Ctrl+V): text arrives as the text itself (not a file path) and image paths become attached images. Plain shells still get the parts typed on one line.
+- **Ctrl+Shift+Alt+A** shows the view and **Ctrl+Shift+Alt+V** sends the latest capture to the agent, from the browser or anywhere in VS Code.
 
 ### New modes (the Tools button, or their keys)
 

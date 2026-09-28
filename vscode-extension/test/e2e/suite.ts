@@ -5,7 +5,7 @@ import { WebSocket } from 'ws';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import * as vscode from 'vscode';
 
 interface DebugTab {
@@ -36,6 +36,15 @@ interface DebugState {
   extensions: { id: string; name: string; enabled: boolean; popup?: string }[];
   history: { url: string; title: string; visitCount: number }[];
   panels: DebugPanel[];
+  context: {
+    id: string;
+    kind: string;
+    title: string;
+    file?: string;
+    url?: string;
+    sentTo: string[];
+  }[];
+  agents: { id: string; kind: string; label: string }[];
 }
 
 const state = async () =>
@@ -330,13 +339,45 @@ export async function run(): Promise<void> {
         },
       });
       try {
+        await waitFor('the agent terminal', (s) =>
+          s.agents.some((a) => a.kind === 'terminal' && a.label === 'Claude Code'),
+        );
         const path = (await exec('vscodeBrowser.screenshot.viewport')) as string;
-        assert.equal(await exec('vscodeBrowser.screenshot.sendToTerminal'), true);
+        // Every capture lands in the Agent Context list.
+        const item = await waitFor('the screenshot in Agent Context', (s) =>
+          s.context.find(
+            (i) => i.kind === 'screenshot' && i.file && path.endsWith(i.file.replace(/\//g, sep)),
+          ),
+        );
+        assert.equal(await exec('vscodeBrowser.screenshot.sendToTerminal'), 'Claude Code');
         for (const deadline = Date.now() + 5000; !typed && Date.now() < deadline;) {
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
         assert.ok(typed.includes(path), typed);
         assert.ok(!/[\r\n]/.test(typed), 'Enter must not be pressed');
+        await waitFor('the item marked as sent', (s) =>
+          s.context.find((i) => i.id === item.id)?.sentTo.includes('Claude Code'),
+        );
+        // The "send latest" shortcut's command sends what was captured last.
+        typed = '';
+        await exec('vscodeBrowser.debug.copyElementAt', 30, 30);
+        await waitFor('the element in Agent Context', (s) => s.context[0]?.kind === 'element');
+        assert.equal(await exec('vscodeBrowser.sendLatestContext'), 'Claude Code');
+        for (
+          const deadline = Date.now() + 5000;
+          !typed.includes('\x1b[201~') && Date.now() < deadline;
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        // Agent CLIs get the details themselves, as one paste (so their newlines don't submit).
+        assert.ok(typed.startsWith('\x1b[200~'), JSON.stringify(typed.slice(0, 40)));
+        assert.match(typed, /### Element: `h1`/);
+        // Line breaks inside a paste don't submit; outside one they would.
+        const outside = typed
+          .split('\x1b[200~')
+          .map((part) => part.split('\x1b[201~').at(-1))
+          .join('');
+        assert.ok(!outside.includes('\r'), 'Enter must not be pressed');
       } finally {
         terminal.dispose();
       }
@@ -373,6 +414,10 @@ export async function run(): Promise<void> {
       }
       assert.match(text, /boom from fixture/);
       assert.match(text, /uncaught fixture failure/);
+      // Console errors are collected in Agent Context as they happen.
+      await waitFor('the console errors in Agent Context', (s) =>
+        s.context.some((i) => i.kind === 'errors' && i.url === `${base}/errors`),
+      );
       assert.equal(await vscode.env.clipboard.readText(), text);
       const context = String(await exec('vscodeBrowser.copyPageContext'));
       assert.ok(context.includes(`${base}/errors`), context);

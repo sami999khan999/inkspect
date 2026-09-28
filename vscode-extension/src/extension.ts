@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { initAgentSend } from './agent/chat';
 import { BrowserAgent } from './agent/BrowserAgent';
+import { initContextTray } from './agent/contextTray';
 import { registerLanguageModelTools } from './agent/languageModelTools';
 import { McpHttpServer, registerMcpCommands } from './agent/mcpServer';
 import { BridgeServer } from './bridge/bridgeServer';
@@ -13,8 +14,10 @@ import { ExtensionsManager } from './features/extensions';
 import { HistoryStore } from './features/historyStore';
 import { SessionStore } from './features/sessions';
 import { registerTerminalLinks } from './features/terminalLinks';
+import { initAgentTerminals } from './features/terminalSend';
 import { ZoomStore } from './features/zoom';
 import { BrowserPanel, type Services } from './panel/BrowserPanel';
+import { CONTEXT_VIEW_ID, ContextViewProvider } from './sidebar/ContextView';
 import { SHORTCUTS_VIEW_ID, ShortcutsViewProvider } from './sidebar/ShortcutsView';
 import { registerSidebar } from './sidebar/views';
 
@@ -45,6 +48,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const mcp = new McpHttpServer(context, agent, logger);
   void mcp.sync();
   initAgentSend(context.globalStorageUri.fsPath);
+  const tray = initContextTray(context.globalStorageUri.fsPath);
+  const agentTerminals = initAgentTerminals(logger);
+  const contextView = new ContextViewProvider(context.extensionUri, tray, agentTerminals);
   const bridge = new BridgeServer(context, bookmarks, logger);
   void bridge.sync();
   const shortcutsView = new ShortcutsViewProvider(
@@ -102,6 +108,16 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     }),
     registerSidebar(services),
+    tray,
+    agentTerminals,
+    contextView,
+    vscode.window.registerWebviewViewProvider(CONTEXT_VIEW_ID, contextView, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.commands.registerCommand('vscodeBrowser.showAgentContext', () =>
+      vscode.commands.executeCommand(`${CONTEXT_VIEW_ID}.focus`),
+    ),
+    vscode.commands.registerCommand('vscodeBrowser.clearAgentContext', () => tray.clear()),
     shortcutsView,
     vscode.window.registerWebviewViewProvider(SHORTCUTS_VIEW_ID, shortcutsView),
     vscode.commands.registerCommand('vscodeBrowser.editShortcuts', () =>

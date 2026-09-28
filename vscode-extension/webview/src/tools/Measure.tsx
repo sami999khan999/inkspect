@@ -53,6 +53,8 @@ export function Measure({
             pinned && hovered !== pinned ? (hovered ?? undefined) : undefined,
           ),
           toast: 'Measurements copied',
+          kind: 'measure',
+          label: 'Measurements',
         });
       },
     });

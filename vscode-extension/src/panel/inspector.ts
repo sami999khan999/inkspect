@@ -10,7 +10,8 @@ import {
   localWorkspaceFolder,
   saveScreenshot,
 } from '../features/screenshots';
-import { rememberPick, sendToAgent } from '../agent/chat';
+import { captureAndSend, rememberPick } from '../agent/chat';
+import { addContext, type ContextInput } from '../agent/contextTray';
 import { normalizeSourcePath } from '../features/sourcePaths';
 import { elementLabel, formatDetails, type ElementDetails } from '../shared/elementInfo';
 import type { HostToWebview, InspectPurpose, Rect } from '../shared/protocol';
@@ -34,7 +35,7 @@ export class Inspector {
   private tabId?: string;
   /** Element reached with the arrow keys, and the pointer position it was reached from. */
   /** An element screenshot to copy after the details (Alt+click). */
-  private pendingImage?: { bytes: Uint8Array; mimeType: string };
+  private pendingImage?: { bytes: Uint8Array; mimeType: string; path: string };
   private current?: { node: number; from?: { x: number; y: number } };
   private selection: { nodeId: number; details: Details }[] = [];
 
@@ -115,7 +116,11 @@ export class Inspector {
       const path = await saveScreenshot(bytes, options.url, format, this.deps.globalStorage);
       details.screenshot = displayPath(path);
       // Screenshots are always copied; the image goes last so it stays on the clipboard.
-      this.pendingImage = { bytes, mimeType: format === 'jpeg' ? 'image/jpeg' : `image/${format}` };
+      this.pendingImage = {
+        bytes,
+        mimeType: format === 'jpeg' ? 'image/jpeg' : `image/${format}`,
+        path,
+      };
       await session.highlight(node).catch(() => {});
     }
     if (options.add) {
@@ -189,9 +194,20 @@ export class Inspector {
     rememberPick(markdown);
     const image = this.pendingImage;
     this.pendingImage = undefined;
+    const first = elements[0]!;
+    const context: ContextInput = {
+      kind: 'element',
+      title: elements.length === 1 ? elementLabel(first) : `${elements.length} elements`,
+      detail: first.component?.name ?? pageHost(first.pageUrl),
+      text: markdown,
+      image: image && { bytes: image.bytes, mimeType: image.mimeType },
+      file: image?.path,
+      url: first.pageUrl,
+    };
     if (chat) {
-      await sendToAgent(markdown, { label: `element ${elementLabel(elements[0]!)}` });
+      await captureAndSend(context);
     } else {
+      addContext(context);
       const text = formatDetails(elements, config.inspectorCopyFormat, config.inspectorFields);
       await copyText(text);
       this.deps.toast(
@@ -229,6 +245,15 @@ export class Inspector {
       height: details.rect.height,
     }));
     this.deps.post({ type: 'inspectSelection', tabId: this.tabId, rects });
+  }
+}
+
+function pageHost(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).host || undefined;
+  } catch {
+    return undefined;
   }
 }
 

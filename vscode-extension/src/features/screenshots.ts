@@ -2,7 +2,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 import { copyText } from './clipboard';
-import { sendToAgent } from '../agent/chat';
+import { sendContextItem } from '../agent/chat';
+import { addContext, type ContextItem } from '../agent/contextTray';
+import { getAgentTerminals } from './terminalSend';
 import { getConfig } from '../config';
 
 export type ScreenshotFormat = 'png' | 'jpeg' | 'webp';
@@ -75,8 +77,8 @@ export async function saveScreenshot(
 }
 
 /**
- * Saves a page recording (WebM) next to the screenshots and offers to send it to the agent.
- * Returns its path.
+ * Saves a page recording (WebM) next to the screenshots, adds it to the Agent Context list and
+ * offers to send it to the agent. Returns its path.
  */
 export async function deliverRecording(
   bytes: Uint8Array,
@@ -91,72 +93,90 @@ export async function deliverRecording(
     .replace(/\.png$/, '.webm');
   const path = join(directory, name);
   await writeFile(path, bytes);
-  const actions = screenshotActions(path, { label: 'Recording', url });
-  void vscode.window
-    .showInformationMessage(
-      `Recording saved (${Math.round(seconds)} s) · ${displayPath(path)}`,
-      'Send to Agent',
-      'More...',
-    )
-    .then(async (choice) => {
-      if (choice === 'Send to Agent') await actions.agent.run();
-      else if (choice === 'More...') {
-        const pick = await vscode.window.showQuickPick(Object.values(actions), {
-          title: `Recording: ${basename(path)}`,
-          placeHolder: displayPath(path),
-        });
-        await pick?.run();
-      }
-    });
+  const item = addContext({
+    kind: 'recording',
+    title: `Recording (${Math.round(seconds)} s)`,
+    detail: hostOf(url),
+    file: path,
+    url,
+  });
+  offerActions(`Recording saved (${Math.round(seconds)} s) · ${displayPath(path)}`, item, path);
   return path;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
 }
 
 interface ScreenshotAction extends vscode.QuickPickItem {
   run: () => Thenable<unknown> | void;
 }
 
-/** Everything that can be done with a saved screenshot (notification buttons and "More..."). */
-function screenshotActions(
-  path: string,
-  options: { label: string; url: string },
-): Record<'agent' | 'otherTarget' | 'copyPath' | 'open' | 'reveal', ScreenshotAction> {
-  const uri = vscode.Uri.file(path);
-  const toChat = getConfig().agentSendTarget === 'chat';
-  const text = `${options.label} of ${options.url}:`;
-  return {
-    agent: {
-      label: '$(sparkle) Send to Agent',
-      description: toChat
-        ? 'Attach the image in the chat view'
-        : 'Type the path into the agent in a terminal',
-      run: () => sendToAgent(toChat ? `${text} ${displayPath(path)}` : '', { files: [path] }),
-    },
-    otherTarget: toChat
-      ? {
-          label: '$(terminal) Send to Terminal',
-          description: 'Type the path into an agent running in a terminal',
-          run: () => sendToAgent('', { files: [path], target: 'terminal' }),
-        }
-      : {
-          label: '$(comment-discussion) Send to Chat',
-          description: 'Attach the image in the chat view',
-          run: () => sendToAgent(`${text} ${displayPath(path)}`, { files: [path], target: 'chat' }),
+/**
+ * The notification after a capture: "Send to Agent", and "More..." with the other actions
+ * (another agent or chat, copy the path, open, reveal).
+ */
+function offerActions(message: string, item: ContextItem | undefined, path?: string): void {
+  const buttons = item ? ['Send to Agent', 'More...'] : path ? ['More...'] : [];
+  void vscode.window.showInformationMessage(message, ...buttons).then(async (choice) => {
+    if (choice === 'Send to Agent' && item) await sendContextItem(item);
+    else if (choice === 'More...') {
+      const actions = moreActions(item, path);
+      const pick = await vscode.window.showQuickPick(actions, {
+        title: item?.title ?? basename(path ?? ''),
+        placeHolder: path ? displayPath(path) : undefined,
+      });
+      await pick?.run();
+    }
+  });
+}
+
+function moreActions(item: ContextItem | undefined, path?: string): ScreenshotAction[] {
+  const actions: ScreenshotAction[] = [];
+  if (item) {
+    actions.push(
+      {
+        label: '$(sparkle) Send to Agent...',
+        description: 'Choose the agent, or VS Code chat',
+        run: async () => {
+          const targets = getAgentTerminals().targets();
+          const pick = await vscode.window.showQuickPick(
+            targets.map((t) => ({ label: t.label, description: t.detail, id: t.id })),
+            { title: 'Send to which agent?' },
+          );
+          if (pick) await sendContextItem(item, pick.id);
         },
-    copyPath: {
-      label: '$(copy) Copy Path',
-      description: displayPath(path),
-      run: () => copyText(displayPath(path)),
-    },
-    open: {
-      label: '$(go-to-file) Open',
-      run: () => vscode.commands.executeCommand('vscode.open', uri),
-    },
-    reveal: {
-      label: '$(folder-opened) Reveal in File Explorer',
-      description: dirname(displayPath(path)),
-      run: () => vscode.commands.executeCommand('revealFileInOS', uri),
-    },
-  };
+      },
+      {
+        label: '$(list-unordered) Show in Agent Context',
+        run: () => vscode.commands.executeCommand('vscodeBrowser.showAgentContext'),
+      },
+    );
+  }
+  if (path) {
+    const uri = vscode.Uri.file(path);
+    actions.push(
+      {
+        label: '$(copy) Copy Path',
+        description: displayPath(path),
+        run: () => copyText(displayPath(path)),
+      },
+      {
+        label: '$(go-to-file) Open',
+        run: () => vscode.commands.executeCommand('vscode.open', uri),
+      },
+      {
+        label: '$(folder-opened) Reveal in File Explorer',
+        description: dirname(displayPath(path)),
+        run: () => vscode.commands.executeCommand('revealFileInOS', uri),
+      },
+    );
+  }
+  return actions;
 }
 
 export interface DeliverOptions {
@@ -173,41 +193,32 @@ export interface DeliverOptions {
 }
 
 /**
- * Copies a screenshot to the clipboard (always) and saves it as a file unless
- * `vscodeBrowser.screenshots.saveFile` is off, then shows a notification with actions.
- * Returns the saved path, if it was saved.
+ * Copies a screenshot to the clipboard (always), adds it to the Agent Context list, and saves it
+ * as a file unless `vscodeBrowser.screenshots.saveFile` is off; then sends it to the agent
+ * (`toAgent`) or shows a notification with actions. Returns the saved path, if it was saved.
  */
 export async function deliverScreenshot(options: DeliverOptions): Promise<string | undefined> {
   const { bytes, format } = options;
   const mimeType = format === 'jpeg' ? 'image/jpeg' : `image/${format}`;
   options.copyImage(bytes, mimeType);
-  // Sending to the agent needs a file, whatever the setting says.
-  const path =
-    getConfig().screenshotSaveFile || options.toAgent
-      ? await saveScreenshot(bytes, options.url, format, options.globalStorage)
-      : undefined;
-  if (!path) {
-    void vscode.window.showInformationMessage(`${options.label} copied to the clipboard`);
-    return undefined;
-  }
-  const actions = screenshotActions(path, options);
+  const path = getConfig().screenshotSaveFile
+    ? await saveScreenshot(bytes, options.url, format, options.globalStorage)
+    : undefined;
+  const item = addContext({
+    kind: 'screenshot',
+    title: options.label,
+    detail: hostOf(options.url),
+    image: { bytes, mimeType },
+    file: path,
+    url: options.url,
+  });
   if (options.toAgent) {
-    await actions.agent.run();
+    if (item) {
+      await sendContextItem(item);
+      return item.file;
+    }
     return path;
   }
-  // Notifications show about three buttons before truncating them: the agent action first,
-  // the rest (with the full path) under "More...".
-  void vscode.window
-    .showInformationMessage(`${options.label} copied · saved`, 'Send to Agent', 'More...')
-    .then(async (choice) => {
-      if (choice === 'Send to Agent') await actions.agent.run();
-      else if (choice === 'More...') {
-        const pick = await vscode.window.showQuickPick(Object.values(actions), {
-          title: `${options.label}: ${basename(path)}`,
-          placeHolder: displayPath(path),
-        });
-        await pick?.run();
-      }
-    });
+  offerActions(`${options.label} copied${path ? ' · saved' : ''}`, item, path);
   return path;
 }

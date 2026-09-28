@@ -18,7 +18,7 @@ import {
   type ServerMessage,
   type ShortcutSettings,
 } from '@inkspect/shared/bridge';
-import { sendToAgent } from '../agent/chat';
+import { captureAndSend } from '../agent/chat';
 import { errorMessage } from '../browser/logger';
 import { getConfig } from '../config';
 import type { BookmarksStore } from '../features/bookmarks';
@@ -637,16 +637,23 @@ export class BridgeServer implements vscode.Disposable {
         if (path)
           void vscode.window.showInformationMessage(`${label} saved to ${displayPath(path)}`);
       } else {
-        const sent = await sendToAgent(message.image ? '' : (message.text ?? ''), {
-          files: path ? [path] : [],
-          label,
-          // "chat" follows the agent.sendTarget setting; "terminal" always means the terminal.
-          target: message.target === 'terminal' ? 'terminal' : undefined,
-        });
+        // Sends from the browser show in the Agent Context list too.
+        const sent = await captureAndSend(
+          {
+            kind: message.image ? 'screenshot' : 'text',
+            title: label,
+            detail: message.pageUrl,
+            text: message.image ? undefined : message.text,
+            file: path,
+            url: message.pageUrl,
+          },
+          // "chat" follows the default agent; "terminal" always means an agent in a terminal.
+          message.target === 'terminal' ? 'terminal' : undefined,
+        );
         if (!sent) {
           reply(false, {
             path: path && displayPath(path),
-            error: 'Nothing was sent: no terminal was chosen in VS Code.',
+            error: 'Nothing was sent: no agent is running in a VS Code terminal.',
           });
           return;
         }

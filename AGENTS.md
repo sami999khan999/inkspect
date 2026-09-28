@@ -83,7 +83,7 @@ src/browser/            Chromium + CDP: BrowserEngine, TabSession, input mapping
 src/panel/              BrowserPanel (window with tabs), Tab, inspector, DevTools panel, webview HTML
 src/features/           bookmarks, history, sessions, downloads, screenshots, extensions, zoom...
 src/agent/              agent tools (tools.ts), MCP (mcpProtocol.ts, mcpServer.ts), send-to-chat
-src/sidebar/            Activity Bar tree views (actions, tabs, bookmarks)
+src/sidebar/            Activity Bar views: trees (actions, tabs, bookmarks), Agent Context and Shortcuts webviews
 src/shared/             code shared by host AND webview: protocol, url, devices, elementInfo...
 webview/src/            React UI: App.tsx, components/, drawing/, pages/ (vb:// pages)
 test/unit/              Vitest unit tests (vscode module aliased to test/unit/stubs/vscode.ts)
@@ -147,7 +147,7 @@ npm run package      # production build + .vsix
 - Declare them in `package.json` (`contributes.commands`, `menus.commandPalette` with a `when`).
 - **Every browser shortcut is an action in `SHORTCUT_ACTIONS` (`src/shared/shortcuts.ts`)**, with an id, a label, a scope (`global` or a mode) and default keys:
   - The webview dispatches them (`webview/src/shortcuts.ts`, one capture-phase listener), so users can remap any of them in the **Shortcuts** sidebar view (`src/sidebar/ShortcutsView.ts`). The map is the `vscodeBrowser.shortcuts` setting, synced by VS Code Settings Sync and, through the bridge, the browser extension's `chrome.storage.sync`.
-  - Don't add browser keys to `contributes.keybindings`: they would fire twice. A unit test checks there are none, that ids are unique, that host commands exist, and that the defaults don't conflict.
+  - Don't add browser keys to `contributes.keybindings`. The only exceptions are actions marked `everywhere` (they must also work outside the browser); inside it, the webview consumes the key first, so they run once. A unit test checks that the keybindings match the `everywhere` actions, that ids are unique, that host commands exist, and that the defaults don't conflict.
   - Actions with a `command` run it through the host (the `command` message, allowed only for registry commands). Other actions are handled in the webview (`webview/src/actions.ts`, or a mode component registering its handlers).
   - Modes that take over the page use plain keys; modes that leave the page usable (console, device, overlay, record) use Alt+ keys.
   - Show keys with `shortcutLabel()` / `withShortcut()`, never hard-coded, so remapped keys show everywhere.
@@ -158,6 +158,11 @@ npm run package      # production build + .vsix
 
 - Add every setting in two places: `contributes.configuration` (with a `markdownDescription`) and the typed `getConfig()` in `src/config.ts`.
 - Read settings through `getConfig()`, not `workspace.getConfiguration` scattered in code.
+
+### Sending to the agent
+
+- Every capture (picked element, screenshot, recording, Copy-for-AI text, report) goes into the Agent Context list with `addContext()`, and every "send to agent" goes through `captureAndSend()` / `sendContextItem()` (`src/agent/chat.ts`), so everything sent also shows in the **Agent Context** view.
+- Terminal sends go only to terminals where `AgentTerminals` (`src/features/terminalSend.ts`) found an agent, or that the user picked. Never type into a plain shell by default, and don't focus the terminal. Agent recognition is pure and unit-tested (`src/agent/agentDetect.ts`).
 
 ### Agent tools
 

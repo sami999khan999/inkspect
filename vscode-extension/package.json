@@ -399,6 +399,24 @@
         "icon": "$(terminal)"
       },
       {
+        "command": "vscodeBrowser.showAgentContext",
+        "title": "Show Agent Context",
+        "category": "Browser",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "vscodeBrowser.sendLatestContext",
+        "title": "Send Latest Capture to Agent",
+        "category": "Browser",
+        "icon": "$(send)"
+      },
+      {
+        "command": "vscodeBrowser.clearAgentContext",
+        "title": "Clear Agent Context",
+        "category": "Browser",
+        "icon": "$(clear-all)"
+      },
+      {
         "command": "vscodeBrowser.editShortcuts",
         "title": "Edit Browser Shortcuts",
         "category": "Browser",
@@ -636,6 +654,16 @@
           "command": "vscodeBrowser.openSettings",
           "when": "view == vscodeBrowser.actions",
           "group": "navigation"
+        },
+        {
+          "command": "vscodeBrowser.chooseAgentTerminal",
+          "when": "view == vscodeBrowser.agentContext",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vscodeBrowser.clearAgentContext",
+          "when": "view == vscodeBrowser.agentContext",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -918,7 +946,18 @@
             "The agent running in a terminal (Claude Code, Codex, Gemini CLI and others): its path or text is typed into the terminal, without pressing Enter.",
             "VS Code chat, with the text or files attached."
           ],
-          "markdownDescription": "Where **Send to Agent** sends screenshots, element details and page context. Use **Browser: Choose Agent Terminal** to pick the terminal."
+          "markdownDescription": "Where **Send to Agent** goes by default. With `terminal`, it goes to the AI agent running in a terminal (the one used last when several run; pick another in the **Agent Context** view). Plain shells never receive sends unless you pick them with **Browser: Choose Agent Terminal**."
+        },
+        "vscodeBrowser.agent.command": {
+          "type": "string",
+          "default": "claude",
+          "scope": "application",
+          "markdownDescription": "The command that **Start agent** runs in a new terminal (in the Agent Context view, or when you send with no agent running). For example `claude`, `codex` or `gemini`."
+        },
+        "vscodeBrowser.agent.collectConsoleErrors": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Add the console errors of each page to the **Agent Context** list as they happen, so you can send them to your agent in one click."
         },
         "vscodeBrowser.mcp.enabled": {
           "type": "boolean",
@@ -997,6 +1036,11 @@
         {
           "id": "vscodeBrowser.actions",
           "name": "Browser"
+        },
+        {
+          "type": "webview",
+          "id": "vscodeBrowser.agentContext",
+          "name": "Agent Context"
         },
         {
           "id": "vscodeBrowser.tabs",
@@ -1273,14 +1317,26 @@
           }
         ]
       }
+    ],
+    "keybindings": [
+      {
+        "command": "vscodeBrowser.showAgentContext",
+        "key": "ctrl+shift+alt+a",
+        "mac": "cmd+shift+alt+a"
+      },
+      {
+        "command": "vscodeBrowser.sendLatestContext",
+        "key": "ctrl+shift+alt+v",
+        "mac": "cmd+shift+alt+v"
+      }
     ]
   },
   "scripts": {
     "build": "run-p build:ext build:webview",
     "build:ext": "node esbuild.mjs",
-    "build:webview": "vite build --config webview/vite.config.mts --mode development && vite build --config webview/vite.shortcuts.config.mts --mode development",
-    "build:prod": "node esbuild.mjs --production && vite build --config webview/vite.config.mts --mode production && vite build --config webview/vite.shortcuts.config.mts --mode production",
-    "watch": "run-p watch:ext watch:webview watch:shortcuts",
+    "build:webview": "vite build --config webview/vite.config.mts --mode development && vite build --config webview/vite.shortcuts.config.mts --mode development && vite build --config webview/vite.context.config.mts --mode development",
+    "build:prod": "node esbuild.mjs --production && vite build --config webview/vite.config.mts --mode production && vite build --config webview/vite.shortcuts.config.mts --mode production && vite build --config webview/vite.context.config.mts --mode production",
+    "watch": "run-p watch:ext watch:webview watch:shortcuts watch:context",
     "watch:ext": "node esbuild.mjs --watch",
     "watch:webview": "vite build --config webview/vite.config.mts --watch --mode development",
     "typecheck": "tsc -p . && tsc -p webview",
@@ -1292,7 +1348,8 @@
     "package": "vsce package --no-dependencies",
     "test:e2e": "npm run build && node test/e2e/runTests.mjs",
     "sync:tools": "node scripts/sync-tools.mjs",
-    "watch:shortcuts": "vite build --config webview/vite.shortcuts.config.mts --watch --mode development"
+    "watch:shortcuts": "vite build --config webview/vite.shortcuts.config.mts --watch --mode development",
+    "watch:context": "vite build --config webview/vite.context.config.mts --watch --mode development"
   },
   "dependencies": {
     "@inkspect/shared": "*",

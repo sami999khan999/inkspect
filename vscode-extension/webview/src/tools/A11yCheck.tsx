@@ -54,9 +54,21 @@ export function A11yCheck({
       'a11y.tabOrder': () => setTabOrder((on) => !on),
       'a11y.copy': () =>
         scan &&
-        postToHost({ type: 'copyText', text: report(), toast: 'Accessibility report copied' }),
+        postToHost({
+          type: 'copyText',
+          text: report(),
+          toast: 'Accessibility report copied',
+          kind: 'report',
+          label: 'Accessibility report',
+        }),
       'a11y.agent': () =>
-        scan && postToHost({ type: 'sendToAgent', text: report(), label: 'accessibility report' }),
+        scan &&
+        postToHost({
+          type: 'sendToAgent',
+          text: report(),
+          label: 'accessibility report',
+          kind: 'report',
+        }),
     });
   });
 
@@ -161,6 +173,8 @@ export function A11yCheck({
                   type: 'copyText',
                   text: report(),
                   toast: 'Accessibility report copied',
+                  kind: 'report',
+                  label: 'Accessibility report',
                 })
               }
             >
@@ -171,7 +185,12 @@ export function A11yCheck({
               variant="primary"
               icon="sparkle"
               onClick={() =>
-                postToHost({ type: 'sendToAgent', text: report(), label: 'accessibility report' })
+                postToHost({
+                  type: 'sendToAgent',
+                  text: report(),
+                  label: 'accessibility report',
+                  kind: 'report',
+                })
               }
             >
               Send to agent

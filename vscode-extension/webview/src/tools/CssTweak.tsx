@@ -84,10 +84,18 @@ export function CssTweak({
         postToHost({
           type: 'sendToAgent',
           text: `Apply these CSS changes:\n\n${changes}`,
-          label: 'css changes',
+          label: 'CSS changes',
+          kind: 'css',
         }),
       'tweak.copy': () =>
-        changes && postToHost({ type: 'copyText', text: changes, toast: 'CSS changes copied' }),
+        changes &&
+        postToHost({
+          type: 'copyText',
+          text: changes,
+          toast: 'CSS changes copied',
+          kind: 'css',
+          label: 'CSS changes',
+        }),
       'tweak.undo': () => {
         const last = target?.history.at(-1);
         if (!target || !last) return;
@@ -171,7 +179,13 @@ export function CssTweak({
               icon="copy"
               disabled={!changes}
               onClick={() =>
-                postToHost({ type: 'copyText', text: changes, toast: 'CSS changes copied' })
+                postToHost({
+                  type: 'copyText',
+                  text: changes,
+                  toast: 'CSS changes copied',
+                  kind: 'css',
+                  label: 'CSS changes',
+                })
               }
             >
               Copy
@@ -185,7 +199,8 @@ export function CssTweak({
                 postToHost({
                   type: 'sendToAgent',
                   text: `Apply these CSS changes:\n\n${changes}`,
-                  label: 'css changes',
+                  label: 'CSS changes',
+                  kind: 'css',
                 })
               }
             >

@@ -60,7 +60,8 @@ export function Segmented<T extends string>({
             role="radio"
             aria-checked={checked}
             aria-label={iconOnly ? option.label : undefined}
-            title={iconOnly ? option.label : undefined}
+            // Hosts may hide the labels of icon options when narrow, so they keep a tooltip.
+            title={iconOnly || option.icon ? option.label : undefined}
             data-value={option.value}
             tabIndex={checked ? 0 : -1}
             className={cx('segment', checked && 'checked')}
@@ -69,7 +70,7 @@ export function Segmented<T extends string>({
             {option.icon && (
               <span className={`codicon codicon-${option.icon}`} aria-hidden="true" />
             )}
-            {!iconOnly && <span>{option.label}</span>}
+            {!iconOnly && <span className="segment-label">{option.label}</span>}
             {option.count !== undefined && (
               <span className={cx('segment-count', option.tone)}>{option.count}</span>
             )}

@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 export function renderWebviewHtml(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
-  entry: 'index' | 'shortcuts' = 'index',
+  entry: 'index' | 'shortcuts' | 'context' = 'index',
 ): string {
   const root = vscode.Uri.joinPath(extensionUri, 'dist', 'webview');
   const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(root, `${entry}.js`));
@@ -27,7 +27,7 @@ export function renderWebviewHtml(
   <meta http-equiv="Content-Security-Policy" content="${csp}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${styleUri}">
-  <title>${entry === 'shortcuts' ? 'Shortcuts' : 'Browser'}</title>
+  <title>${{ index: 'Browser', shortcuts: 'Shortcuts', context: 'Agent Context' }[entry]}</title>
 </head>
 <body>
   <div id="root"></div>

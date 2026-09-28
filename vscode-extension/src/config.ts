@@ -38,6 +38,8 @@ export interface BrowserConfig {
   devtoolsEnabled: boolean;
   agentConfirmNavigation: boolean;
   agentSendTarget: 'terminal' | 'chat';
+  agentCommand: string;
+  agentCollectConsoleErrors: boolean;
   shortcuts: ShortcutOverrides;
   shortcutsUpdated: number;
   recordMaxSeconds: number;
@@ -88,6 +90,8 @@ export function getConfig(): BrowserConfig {
     devtoolsEnabled: c.get<boolean>('devtools.enabled', true),
     agentConfirmNavigation: c.get<boolean>('agent.confirmNavigation', true),
     agentSendTarget: oneOf(c.get('agent.sendTarget'), ['terminal', 'chat'] as const, 'terminal'),
+    agentCommand: c.get<string>('agent.command', 'claude').trim() || 'claude',
+    agentCollectConsoleErrors: c.get<boolean>('agent.collectConsoleErrors', true),
     shortcuts: sanitizeOverrides(c.get('shortcuts')),
     shortcutsUpdated: c.get<number>('shortcutsUpdated', 0),
     recordMaxSeconds: clamp(c.get<number>('record.maxSeconds', 60), 5, 600),

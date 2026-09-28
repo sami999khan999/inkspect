@@ -2,7 +2,16 @@ import * as vscode from 'vscode';
 import { getConfig } from '../config';
 import { copyText } from '../features/clipboard';
 import { saveContext } from '../features/context';
-import { sendTextToTerminal, shellPath } from '../features/terminalSend';
+import { displayPath } from '../features/screenshots';
+import {
+  CHAT_TARGET,
+  acceptsPaste,
+  getAgentTerminals,
+  pasteIntoTerminal,
+  resolveAgentTerminal,
+  shellPath,
+} from '../features/terminalSend';
+import { addContext, contextTray, type ContextInput, type ContextItem } from './contextTray';
 
 let lastPick: string | undefined;
 let storage = '';
@@ -21,40 +30,82 @@ export function initAgentSend(globalStorage: string): void {
   storage = globalStorage;
 }
 
+/** Longer text is pasted as the path of a file holding it. */
+const MAX_PASTE = 20_000;
+
 /** Text typed straight into a terminal must be short and on one line; longer text goes in a file. */
 export function fitsTerminal(text: string): boolean {
   return !/[\r\n]/.test(text.trim()) && text.length <= 300;
 }
 
 /**
- * Sends something to the agent: by default the agent CLI in a terminal (the path of each file,
- * and the text, or the path of a file holding it when it is long), without pressing Enter; or
- * VS Code chat (`vscodeBrowser.agent.sendTarget`). Returns false if nothing was sent.
+ * Sends something to the agent, without pressing Enter: to an agent CLI in a terminal (each
+ * file's path and the text, each pasted separately), or to VS Code chat. `target` is a target id from the Agent Context view (`terminal:<n>` or `chat`), or
+ * `terminal`/`chat`; by default, the agent used last (see `vscodeBrowser.agent.sendTarget`).
+ * Returns the name of the agent it went to, or undefined if nothing was sent.
  */
 export async function sendToAgent(
   text: string,
-  options: { files?: string[]; label?: string; target?: 'terminal' | 'chat' } = {},
-): Promise<boolean> {
+  options: { files?: string[]; label?: string; target?: string } = {},
+): Promise<string | undefined> {
   const files = options.files ?? [];
-  const target = options.target ?? getConfig().agentSendTarget;
-  if (target === 'chat') {
+  const agents = getAgentTerminals();
+  let target = options.target;
+  if (!target || target === 'terminal') {
+    await agents.refresh();
+    target = target === 'terminal' ? undefined : agents.defaultTarget(getConfig().agentSendTarget);
+  }
+  if (target === CHAT_TARGET) {
     await sendToChat(
-      text,
+      text.trim() ? text : files.map(displayPath).join('\n'),
       files.map((f) => vscode.Uri.file(f)),
     );
-    return true;
+    return 'VS Code chat';
   }
-  const parts = files.map(shellPath);
   const trimmed = text.trim();
+  if (!trimmed && !files.length) return undefined;
+  const found = await resolveAgentTerminal(target);
+  if (!found) return undefined;
+  const parts = files.map(shellPath);
   if (trimmed) {
+    // Agent CLIs get the text itself as a paste; very long text, or a terminal that only takes
+    // typing, gets the path of a file holding it.
+    const inline = acceptsPaste(found.agent) ? trimmed.length <= MAX_PASTE : fitsTerminal(trimmed);
     parts.push(
-      fitsTerminal(trimmed)
-        ? trimmed
-        : shellPath(await saveContext(text, options.label ?? 'context', storage)),
+      inline ? trimmed : shellPath(await saveContext(text, options.label ?? 'context', storage)),
     );
   }
-  if (!parts.length) return false;
-  return sendTextToTerminal(parts.join(' '));
+  pasteIntoTerminal(found.terminal, found.agent, parts);
+  return found.agent.label;
+}
+
+/** Sends an item of the Agent Context list, and records where it went. */
+export async function sendContextItem(
+  item: ContextItem,
+  target?: string,
+): Promise<string | undefined> {
+  const tray = contextTray();
+  const file = tray ? await tray.fileOf(item) : item.file;
+  // Images are sent as their file; the text of an element with a screenshot already names it.
+  const text = item.text ?? '';
+  const files = file && !text.includes(displayPath(file)) ? [file] : [];
+  const sent = await sendToAgent(text, { files, label: item.title, target });
+  if (sent) tray?.markSent(item, sent);
+  return sent;
+}
+
+/**
+ * Adds a capture to the Agent Context list and sends it to the agent: the one path for every
+ * "send to agent" action, so everything sent also shows in the list.
+ */
+export async function captureAndSend(
+  input: ContextInput,
+  target?: string,
+): Promise<string | undefined> {
+  const item = addContext(input);
+  if (item) return sendContextItem(item, target);
+  const files = input.file ? [input.file] : [];
+  return sendToAgent(input.text ?? '', { files, label: input.title, target });
 }
 
 /**

@@ -99,7 +99,13 @@ export function Eyedropper({
         if (!color) return;
         const value = formatColor(color, format);
         setRecent((current) => [value, ...current.filter((c) => c !== value)].slice(0, 6));
-        postToHost({ type: 'copyText', text: value, toast: `Copied ${value}` });
+        postToHost({
+          type: 'copyText',
+          text: value,
+          toast: `Copied ${value}`,
+          kind: 'color',
+          label: `Color ${value}`,
+        });
       }}
     >
       <div

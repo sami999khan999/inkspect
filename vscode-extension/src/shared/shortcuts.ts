@@ -30,6 +30,11 @@ export interface ShortcutAction {
   mac?: readonly string[];
   /** A VS Code command the host runs; without it, the webview handles the action itself. */
   command?: string;
+  /**
+   * Also a VS Code keybinding (`contributes.keybindings`, default keys only), so it works outside
+   * the browser too. Inside the browser the webview handles the key first, so it runs once.
+   */
+  everywhere?: boolean;
 }
 
 export const SCOPE_LABELS: Record<ShortcutScope, string> = {
@@ -232,6 +237,23 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     scope: 'global',
     keys: ['ctrl+alt+enter'],
     command: cmd('sendPageContextToChat'),
+  },
+  // Agent.
+  {
+    id: 'agent.showContext',
+    label: 'Show agent context',
+    scope: 'global',
+    keys: ['ctrl+shift+alt+a'],
+    command: cmd('showAgentContext'),
+    everywhere: true,
+  },
+  {
+    id: 'agent.sendLatest',
+    label: 'Send the latest capture to the agent',
+    scope: 'global',
+    keys: ['ctrl+shift+alt+v'],
+    command: cmd('sendLatestContext'),
+    everywhere: true,
   },
   // Internal pages and panels.
   {
