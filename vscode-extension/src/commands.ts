@@ -1,7 +1,8 @@
 import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
 import { lastScreenshotPath } from './features/screenshots';
-import { sendPathToTerminal } from './features/terminalSend';
+import { sendToAgent } from './agent/chat';
+import { pickTerminal } from './features/terminalSend';
 import { getConfig } from './config';
 import { BrowserPanel, type Services } from './panel/BrowserPanel';
 import { clearBrowsingData, exportBookmarks, importBookmarks } from './panel/browserData';
@@ -214,7 +215,15 @@ export function registerCommands(services: Services): vscode.Disposable {
         void vscode.window.showInformationMessage('Take a screenshot first.');
         return false;
       }
-      return sendPathToTerminal(path);
+      return sendToAgent('', { files: [path] });
+    }),
+    vscode.commands.registerCommand('vscodeBrowser.chooseAgentTerminal', async () => {
+      const terminal = await pickTerminal(true);
+      if (!terminal && !vscode.window.terminals.length) {
+        void vscode.window.showInformationMessage(
+          'No terminal is open. Start your agent in a terminal first.',
+        );
+      }
     }),
     vscode.commands.registerCommand(
       'vscodeBrowser.sendPageContextToChat',

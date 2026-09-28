@@ -365,7 +365,7 @@
       },
       {
         "command": "vscodeBrowser.sendPageContextToChat",
-        "title": "Send Page Context to Chat",
+        "title": "Send Page Context to Agent",
         "category": "Browser",
         "icon": "$(comment-discussion)"
       },
@@ -377,7 +377,7 @@
       },
       {
         "command": "vscodeBrowser.screenshot.sendToTerminal",
-        "title": "Send Last Screenshot to Terminal Agent",
+        "title": "Send Last Screenshot to Agent",
         "category": "Browser",
         "icon": "$(terminal)"
       },
@@ -391,6 +391,18 @@
         "command": "vscodeBrowser.bridge.forget",
         "title": "Unlink All Browser Extensions",
         "category": "Browser"
+      },
+      {
+        "command": "vscodeBrowser.chooseAgentTerminal",
+        "title": "Choose Agent Terminal",
+        "category": "Browser",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "vscodeBrowser.editShortcuts",
+        "title": "Edit Browser Shortcuts",
+        "category": "Browser",
+        "icon": "$(keyboard)"
       }
     ],
     "menus": {
@@ -654,146 +666,6 @@
         }
       ]
     },
-    "keybindings": [
-      {
-        "command": "vscodeBrowser.newTab",
-        "key": "ctrl+t",
-        "mac": "cmd+t",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.closeTab",
-        "key": "ctrl+w",
-        "mac": "cmd+w",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.reopenClosedTab",
-        "key": "ctrl+shift+t",
-        "mac": "cmd+shift+t",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.nextTab",
-        "key": "ctrl+tab",
-        "mac": "ctrl+tab",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.nextTab",
-        "key": "ctrl+pagedown",
-        "mac": "cmd+alt+right",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.previousTab",
-        "key": "ctrl+shift+tab",
-        "mac": "ctrl+shift+tab",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.previousTab",
-        "key": "ctrl+pageup",
-        "mac": "cmd+alt+left",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.focusAddressBar",
-        "key": "ctrl+l",
-        "mac": "cmd+l",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.focusAddressBar",
-        "key": "alt+d",
-        "mac": "alt+d",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.reload",
-        "key": "ctrl+r",
-        "mac": "cmd+r",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.hardReload",
-        "key": "ctrl+shift+r",
-        "mac": "cmd+shift+r",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.goBack",
-        "key": "alt+left",
-        "mac": "cmd+[",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.goForward",
-        "key": "alt+right",
-        "mac": "cmd+]",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.goHome",
-        "key": "alt+home",
-        "mac": "cmd+shift+h",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.find",
-        "key": "ctrl+f",
-        "mac": "cmd+f",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.zoomIn",
-        "key": "ctrl+=",
-        "mac": "cmd+=",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.zoomIn",
-        "key": "ctrl+shift+=",
-        "mac": "cmd+shift+=",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.zoomOut",
-        "key": "ctrl+-",
-        "mac": "cmd+-",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.zoomReset",
-        "key": "ctrl+0",
-        "mac": "cmd+0",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.viewSource",
-        "key": "ctrl+u",
-        "mac": "cmd+alt+u",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.bookmarkPage",
-        "key": "ctrl+d",
-        "mac": "cmd+d",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.toggleInspector",
-        "key": "ctrl+shift+c",
-        "mac": "cmd+shift+c",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      },
-      {
-        "command": "vscodeBrowser.openDevTools",
-        "key": "f12",
-        "mac": "f12",
-        "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
-      }
-    ],
     "configuration": {
       "title": "VS Code Browser",
       "properties": {
@@ -955,22 +827,10 @@
           "default": "png",
           "description": "Image format of screenshots."
         },
-        "vscodeBrowser.screenshots.defaultAction": {
-          "type": "string",
-          "enum": [
-            "saveAndCopy",
-            "save",
-            "copy",
-            "ask"
-          ],
-          "default": "saveAndCopy",
-          "enumDescriptions": [
-            "Save the file and copy the image to the clipboard.",
-            "Save the file and copy its path (handy for AI agents that read files).",
-            "Only copy the image to the clipboard.",
-            "Ask every time."
-          ],
-          "description": "What happens with a new screenshot."
+        "vscodeBrowser.screenshots.saveFile": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Also save each screenshot as a file (in `#vscodeBrowser.screenshots.directory#`). Screenshots are always copied to the clipboard as an image."
         },
         "vscodeBrowser.screenshots.annotationPadding": {
           "type": "number",
@@ -1047,6 +907,19 @@
           "default": true,
           "markdownDescription": "Ask before an agent in VS Code chat opens a page in the browser (the `browser_navigate` tool). MCP clients ask for approval themselves."
         },
+        "vscodeBrowser.agent.sendTarget": {
+          "type": "string",
+          "enum": [
+            "terminal",
+            "chat"
+          ],
+          "default": "terminal",
+          "enumDescriptions": [
+            "The agent running in a terminal (Claude Code, Codex, Gemini CLI and others): its path or text is typed into the terminal, without pressing Enter.",
+            "VS Code chat, with the text or files attached."
+          ],
+          "markdownDescription": "Where **Send to Agent** sends screenshots, element details and page context. Use **Browser: Choose Agent Terminal** to pick the terminal."
+        },
         "vscodeBrowser.mcp.enabled": {
           "type": "boolean",
           "default": false,
@@ -1075,6 +948,38 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Sync bookmarks both ways with linked browsers."
+        },
+        "vscodeBrowser.shortcuts": {
+          "type": "object",
+          "scope": "application",
+          "default": {},
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "markdownDescription": "Your browser shortcuts: an action id to its keys (for example `\"mode.draw\": \"ctrl+alt+d\"`; `[]` removes a shortcut). Edit them in the **Shortcuts** view of the Browser sidebar. VS Code Settings Sync and the paired Inkspect browser extension carry them to your other devices."
+        },
+        "vscodeBrowser.shortcutsUpdated": {
+          "type": "number",
+          "scope": "application",
+          "default": 0,
+          "markdownDescription": "When the shortcuts last changed (set by the Shortcuts view; used to sync them with the Inkspect browser extension)."
+        },
+        "vscodeBrowser.record.maxSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "maximum": 600,
+          "markdownDescription": "Longest recording, in seconds (**Record the page** mode)."
         }
       }
     },
@@ -1100,6 +1005,11 @@
         {
           "id": "vscodeBrowser.bookmarks",
           "name": "Bookmarks"
+        },
+        {
+          "type": "webview",
+          "id": "vscodeBrowser.shortcuts",
+          "name": "Shortcuts"
         }
       ]
     },
@@ -1352,7 +1262,7 @@
           {
             "id": "agents",
             "title": "Let agents use the browser",
-            "description": "Chat agents can open pages, take screenshots and read elements and errors.\n[Send Page Context to Chat](command:vscodeBrowser.sendPageContextToChat)",
+            "description": "Chat agents can open pages, take screenshots and read elements and errors.\n[Send Page Context to Agent](command:vscodeBrowser.sendPageContextToChat)",
             "media": {
               "markdown": "media/walkthrough/agents.md"
             },
@@ -1368,9 +1278,9 @@
   "scripts": {
     "build": "run-p build:ext build:webview",
     "build:ext": "node esbuild.mjs",
-    "build:webview": "vite build --config webview/vite.config.mts --mode development",
-    "build:prod": "node esbuild.mjs --production && vite build --config webview/vite.config.mts --mode production",
-    "watch": "run-p watch:ext watch:webview",
+    "build:webview": "vite build --config webview/vite.config.mts --mode development && vite build --config webview/vite.shortcuts.config.mts --mode development",
+    "build:prod": "node esbuild.mjs --production && vite build --config webview/vite.config.mts --mode production && vite build --config webview/vite.shortcuts.config.mts --mode production",
+    "watch": "run-p watch:ext watch:webview watch:shortcuts",
     "watch:ext": "node esbuild.mjs --watch",
     "watch:webview": "vite build --config webview/vite.config.mts --watch --mode development",
     "typecheck": "tsc -p . && tsc -p webview",
@@ -1381,7 +1291,8 @@
     "vscode:prepublish": "npm run build:prod",
     "package": "vsce package --no-dependencies",
     "test:e2e": "npm run build && node test/e2e/runTests.mjs",
-    "sync:tools": "node scripts/sync-tools.mjs"
+    "sync:tools": "node scripts/sync-tools.mjs",
+    "watch:shortcuts": "vite build --config webview/vite.shortcuts.config.mts --watch --mode development"
   },
   "dependencies": {
     "@inkspect/shared": "*",

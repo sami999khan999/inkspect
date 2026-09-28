@@ -3,6 +3,8 @@ import type { BookmarkRoots } from './bookmarks';
 import type { ConsoleEntry, NetworkEntry } from './devtools';
 import type { DevicePreset, EmulationSettings } from './devices';
 import type { ClearRange, HistoryItem, Suggestion } from './history';
+import type { ShortcutOverrides } from './shortcuts';
+import type { A11yScan, MeasureBox } from './tools';
 
 // Messages exchanged between the extension host (src/panel) and the webview (webview/src).
 // Both sides import this file, so every message type is defined exactly once.
@@ -314,7 +316,22 @@ export type HostToWebview =
   | { type: 'focusAddressBar' }
   | { type: 'focusViewport' }
   | { type: 'openFind' }
-  | { type: 'toast'; message: string };
+  | { type: 'toast'; message: string }
+  /** The user's shortcut changes (see src/shared/shortcuts.ts). */
+  | { type: 'shortcuts'; overrides: ShortcutOverrides }
+  /** Settings the webview's modes need. */
+  | { type: 'settings'; recordMaxSeconds: number }
+  | { type: 'measureResult'; requestId: string; box?: MeasureBox }
+  | { type: 'a11yResult'; tabId: string; scan?: A11yScan }
+  /** CSS tweak: the picked element and its current values (undefined when nothing was hit). */
+  | {
+      type: 'tweakTarget';
+      tabId: string;
+      target?: { selector: string; values: Record<string, string> };
+    }
+  | { type: 'tweakValue'; tabId: string; property: string; value: string }
+  /** Design overlay: the chosen image. */
+  | { type: 'overlayImage'; tabId: string; data: Uint8Array; mimeType: string; name: string };
 
 /** Messages sent from the webview to the extension host. */
 export type WebviewToHost =
@@ -363,6 +380,24 @@ export type WebviewToHost =
   | { type: 'historyAction'; action: 'clear'; range: ClearRange }
   | { type: 'clearBrowsingData' }
   | { type: 'toggleBookmarksBar' }
+  /** A shortcut's VS Code command (only registry commands are run). */
+  | { type: 'command'; command: string }
+  /** Copies text for the webview (the host's clipboard handles every platform); `toast` confirms. */
+  | { type: 'copyText'; text: string; toast?: string }
+  /** Sends text (measurements, reports, CSS changes) to the agent. */
+  | { type: 'sendToAgent'; text: string; label: string }
+  /** Measure mode: the boxes of the element at a point (viewport CSS pixels). */
+  | { type: 'measure'; tabId: string; requestId: string; x: number; y: number }
+  /** Accessibility check: scan the page. */
+  | { type: 'a11yScan'; tabId: string }
+  /** CSS tweak: pick the element at a point, set one property, or put everything back. */
+  | { type: 'tweak'; tabId: string; action: 'pick'; x: number; y: number }
+  | { type: 'tweak'; tabId: string; action: 'set'; property: string; value: string }
+  | { type: 'tweak'; tabId: string; action: 'restore' }
+  /** Design overlay: choose an image file. */
+  | { type: 'overlayOpen'; tabId: string }
+  /** Record mode: the finished recording (WebM). */
+  | { type: 'saveRecording'; tabId: string; data: Uint8Array; seconds: number }
   /** Device emulation for a tab (validated with `sanitizeEmulation` by the host). */
   | { type: 'emulation'; tabId: string; settings: EmulationSettings }
   | { type: 'saveCustomDevice'; name: string; device: EmulationSettings['device'] }
@@ -383,7 +418,8 @@ export type WebviewToHost =
   | {
       type: 'inspect';
       tabId: string;
-      action: 'start' | 'parent' | 'child' | 'copySelection' | 'stop';
+      /** `screenshot` and `agent` act on the element reached with the pointer or arrow keys. */
+      action: 'start' | 'parent' | 'child' | 'copySelection' | 'screenshot' | 'agent' | 'stop';
     }
   | { type: 'annotations'; tabId: string; shapes: Shape[] }
   /** Screenshot for compositing drawings; `rect` in document CSS pixels for `region`. */
@@ -417,13 +453,20 @@ export type WebviewToHost =
   /** Opens a script location from the console in the editor (when it is a workspace file). */
   | { type: 'openSource'; url: string; line?: number; column?: number }
   /** A finished (composited) PNG to save and copy like other screenshots. */
-  | { type: 'saveImage'; tabId: string; base64: string; label: string }
+  | { type: 'saveImage'; tabId: string; base64: string; label: string; toAgent?: boolean }
   /** Types the last screenshot's path into a terminal (for an agent running there). */
   | { type: 'screenshotToTerminal' }
   /** Reply to `convertImage`; no `base64` if the image could not be decoded. */
   | { type: 'convertedImage'; requestId: string; base64?: string }
   /** `rect` (viewport CSS pixels) for `region`. */
-  | { type: 'screenshot'; tabId: string; mode: 'viewport' | 'fullPage' | 'region'; rect?: Rect };
+  | {
+      type: 'screenshot';
+      tabId: string;
+      mode: 'viewport' | 'fullPage' | 'region';
+      rect?: Rect;
+      /** Also send it to the agent. */
+      toAgent?: boolean;
+    };
 
 // ---------------------------------------------------------------------------------------------
 // Validation of messages from the webview
@@ -435,6 +478,8 @@ const isString: Check = (v) => typeof v === 'string';
 const isNumber: Check = (v) => typeof v === 'number' && Number.isFinite(v);
 const isBoolean: Check = (v) => typeof v === 'boolean';
 const isObject: Check = (v) => typeof v === 'object' && v !== null;
+/** Text the webview asks to copy or send (reports, measurements): bounded. */
+const isShortText: Check = (v) => typeof v === 'string' && v.length <= 1_000_000;
 const optional =
   (check: Check): Check =>
   (v) =>
@@ -592,6 +637,19 @@ const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
   },
   clearBrowsingData: {},
   toggleBookmarksBar: {},
+  command: { command: isString },
+  copyText: { text: isShortText, toast: optional(isString) },
+  sendToAgent: { text: isShortText, label: isString },
+  measure: { tabId: isString, requestId: isString, x: isNumber, y: isNumber },
+  a11yScan: { tabId: isString },
+  // Each tweak action has its own fields; see isValidTweak.
+  tweak: { tabId: isString, action: oneOf('pick', 'set', 'restore') },
+  overlayOpen: { tabId: isString },
+  saveRecording: {
+    tabId: isString,
+    data: (v) => v instanceof Uint8Array && v.length > 0 && v.length <= 500_000_000,
+    seconds: isNumber,
+  },
   emulation: { tabId: isString, settings: isObject },
   annotations: { tabId: isString, shapes: (v) => Array.isArray(v) },
   annotationCapture: {
@@ -600,7 +658,7 @@ const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
     area: oneOf('region', 'viewport', 'fullPage'),
     rect: optional(shape({ x: isNumber, y: isNumber, width: isNumber, height: isNumber })),
   },
-  saveImage: { tabId: isString, base64: isString, label: isString },
+  saveImage: { tabId: isString, base64: isString, label: isString, toAgent: optional(isBoolean) },
   screenshotToTerminal: {},
   convertedImage: { requestId: isString, base64: optional(isString) },
   extension: {
@@ -630,7 +688,16 @@ const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
   openSource: { url: isString, line: optional(isNumber), column: optional(isNumber) },
   inspect: {
     tabId: isString,
-    action: oneOf('start', 'pick', 'parent', 'child', 'copySelection', 'stop'),
+    action: oneOf(
+      'start',
+      'pick',
+      'parent',
+      'child',
+      'copySelection',
+      'screenshot',
+      'agent',
+      'stop',
+    ),
     x: optional(isNumber),
     y: optional(isNumber),
     purpose: optional(oneOf('copy', 'screenshot')),
@@ -642,6 +709,7 @@ const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
     tabId: isString,
     mode: oneOf('viewport', 'fullPage', 'region'),
     rect: optional(shape({ x: isNumber, y: isNumber, width: isNumber, height: isNumber })),
+    toAgent: optional(isBoolean),
   },
   saveCustomDevice: { name: isString, device: isObject },
 };
@@ -652,7 +720,20 @@ export function isWebviewToHost(value: unknown): value is WebviewToHost {
   const type = (value as { type?: unknown }).type;
   if (typeof type !== 'string' || !Object.hasOwn(MESSAGE_FIELDS, type)) return false;
   if (!shape(MESSAGE_FIELDS[type as WebviewToHost['type']])(value)) return false;
+  if (type === 'tweak') return isValidTweak(value as Record<string, unknown>);
   return type !== 'bookmark' || isValidBookmarkAction(value as Record<string, unknown>);
+}
+
+function isValidTweak(message: Record<string, unknown>): boolean {
+  if (message.action === 'pick') return isNumber(message.x) && isNumber(message.y);
+  if (message.action === 'set') {
+    return (
+      isString(message.property) &&
+      isString(message.value) &&
+      (message.value as string).length <= 500
+    );
+  }
+  return message.action === 'restore';
 }
 
 const BOOKMARK_ACTION_FIELDS: Record<BookmarkAction['action'], Record<string, Check>> = {

@@ -13,7 +13,7 @@ A browser extension for **Chrome, Edge, Brave, Vivaldi, Opera and Firefox**. A k
 
 It also links to the VS Code extension. **Bookmarks sync both ways**: a bookmark added in the browser shows up in VS Code, and a bookmark added in VS Code shows up in the browser.
 
-**Status:** Phases 0–9 are built and tested, with the gaps listed in each phase. Phase 10 (browsers other than Chrome) and store publishing are open.
+**Status:** Phases 0–9 were built and tested. The extension is now reduced to **bookmark sync with VS Code** (Phases 7–8). The toolbar features (Phases 1–6 and 9) are switched off, with their code commented out; see "Disabled features" in `browser-extension/README.md`. Phase 10 (browsers other than Chrome) and store publishing are open.
 
 This plan lives next to `plans/vscode-browser-plan.md`. Tasks that change the VS Code extension are marked **[vscode]**.
 

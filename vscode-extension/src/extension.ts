@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { initAgentSend } from './agent/chat';
 import { BrowserAgent } from './agent/BrowserAgent';
 import { registerLanguageModelTools } from './agent/languageModelTools';
 import { McpHttpServer, registerMcpCommands } from './agent/mcpServer';
@@ -14,6 +15,7 @@ import { SessionStore } from './features/sessions';
 import { registerTerminalLinks } from './features/terminalLinks';
 import { ZoomStore } from './features/zoom';
 import { BrowserPanel, type Services } from './panel/BrowserPanel';
+import { SHORTCUTS_VIEW_ID, ShortcutsViewProvider } from './sidebar/ShortcutsView';
 import { registerSidebar } from './sidebar/views';
 
 let engineHost: EngineHost | undefined;
@@ -42,8 +44,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const agent = new BrowserAgent(services);
   const mcp = new McpHttpServer(context, agent, logger);
   void mcp.sync();
+  initAgentSend(context.globalStorageUri.fsPath);
   const bridge = new BridgeServer(context, bookmarks, logger);
   void bridge.sync();
+  const shortcutsView = new ShortcutsViewProvider(
+    context.extensionUri,
+    () => bridge.connected.length > 0,
+    bridge.onDidChange,
+  );
 
   const statusBarItem = vscode.window.createStatusBarItem(
     'vscodeBrowser.status',
@@ -80,7 +88,12 @@ export function activate(context: vscode.ExtensionContext): void {
       const mode = (options as { firstSyncMode?: 'merge' } | undefined)?.firstSyncMode;
       if (mode) bridge.firstSyncModeForTests = mode;
       await bridge.sync();
-      return { port: bridge.port, code: bridge.createPairingCode(), connected: bridge.connected };
+      return {
+        port: bridge.port,
+        code: bridge.createPairingCode(),
+        connected: bridge.connected,
+        offers: bridge.pendingOffers(),
+      };
     }),
     vscode.window.registerWebviewPanelSerializer(BrowserPanel.viewType, {
       deserializeWebviewPanel: async (panel, state: unknown) => {
@@ -89,6 +102,11 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     }),
     registerSidebar(services),
+    shortcutsView,
+    vscode.window.registerWebviewViewProvider(SHORTCUTS_VIEW_ID, shortcutsView),
+    vscode.commands.registerCommand('vscodeBrowser.editShortcuts', () =>
+      vscode.commands.executeCommand(`${SHORTCUTS_VIEW_ID}.focus`),
+    ),
     engineHost.onPageOpened((event) => BrowserPanel.routePageOpened(services, event)),
     registerTerminalLinks(
       () => getConfig().openLinksFromTerminal,

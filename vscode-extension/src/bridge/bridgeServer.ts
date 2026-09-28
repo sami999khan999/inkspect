@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -10,22 +11,53 @@ import {
   BRIDGE_PATH,
   encode,
   isExtensionOrigin,
+  newerShortcuts,
   parseClientMessage,
   type ClientInfo,
   type ClientMessage,
   type ServerMessage,
+  type ShortcutSettings,
 } from '@inkspect/shared/bridge';
-import { sendToChat } from '../agent/chat';
+import { sendToAgent } from '../agent/chat';
 import { errorMessage } from '../browser/logger';
 import { getConfig } from '../config';
 import type { BookmarksStore } from '../features/bookmarks';
 import { JsonStore } from '../features/jsonStore';
-import { displayPath, localWorkspaceFolder, saveScreenshot } from '../features/screenshots';
-import { sendPathToTerminal } from '../features/terminalSend';
+import { displayPath, saveScreenshot } from '../features/screenshots';
+import { copyImageBytes } from '../features/clipboard';
+import { saveContext } from '../features/context';
+import {
+  isOwnWrite,
+  onDidChangeShortcuts,
+  readShortcuts,
+  touchShortcuts,
+  writeShortcuts,
+} from '../features/shortcutSettings';
+import { sanitizeOverrides } from '../shared/shortcuts';
 
 const CLIENTS_KEY = 'vscodeBrowser.bridge.clients';
 const PAIRING_MS = 2 * 60_000;
 const MAX_MESSAGE = 32 * 1024 * 1024;
+/** How long an unpaired browser's offer stays up for VS Code windows to show. */
+const OFFER_MS = 10 * 60_000;
+/** How often a window that couldn't bind the port tries again (the serving window may close). */
+const RETRY_MS = 15_000;
+// Files in globalStorage shared by all VS Code windows: only one window serves the link, but
+// pairing can start from any of them.
+const PAIRING_FILE = 'bridge-pairing.json';
+const OFFERS_FILE = 'bridge-offers.json';
+
+interface SharedPairing {
+  codeHash: string;
+  expires: number;
+}
+
+interface Offer {
+  browser: string;
+  at: number;
+  /** Some window already showed it. */
+  shown?: boolean;
+}
 
 interface PairedClient extends ClientInfo {
   origin: string;
@@ -53,7 +85,6 @@ export class BridgeServer implements vscode.Disposable {
   private server?: Server;
   private sockets?: WebSocketServer;
   private readonly connections = new Set<Connection>();
-  private pairing?: { code: string; expires: number };
   private readonly links: JsonStore<Record<string, SyncState>>;
   /** Per-browser sync queue: snapshots are merged one at a time. */
   private readonly queues = new Map<string, Promise<void>>();
@@ -63,6 +94,8 @@ export class BridgeServer implements vscode.Disposable {
   /** Integration tests answer the first-sync question in advance. */
   firstSyncModeForTests?: FirstSyncMode;
   private requestTimer?: NodeJS.Timeout;
+  private retryTimer?: NodeJS.Timeout;
+  private loggedPortInUse = false;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly statusItem: vscode.StatusBarItem;
   private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
@@ -91,6 +124,36 @@ export class BridgeServer implements vscode.Disposable {
       bookmarks.onDidChange(() => {
         if (!this.applyingLocal) this.requestSnapshotsSoon();
       }),
+      // Shortcut changes go to every linked browser (and from there to its sync storage).
+      onDidChangeShortcuts(() => {
+        const { overrides, updated } = readShortcuts();
+        const json = JSON.stringify(overrides);
+        const changed = json !== this.lastShortcuts.json;
+        this.lastShortcuts = { json, updated };
+        // Changed outside writeShortcuts (settings.json by hand, Settings Sync): give it a new
+        // time, or browsers would keep their copy. Only the serving window does; the new time
+        // brings this event back as our own write, which is then sent.
+        if (this.server && changed && !isOwnWrite(overrides, updated)) {
+          void touchShortcuts();
+          return;
+        }
+        const message = this.shortcutsMessage();
+        for (const connection of this.connections) {
+          if (connection.client) this.send(connection, message);
+        }
+      }),
+      // Offers are shown by whichever window has focus, which is rarely the serving one.
+      vscode.window.onDidChangeWindowState((state) => {
+        if (state.focused) this.showOffers();
+      }),
+    );
+    const offers = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(context.globalStorageUri, OFFERS_FILE),
+    );
+    this.disposables.push(
+      offers,
+      offers.onDidCreate(() => this.showOffers()),
+      offers.onDidChange(() => this.showOffers()),
     );
   }
 
@@ -134,9 +197,14 @@ export class BridgeServer implements vscode.Disposable {
       });
     } catch (error) {
       // Another VS Code window already serves the link; it shares the same bookmarks file.
-      this.logger.info(
-        `Browser link: port ${bridgePort} is in use (${errorMessage(error)}), not serving.`,
-      );
+      // Try again later, so the link moves here when that window closes.
+      if (!this.loggedPortInUse) {
+        this.loggedPortInUse = true;
+        this.logger.info(
+          `Browser link: port ${bridgePort} is in use (${errorMessage(error)}); another window serves it.`,
+        );
+      }
+      this.retryTimer = setTimeout(() => void this.sync(), RETRY_MS);
       return;
     }
     this.server = server;
@@ -147,26 +215,106 @@ export class BridgeServer implements vscode.Disposable {
 
   /** Shows a pairing code for the browser extension. */
   async startPairing(): Promise<void> {
-    await this.sync();
-    if (!this.server) {
+    if (!getConfig().bridgeEnabled) {
       void vscode.window.showWarningMessage(
-        'The browser link is not running in this window (another VS Code window may serve it, or it is turned off in settings).',
+        'The browser link is turned off (setting "vscodeBrowser.bridge.enabled").',
       );
       return;
     }
+    // Works in any window: the code is shared with the window that serves the link.
+    await this.sync();
     const code = this.createPairingCode();
     const choice = await vscode.window.showInformationMessage(
-      `Browser link pairing code: ${code}. In the browser, open the Inkspect toolbar (Alt+Shift+I), click the VS Code button and enter this code within 2 minutes.`,
+      `Browser link pairing code: ${code}. In the browser, click the Inkspect toolbar button and enter this code on its settings page within 2 minutes.`,
       'Copy Code',
     );
     if (choice) await vscode.env.clipboard.writeText(code);
   }
 
-  /** A new 6-digit pairing code, valid for 2 minutes (replaces any earlier one). */
+  /** An unpaired browser connected: record an offer for the next focused window to show. */
+  private offerPairing(client: ClientInfo): void {
+    const offers = this.readOffers();
+    if (!offers[client.id]) {
+      offers[client.id] = { browser: client.browser, at: Date.now() };
+      this.writeShared(OFFERS_FILE, offers);
+    }
+    this.showOffers();
+  }
+
+  /** Shows offers no window has shown yet, if this window has focus (one notification each). */
+  private showOffers(): void {
+    if (!vscode.window.state.focused) return;
+    const offers = this.readOffers();
+    const fresh = Object.values(offers).filter((offer) => !offer.shown);
+    if (!fresh.length) return;
+    for (const offer of fresh) offer.shown = true;
+    this.writeShared(OFFERS_FILE, offers);
+    for (const offer of fresh) {
+      void vscode.window
+        .showInformationMessage(`${offer.browser} wants to sync bookmarks with VS Code.`, 'Pair')
+        .then((choice) => (choice ? this.startPairing() : undefined));
+    }
+  }
+
+  private readOffers(): Record<string, Offer> {
+    const stored = this.readShared<Record<string, Offer>>(OFFERS_FILE) ?? {};
+    const now = Date.now();
+    return Object.fromEntries(
+      Object.entries(stored).filter(
+        ([, offer]) =>
+          typeof offer?.browser === 'string' &&
+          typeof offer.at === 'number' &&
+          now - offer.at < OFFER_MS,
+      ),
+    );
+  }
+
+  /** Ids of unpaired browsers waiting to be paired (shared by all windows). */
+  pendingOffers(): string[] {
+    return Object.keys(this.readOffers());
+  }
+
+  private removeOffer(clientId: string): void {
+    const offers = this.readOffers();
+    if (!offers[clientId]) return;
+    delete offers[clientId];
+    this.writeShared(OFFERS_FILE, Object.keys(offers).length ? offers : undefined);
+  }
+
+  /** A new 6-digit pairing code, valid for 2 minutes (replaces any earlier one, in any window). */
   createPairingCode(): string {
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
-    this.pairing = { code, expires: Date.now() + PAIRING_MS };
+    const pairing: SharedPairing = { codeHash: hash(code), expires: Date.now() + PAIRING_MS };
+    this.writeShared(PAIRING_FILE, pairing);
     return code;
+  }
+
+  private readShared<T>(name: string): T | undefined {
+    try {
+      return JSON.parse(
+        readFileSync(join(this.context.globalStorageUri.fsPath, name), 'utf8'),
+      ) as T;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Writes (or, for `undefined`, removes) a file shared with the other windows. */
+  private writeShared(name: string, value: unknown): void {
+    const dir = this.context.globalStorageUri.fsPath;
+    const file = join(dir, name);
+    try {
+      if (value === undefined) {
+        rmSync(file, { force: true });
+        return;
+      }
+      mkdirSync(dir, { recursive: true });
+      const temp = `${file}.${process.pid}.tmp`;
+      writeFileSync(temp, JSON.stringify(value), 'utf8');
+      renameSync(temp, file);
+    } catch (error) {
+      this.logger.warn(`Browser link: could not write ${name}: ${errorMessage(error)}`);
+    }
   }
 
   /** Forgets every paired browser and closes their connections. */
@@ -217,12 +365,14 @@ export class BridgeServer implements vscode.Disposable {
       return;
     }
     if (message.type === 'pair') {
-      const pairing = this.pairing;
+      const pairing = this.readShared<SharedPairing>(PAIRING_FILE);
+      const codeHash = hash(message.code);
       const valid =
-        pairing &&
+        typeof pairing?.codeHash === 'string' &&
+        typeof pairing.expires === 'number' &&
         Date.now() < pairing.expires &&
-        message.code.length === pairing.code.length &&
-        timingSafeEqual(Buffer.from(message.code), Buffer.from(pairing.code));
+        pairing.codeHash.length === codeHash.length &&
+        timingSafeEqual(Buffer.from(codeHash), Buffer.from(pairing.codeHash));
       if (!valid) {
         this.send(connection, {
           type: 'error',
@@ -232,7 +382,9 @@ export class BridgeServer implements vscode.Disposable {
         });
         return;
       }
-      this.pairing = undefined;
+      this.writeShared(PAIRING_FILE, undefined);
+      this.removeOffer(message.client.id);
+      this.logger.info(`Browser link: paired with ${message.client.browser}.`);
       const token = randomBytes(32).toString('base64url');
       await this.context.globalState.update(CLIENTS_KEY, {
         ...this.paired,
@@ -263,7 +415,17 @@ export class BridgeServer implements vscode.Disposable {
           code: 'unpaired',
           message: 'This browser is not paired with VS Code.',
         });
-        connection.socket.close(4001, 'Unpaired');
+        if (message.token) {
+          // A wrong token: drop the connection (the browser forgets it and asks to pair again).
+          this.logger.info(`Browser link: ${message.client.browser} has an unknown token.`);
+          connection.socket.close(4001, 'Unpaired');
+        } else {
+          // A browser that was never paired: keep the connection open for pairing, and offer it.
+          this.logger.info(
+            `Browser link: ${message.client.browser} connected but is not paired; offering to pair.`,
+          );
+          this.offerPairing(message.client);
+        }
         return;
       }
       connection.client = message.client;
@@ -292,12 +454,39 @@ export class BridgeServer implements vscode.Disposable {
       case 'send':
         await this.handleSend(connection, message);
         return;
+      case 'settings.shortcuts': {
+        // The browser's sync storage had newer shortcuts (changed on another device).
+        const { overrides, updated } = readShortcuts();
+        const local = { shortcuts: overrides as ShortcutSettings['shortcuts'], updated };
+        if (newerShortcuts(local, message) === 'remote') {
+          await writeShortcuts(sanitizeOverrides(message.shortcuts), message.updated);
+          this.logger.info(`Browser link: shortcuts updated from ${client.browser}.`);
+        }
+        return;
+      }
     }
+  }
+
+  /** The shortcut settings last seen, to notice edits that didn't update the time. */
+  private lastShortcuts = (() => {
+    const { overrides, updated } = readShortcuts();
+    return { json: JSON.stringify(overrides), updated };
+  })();
+
+  /** VS Code's shortcut settings, for the browser to keep in its sync storage. */
+  private shortcutsMessage(): ServerMessage {
+    const { overrides, updated } = readShortcuts();
+    return {
+      type: 'settings.shortcuts',
+      shortcuts: overrides as ShortcutSettings['shortcuts'],
+      updated,
+    };
   }
 
   private welcome(connection: Connection): void {
     const syncBookmarks = getConfig().bridgeSyncBookmarks;
     this.send(connection, { type: 'welcome', peer: this.peerName(), syncBookmarks });
+    this.send(connection, this.shortcutsMessage());
     this.updateStatus();
   }
 
@@ -436,53 +625,36 @@ export class BridgeServer implements vscode.Disposable {
       const label = message.label || 'From the browser';
       let path: string | undefined;
       if (message.image) {
-        path = await saveScreenshot(
-          new Uint8Array(Buffer.from(message.image, 'base64')),
-          message.pageUrl ?? '',
-          'png',
-          globalStorage,
+        const bytes = new Uint8Array(Buffer.from(message.image, 'base64'));
+        path = await saveScreenshot(bytes, message.pageUrl ?? '', 'png', globalStorage);
+        // Screenshots are always copied, wherever they come from.
+        await copyImageBytes(bytes, 'image/png').catch((error: unknown) =>
+          this.logger.warn(`Browser link: could not copy the image: ${errorMessage(error)}`),
         );
-      } else if (message.text && message.target !== 'chat') {
-        // Multi-line text can't be typed into a terminal safely: agents read it from a file.
-        path = await this.saveContext(message.text, label);
       }
-      if (message.target === 'chat') {
-        await sendToChat(
-          message.text ??
-            `${label}${message.pageUrl ? ` of ${message.pageUrl}` : ''}: ${path ? displayPath(path) : ''}`,
-          path ? [vscode.Uri.file(path)] : [],
-        );
-      } else if (message.target === 'terminal' && path) {
-        const sent = await sendPathToTerminal(path);
+      if (message.target === 'save') {
+        path ??= message.text ? await saveContext(message.text, label, globalStorage) : undefined;
+        if (path)
+          void vscode.window.showInformationMessage(`${label} saved to ${displayPath(path)}`);
+      } else {
+        const sent = await sendToAgent(message.image ? '' : (message.text ?? ''), {
+          files: path ? [path] : [],
+          label,
+          // "chat" follows the agent.sendTarget setting; "terminal" always means the terminal.
+          target: message.target === 'terminal' ? 'terminal' : undefined,
+        });
         if (!sent) {
-          reply(false, { path, error: 'No terminal was chosen in VS Code.' });
+          reply(false, {
+            path: path && displayPath(path),
+            error: 'Nothing was sent: no terminal was chosen in VS Code.',
+          });
           return;
         }
-      } else if (message.target === 'save' && path) {
-        void vscode.window.showInformationMessage(`${label} saved to ${displayPath(path)}`);
       }
       reply(true, { path: path && displayPath(path) });
     } catch (error) {
       reply(false, { error: errorMessage(error) });
     }
-  }
-
-  /** Writes text (element details, console summaries) where agents can read it. */
-  private async saveContext(text: string, label: string): Promise<string> {
-    const workspace = localWorkspaceFolder();
-    const folder = workspace
-      ? join(workspace, '.vscode-browser', 'context')
-      : join(this.context.globalStorageUri.fsPath, 'context');
-    await mkdir(folder, { recursive: true });
-    const slug =
-      label
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-        .slice(0, 40) || 'context';
-    const path = join(folder, `${slug}-${Date.now()}.md`);
-    await writeFile(path, text.endsWith('\n') ? text : `${text}\n`, 'utf8');
-    return path;
   }
 
   private updateStatus(): void {
@@ -502,6 +674,7 @@ export class BridgeServer implements vscode.Disposable {
   }
 
   private stop(): void {
+    clearTimeout(this.retryTimer);
     for (const connection of this.connections) connection.socket.terminate();
     this.connections.clear();
     this.sockets?.close();

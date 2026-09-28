@@ -1,7 +1,22 @@
 import { useEffect, useRef } from 'react';
 import type { DownloadInfo } from '@shared/protocol';
+import { Button } from '@inkspect/shared/ui/Button';
+import { IconButton } from '@inkspect/shared/ui/IconButton';
 import { downloadStatus } from '../format';
 import { postToHost } from '../vscode';
+
+const FILE_ICONS: [RegExp, string][] = [
+  [/.(zip|rar|7z|tar|gz|tgz|bz2|xz|vsix|crx)$/i, 'file-zip'],
+  [/.pdf$/i, 'file-pdf'],
+  [/.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg)$/i, 'file-media'],
+  [/.(js|ts|tsx|jsx|json|html|css|py|go|rs|java|c|cpp|sh|ps1|md)$/i, 'file-code'],
+  [/.(exe|msi|dmg|pkg|deb|rpm|appimage)$/i, 'package'],
+];
+
+/** A codicon for a file name's type. */
+function fileIcon(name: string): string {
+  return FILE_ICONS.find(([pattern]) => pattern.test(name))?.[1] ?? 'file';
+}
 
 export function DownloadItem({ download }: { download: DownloadInfo }) {
   const run = (action: 'open' | 'reveal' | 'cancel' | 'remove') => () =>
@@ -14,7 +29,9 @@ export function DownloadItem({ download }: { download: DownloadInfo }) {
 
   return (
     <div className={`download-item ${download.state}`}>
-      <span className="codicon codicon-file download-icon" aria-hidden="true" />
+      <span className="download-icon" aria-hidden="true">
+        <span className={`codicon codicon-${fileIcon(download.filename)}`} />
+      </span>
       <div className="download-body">
         <button
           type="button"
@@ -34,37 +51,23 @@ export function DownloadItem({ download }: { download: DownloadInfo }) {
       </div>
       <div className="download-actions">
         {download.state === 'inProgress' && (
-          <button
-            type="button"
-            className="icon-button"
-            title="Cancel"
-            aria-label="Cancel"
-            onClick={run('cancel')}
-          >
-            <span className="codicon codicon-close" aria-hidden="true" />
-          </button>
+          <IconButton icon="close" label="Cancel" className="small" onClick={run('cancel')} />
         )}
         {available && (
-          <button
-            type="button"
-            className="icon-button"
-            title="Show in folder"
-            aria-label="Show in folder"
+          <IconButton
+            icon="folder-opened"
+            label="Show in folder"
+            className="small"
             onClick={run('reveal')}
-          >
-            <span className="codicon codicon-folder-opened" aria-hidden="true" />
-          </button>
+          />
         )}
         {download.state !== 'inProgress' && (
-          <button
-            type="button"
-            className="icon-button"
-            title="Remove from list"
-            aria-label="Remove from list"
+          <IconButton
+            icon="trash"
+            label="Remove from list"
+            className="small"
             onClick={run('remove')}
-          >
-            <span className="codicon codicon-trash" aria-hidden="true" />
-          </button>
+          />
         )}
       </div>
     </div>
@@ -106,16 +109,20 @@ export function DownloadsPopover({ downloads, onClose }: DownloadsPopoverProps) 
       {downloads.slice(0, 6).map((download) => (
         <DownloadItem key={download.id} download={download} />
       ))}
-      <button
-        type="button"
-        className="link-button popover-footer"
-        onClick={() => {
-          onClose();
-          postToHost({ type: 'navigate', input: 'vb://downloads', newTab: true });
-        }}
-      >
-        Show all downloads
-      </button>
+      {downloads.length === 0 && <p className="popover-empty">No downloads yet.</p>}
+      <div className="popover-footer">
+        <Button
+          variant="ghost"
+          size="sm"
+          iconEnd="arrow-right"
+          onClick={() => {
+            onClose();
+            postToHost({ type: 'navigate', input: 'vb://downloads', newTab: true });
+          }}
+        >
+          Show all downloads
+        </Button>
+      </div>
     </div>
   );
 }

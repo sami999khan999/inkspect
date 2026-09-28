@@ -12,6 +12,7 @@ import {
   BAR_ID,
   emptyRoots,
   findByUrl,
+  bookmarkLabel,
   folderList,
   moveNode,
   OTHER_ID,
@@ -206,5 +207,14 @@ describe('history', () => {
     );
     expect(suggestions.map((s) => s.kind)).toEqual(['tab', 'history', 'bookmark']);
     expect(rankSuggestions('', { tabs: [], bookmarks: [], history: [] })).toEqual([]);
+  });
+});
+
+describe('bookmark labels', () => {
+  it('shows the title, or the address without the scheme when untitled', () => {
+    expect(bookmarkLabel({ title: 'Claude', url: 'https://claude.ai/new' })).toBe('Claude');
+    expect(bookmarkLabel({ title: '', url: 'https://claude.ai/new' })).toBe('claude.ai/new');
+    expect(bookmarkLabel({ title: '  ', url: 'https://www.messenger.com/' })).toBe('messenger.com');
+    expect(bookmarkLabel({ title: '', url: 'file:///C:/notes.html' })).toBe('/C:/notes.html');
   });
 });

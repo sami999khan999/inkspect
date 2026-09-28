@@ -43,6 +43,16 @@ const state = async () =>
 const exec = (command: string, ...args: unknown[]) =>
   vscode.commands.executeCommand(command, ...args);
 
+/** Waits until `check` is true (for conditions outside the browser state). */
+async function until(what: string, check: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Timed out waiting for ${what}.`);
+}
+
 async function waitFor<T>(
   what: string,
   check: (s: DebugState) => T | undefined | false | null,
@@ -453,6 +463,10 @@ export async function run(): Promise<void> {
     });
 
     await test('the browser extension link pairs, rejects strangers and syncs bookmarks', async () => {
+      // Its own port: a real VS Code on this machine may already serve the default one.
+      await vscode.workspace
+        .getConfiguration('vscodeBrowser')
+        .update('bridge.port', 47_190, vscode.ConfigurationTarget.Global);
       const { port, code } = (await exec('vscodeBrowser.debug.bridge', {
         firstSyncMode: 'merge',
       })) as {
@@ -497,8 +511,24 @@ export async function run(): Promise<void> {
       await new Promise((resolve) => paired.on('open', resolve));
       const sendPaired = (message: object) => paired.send(JSON.stringify({ v: 1, ...message }));
       try {
+        // A browser that was never paired announces itself and stays connected for pairing.
+        sendPaired({ type: 'hello', client, token: '' });
+        assert.equal((await next('error')).code, 'unpaired');
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        assert.equal(paired.readyState, WebSocket.OPEN, 'the unpaired browser was disconnected');
+        // Its offer is shared with every window, and so is the pairing code.
+        const { code: fresh, offers } = (await exec('vscodeBrowser.debug.bridge')) as {
+          code: string;
+          offers: string[];
+        };
+        assert.ok(offers.includes(client.id), JSON.stringify(offers));
+        assert.notEqual(fresh, code);
         sendPaired({ type: 'pair', code, client });
+        assert.equal((await next('error')).code, 'bad-code', 'a replaced code still worked');
+        sendPaired({ type: 'pair', code: fresh, client });
         assert.ok((await next('paired')).token);
+        const after = (await exec('vscodeBrowser.debug.bridge')) as { offers: string[] };
+        assert.ok(!after.offers.includes(client.id), 'the offer stayed after pairing');
         await next('welcome');
         sendPaired({
           type: 'bookmarks.snapshot',
@@ -532,6 +562,67 @@ export async function run(): Promise<void> {
         const result = await next('send.result');
         assert.equal(result.ok, true, JSON.stringify(result));
         assert.ok(existsSync(String(result.path)), String(result.path));
+
+        // VS Code sends its shortcuts after linking; newer ones from the browser's sync win.
+        const settings = vscode.workspace.getConfiguration('vscodeBrowser');
+        assert.equal(typeof (await next('settings.shortcuts')).updated, 'number');
+        // Another device's clock may run ahead: its time is in the future here.
+        const browserTime = Date.now() + 60_000;
+        sendPaired({
+          type: 'settings.shortcuts',
+          shortcuts: { 'mode.draw': 'ctrl+alt+d' },
+          updated: browserTime,
+        });
+        await until(
+          'the shortcut from the browser',
+          () =>
+            vscode.workspace
+              .getConfiguration('vscodeBrowser')
+              .get<Record<string, unknown>>('shortcuts')?.['mode.draw'] === 'ctrl+alt+d',
+        );
+        // A change in VS Code (even edited by hand, without a new time) reaches the browser as
+        // the newer copy.
+        received.splice(0, received.length);
+        await settings.update(
+          'shortcuts',
+          { 'mode.draw': 'ctrl+alt+x' },
+          vscode.ConfigurationTarget.Global,
+        );
+        await until('the edited shortcuts sent to the browser', () =>
+          received.some(
+            (m) =>
+              m.type === 'settings.shortcuts' &&
+              (m.shortcuts as Record<string, unknown>)['mode.draw'] === 'ctrl+alt+x' &&
+              (m.updated as number) > browserTime,
+          ),
+        );
+        await settings.update('shortcuts', undefined, vscode.ConfigurationTarget.Global);
+        await settings.update('shortcutsUpdated', undefined, vscode.ConfigurationTarget.Global);
+
+        // Text for the agent is typed into the agent's terminal (without pressing Enter).
+        const typed: string[] = [];
+        const output = new vscode.EventEmitter<string>();
+        const terminal = vscode.window.createTerminal({
+          name: 'claude (test)',
+          pty: {
+            onDidWrite: output.event,
+            open: () => {},
+            close: () => {},
+            handleInput: (data: string) => typed.push(data),
+          },
+        });
+        try {
+          terminal.show(true);
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          sendPaired({ type: 'send', id: 's2', target: 'terminal', text: 'Fix the header' });
+          const sent = await next('send.result');
+          assert.equal(sent.ok, true, JSON.stringify(sent));
+          await until('the text in the terminal', () => typed.join('').includes('Fix the header'));
+          assert.ok(!typed.join('').includes('\r'), 'Enter was pressed');
+        } finally {
+          terminal.dispose();
+          output.dispose();
+        }
       } finally {
         socket.terminate();
         paired.terminate();

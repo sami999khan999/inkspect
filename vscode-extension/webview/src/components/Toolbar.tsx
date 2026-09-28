@@ -1,6 +1,6 @@
 import type { Suggestion } from '@shared/history';
 import type { DownloadInfo, ExtensionInfo, TabState } from '@shared/protocol';
-import { shortcutLabel } from '../keyboard';
+import { withShortcut } from '../shortcuts';
 import { mainMenu } from '../menus';
 import { postToHost } from '../vscode';
 import { DownloadsPopover } from './DownloadsPopover';
@@ -30,6 +30,10 @@ interface ToolbarProps {
   /** Opens an extension's popup under its toolbar button. */
   onExtension: (id: string, anchor: DOMRect) => void;
   onScreenshotMenu: (x: number, y: number) => void;
+  /** Opens the tools menu (measure, eyedropper, CSS tweak, accessibility, overlay, record). */
+  onToolsMenu: (x: number, y: number) => void;
+  /** One of those tools is on. */
+  toolsActive: boolean;
   openMenu: (x: number, y: number, items: MenuItem[]) => void;
   /** Right-click on Back/Forward: ask the host for the history list. */
   requestHistory: (direction: 'back' | 'forward', x: number, y: number) => void;
@@ -51,14 +55,14 @@ export function Toolbar(props: ToolbarProps) {
     <div className="toolbar" role="toolbar" aria-label="Browser toolbar">
       <IconButton
         icon="arrow-left"
-        label={`Back (${shortcutLabel('vscodeBrowser.goBack')}), right-click for history`}
+        label={`${withShortcut('Back', 'nav.back')}, right-click for history`}
         disabled={!tab?.canGoBack}
         onClick={action('back')}
         onContextMenu={historyButton('back')}
       />
       <IconButton
         icon="arrow-right"
-        label={`Forward (${shortcutLabel('vscodeBrowser.goForward')}), right-click for history`}
+        label={`${withShortcut('Forward', 'nav.forward')}, right-click for history`}
         disabled={!tab?.canGoForward}
         onClick={action('forward')}
         onContextMenu={historyButton('forward')}
@@ -68,7 +72,7 @@ export function Toolbar(props: ToolbarProps) {
       ) : (
         <IconButton
           icon="refresh"
-          label={`Reload (${shortcutLabel('vscodeBrowser.reload')})`}
+          label={withShortcut('Reload', 'nav.reload')}
           disabled={!tab || !!tab.internalPage}
           onClick={action('reload')}
         />
@@ -110,21 +114,21 @@ export function Toolbar(props: ToolbarProps) {
         <div className="toolbar-separator" />
         <IconButton
           icon="inspect"
-          label={`Select an element to copy its details for AI (${shortcutLabel('vscodeBrowser.toggleInspector')})`}
+          label={withShortcut('Select an element to copy its details for AI', 'mode.inspect')}
           active={props.tool !== null}
           disabled={!tab || !!tab.internalPage}
           onClick={props.onToggleInspect}
         />
         <IconButton
           icon="edit"
-          label="Draw on the page"
+          label={withShortcut('Draw on the page', 'mode.draw')}
           active={props.drawing}
           disabled={!tab || !!tab.internalPage}
           onClick={props.onToggleDraw}
         />
         <IconButton
           icon="device-camera"
-          label="Screenshot"
+          label={withShortcut('Screenshot', 'mode.screenshot')}
           disabled={!tab || !!tab.internalPage}
           onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
@@ -133,14 +137,24 @@ export function Toolbar(props: ToolbarProps) {
         />
         <IconButton
           icon="debug-console"
-          label="Console and network (copy errors for AI)"
+          label={withShortcut('Console and network (copy errors for AI)', 'mode.devtools')}
           active={props.devOpen}
           disabled={!tab || !!tab.internalPage}
           onClick={props.onToggleDev}
         />
         <IconButton
+          icon="tools"
+          label="More tools: measure, eyedropper, CSS tweak, accessibility, overlay, record"
+          active={props.toolsActive}
+          disabled={!tab || !!tab.internalPage}
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            props.onToolsMenu(rect.left, rect.bottom + 2);
+          }}
+        />
+        <IconButton
           icon="device-mobile"
-          label="Devices, screen sizes and throttling"
+          label={withShortcut('Devices, screen sizes and throttling', 'mode.device')}
           active={!!tab?.emulation.enabled}
           disabled={!tab || !!tab.internalPage}
           onClick={props.toggleDeviceToolbar}

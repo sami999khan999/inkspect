@@ -20,6 +20,12 @@ export interface BookmarkRoots {
 export const BAR_ID = 'bar';
 export const OTHER_ID = 'other';
 
+/** What a bookmark shows: its title, or its address without the scheme and "www." when untitled. */
+export function bookmarkLabel(node: Pick<BookmarkNode, 'title' | 'url'>): string {
+  if (node.title.trim()) return node.title;
+  return (node.url ?? '').replace(/^[a-z]+:\/\/(www\.)?/i, '').replace(/\/$/, '');
+}
+
 export function emptyRoots(): BookmarkRoots {
   return {
     bar: { id: BAR_ID, type: 'folder', title: 'Bookmarks bar', createdAt: 0, children: [] },

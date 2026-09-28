@@ -1,0 +1,504 @@
+/* The modes' overlays: hint bar, eyedropper, measure, accessibility check, CSS tweak, design
+   overlay and recording. Tokens come from @inkspect/shared/ui/ui.css. Colors drawn over page
+   content (box model, markers) are fixed so they read on any page. */
+
+/* Hint bar ----------------------------------------------------------------------------------- */
+
+.mode-hint {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  z-index: 7;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 12px;
+  max-width: calc(100% - 24px);
+  padding: 5px 12px;
+  border: 1px solid var(--ink-border);
+  border-radius: var(--ink-radius-pill);
+  background: var(--ink-surface-raised);
+  color: var(--vscode-foreground);
+  box-shadow: var(--ink-shadow);
+  font-size: var(--ink-font-sm);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.mode-hint-text {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+}
+
+.mode-hint-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.mode-hint kbd {
+  font-size: var(--ink-font-xs);
+}
+
+/* Eyedropper --------------------------------------------------------------------------------- */
+
+.eyedropper-layer {
+  position: absolute;
+  z-index: 5;
+  cursor: crosshair;
+}
+
+.eyedropper-loupe {
+  position: absolute;
+  z-index: 2;
+  overflow: hidden;
+  border: 1px solid var(--ink-border-strong);
+  border-radius: var(--ink-radius);
+  background: var(--ink-surface-raised);
+  box-shadow: var(--ink-shadow-lg);
+  pointer-events: none;
+}
+
+.eyedropper-loupe canvas {
+  display: block;
+  image-rendering: pixelated;
+}
+
+.eyedropper-center {
+  position: absolute;
+  top: 45px;
+  left: 45px;
+  width: 9px;
+  height: 9px;
+  outline: 1px solid #fff;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.6);
+}
+
+.eyedropper-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-top: 1px solid var(--ink-border-subtle);
+  font-family: var(--vscode-editor-font-family);
+  font-size: var(--ink-font-sm);
+}
+
+.eyedropper-recent {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+}
+
+/* Measure ------------------------------------------------------------------------------------ */
+
+.measure-layer {
+  position: absolute;
+  z-index: 5;
+  overflow: hidden;
+  cursor: crosshair;
+}
+
+.measure-layer.grid {
+  background-image:
+    linear-gradient(to right, rgba(56, 189, 248, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(56, 189, 248, 0.12) 1px, transparent 1px);
+  background-size: var(--grid) var(--grid);
+}
+
+.measure-box {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* The DevTools box model colors. */
+.measure-box.margin {
+  background: rgba(246, 178, 107, 0.45);
+}
+
+.measure-box.border {
+  background: rgba(255, 229, 153, 0.45);
+}
+
+.measure-box.padding {
+  background: rgba(147, 196, 125, 0.5);
+}
+
+.measure-box.content {
+  background: rgba(111, 168, 220, 0.55);
+}
+
+.measure-box.pinned {
+  outline: 2px solid #f43f5e;
+  outline-offset: -1px;
+}
+
+.measure-label,
+.measure-coords {
+  position: absolute;
+  padding: 2px 7px;
+  border-radius: var(--ink-radius-sm);
+  background: rgba(15, 23, 42, 0.9);
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.measure-label strong {
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.measure-gap {
+  position: absolute;
+  background: #f43f5e;
+  pointer-events: none;
+}
+
+.measure-gap.x {
+  height: 1px;
+}
+
+.measure-gap.y {
+  width: 1px;
+}
+
+.measure-gap-label {
+  position: absolute;
+  padding: 1px 5px;
+  border-radius: var(--ink-radius-sm);
+  background: #f43f5e;
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.measure-crosshair {
+  position: absolute;
+  background: rgba(56, 189, 248, 0.7);
+  pointer-events: none;
+}
+
+.measure-crosshair.x {
+  right: 0;
+  left: 0;
+  height: 1px;
+}
+
+.measure-crosshair.y {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+/* Accessibility check and CSS tweak ----------------------------------------------------------- */
+
+.a11y-layer {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.a11y-marker {
+  position: absolute;
+  padding: 0;
+  border: 2px solid #f59e0b;
+  border-radius: 3px;
+  background: rgba(245, 158, 11, 0.12);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.a11y-marker.error {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.a11y-marker.active {
+  z-index: 1;
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.9),
+    0 0 0 6px rgba(239, 68, 68, 0.45);
+}
+
+.a11y-tab {
+  position: absolute;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: var(--ink-radius-pill);
+  background: #7c3aed;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.a11y-panel,
+.tweak-panel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  bottom: 56px;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  width: min(340px, calc(100% - 16px));
+  overflow: hidden;
+  border: 1px solid var(--ink-border);
+  border-radius: var(--ink-radius-lg);
+  background: var(--ink-surface-raised);
+  color: var(--vscode-foreground);
+  box-shadow: var(--ink-shadow-lg);
+  pointer-events: auto;
+  animation: ink-pop-in var(--ink-normal) var(--ink-ease);
+}
+
+.a11y-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--ink-border-subtle);
+}
+
+.a11y-panel-header > strong,
+.tweak-selector {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tweak-selector {
+  font-family: var(--vscode-editor-font-family);
+  font-size: var(--ink-font-sm);
+}
+
+.a11y-counts {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.a11y-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: var(--ink-space-4);
+  color: var(--ink-muted);
+}
+
+.a11y-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.a11y-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--ink-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.a11y-item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.a11y-item.active {
+  background: var(--ink-accent-soft);
+}
+
+.a11y-item .codicon.error {
+  color: var(--ink-danger);
+}
+
+.a11y-item .codicon.warning {
+  color: var(--ink-warning);
+}
+
+.a11y-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.a11y-item-text code {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: var(--vscode-editor-font-family);
+  font-size: var(--ink-font-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.a11y-panel-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--ink-border-subtle);
+}
+
+.tweak-pick {
+  position: absolute;
+  z-index: 5;
+  cursor: crosshair;
+}
+
+.tweak-list {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 8px;
+  overflow-y: auto;
+}
+
+.tweak-row {
+  display: grid;
+  grid-template-columns: 118px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.tweak-property {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: var(--vscode-editor-font-family);
+  font-size: var(--ink-font-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tweak-row.changed .tweak-property {
+  color: var(--ink-accent-fg);
+  font-weight: 600;
+}
+
+.tweak-row .text-field input {
+  font-family: var(--vscode-editor-font-family);
+  font-size: var(--ink-font-sm);
+}
+
+.tweak-count {
+  font-size: var(--ink-font-sm);
+}
+
+/* Design overlay and recording ---------------------------------------------------------------- */
+
+.design-overlay {
+  position: absolute;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.design-overlay img {
+  position: absolute;
+  max-width: none;
+  user-select: none;
+}
+
+.design-bar,
+.record-bar {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 24px);
+  padding: 3px 4px 3px 12px;
+  border: 1px solid var(--ink-border);
+  border-radius: var(--ink-radius-pill);
+  background: var(--ink-surface-raised);
+  color: var(--vscode-foreground);
+  box-shadow: var(--ink-shadow);
+  font-size: var(--ink-font-sm);
+  transform: translateX(-50%);
+}
+
+.record-bar {
+  position: fixed;
+  top: auto;
+  bottom: 16px;
+  z-index: 250;
+}
+
+.design-name {
+  max-width: 160px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.design-offset {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.record-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25);
+  animation: record-blink 1.2s ease-in-out infinite;
+}
+
+.record-dot.paused {
+  background: var(--ink-muted);
+  box-shadow: none;
+  animation: none;
+}
+
+.record-time {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes record-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .record-dot {
+    animation: none;
+  }
+}
+
+body.vscode-high-contrast .mode-hint,
+body.vscode-high-contrast .a11y-panel,
+body.vscode-high-contrast .tweak-panel,
+body.vscode-high-contrast .design-bar,
+body.vscode-high-contrast .record-bar,
+body.vscode-high-contrast .shortcut-card,
+body.vscode-high-contrast .quick-actions {
+  border: 1px solid var(--vscode-contrastBorder);
+}

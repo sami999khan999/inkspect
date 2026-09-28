@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Suggestion } from '@shared/history';
 import type { SecurityState, TabState } from '@shared/protocol';
 import { displayUrl } from '../format';
-import { shortcutLabel } from '../keyboard';
+import { withShortcut } from '../shortcuts';
 import { postToHost } from '../vscode';
 
 const SECURITY_ICON: Record<SecurityState, { icon: string; label: string }> = {
@@ -156,7 +156,10 @@ export function Omnibox({ tab, focusSignal, suggestions, onStar, onDone }: Omnib
           ref={starRef}
           type="button"
           className={`icon-button star-button${tab.bookmarkId ? ' active' : ''}`}
-          title={`${tab.bookmarkId ? 'Edit bookmark' : 'Bookmark this page'} (${shortcutLabel('vscodeBrowser.bookmarkPage')})`}
+          title={withShortcut(
+            tab.bookmarkId ? 'Edit bookmark' : 'Bookmark this page',
+            'page.bookmark',
+          )}
           aria-label={tab.bookmarkId ? 'Edit bookmark' : 'Bookmark this page'}
           onClick={() => onStar(starRef.current!.getBoundingClientRect())}
         >

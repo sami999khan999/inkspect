@@ -1,27 +1,121 @@
-/* Styles of the shared UI components (buttons, menus, drawing toolbar and layer, toast).
-   They use VS Code theme variables; the browser extension defines those in its shadow root. */
+/* The Inkspect design system: tokens and the shared components (buttons, fields, selects,
+   switches, sliders, color picker, menus, toast, drawing toolbar and layer).
+   Colors come from VS Code theme variables; hosts outside VS Code define them (theme.css).
+   Every surface uses the tokens below, so sizes, radii and elevation stay consistent. */
+
+:root,
+:host {
+  /* Shape */
+  --ink-radius-sm: 4px;
+  --ink-radius: 6px;
+  --ink-radius-lg: 10px;
+  --ink-radius-pill: 999px;
+  /* Controls */
+  --ink-control-sm: 24px;
+  --ink-control: 28px;
+  --ink-control-lg: 36px;
+  /* Spacing */
+  --ink-space-1: 4px;
+  --ink-space-2: 8px;
+  --ink-space-3: 12px;
+  --ink-space-4: 16px;
+  --ink-space-5: 24px;
+  --ink-space-6: 32px;
+  /* Type */
+  --ink-font-xs: 11px;
+  --ink-font-sm: 12px;
+  --ink-font: var(--vscode-font-size, 13px);
+  --ink-font-lg: 15px;
+  --ink-font-xl: 22px;
+  /* Surfaces and lines */
+  --ink-surface: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  --ink-surface-raised: var(--vscode-menu-background, var(--ink-surface));
+  --ink-surface-sunken: color-mix(in srgb, var(--vscode-foreground, #888) 4%, transparent);
+  --ink-border: var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
+  --ink-border-subtle: color-mix(in srgb, var(--vscode-foreground, #888) 10%, transparent);
+  --ink-border-strong: color-mix(in srgb, var(--vscode-foreground, #888) 22%, transparent);
+  --ink-hover: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+  --ink-pressed: var(--vscode-toolbar-activeBackground, rgba(128, 128, 128, 0.26));
+  /* Focus rings follow the theme's focus border; accents use the button color, which themes keep
+     vivid (the focus border can be very dim). Text on tinted backgrounds uses the link color. */
+  --ink-focus: var(--vscode-focusBorder, #0078d4);
+  --ink-accent: var(--vscode-button-background, var(--ink-focus));
+  --ink-accent-fg: var(--vscode-textLink-foreground, var(--ink-accent));
+  --ink-accent-soft: color-mix(in srgb, var(--ink-accent) 20%, transparent);
+  /* Secondary text, pulled toward the foreground so it stays readable in low-contrast themes. */
+  --ink-muted: color-mix(
+    in srgb,
+    var(--vscode-descriptionForeground, #9d9d9d) 70%,
+    var(--vscode-foreground, #ccc)
+  );
+  --ink-danger: var(--vscode-errorForeground, #f85149);
+  --ink-success: var(--vscode-testing-iconPassed, #73c991);
+  --ink-warning: var(--vscode-editorWarning-foreground, #cca700);
+  /* Elevation */
+  --ink-shadow-sm: 0 1px 3px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25));
+  --ink-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+  --ink-shadow-lg: 0 12px 32px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.4));
+  /* Motion */
+  --ink-ease: cubic-bezier(0.2, 0, 0, 1);
+  --ink-fast: 90ms;
+  --ink-normal: 160ms;
+}
+
+/* Focus ------------------------------------------------------------------------------------ */
+
+.icon-button:focus-visible,
+.button:focus-visible,
+.link-button:focus-visible,
+.menu-item:focus-visible,
+.select:focus-visible,
+.switch:focus-visible,
+.checkbox:focus-visible,
+.segment:focus-visible,
+.slider-track:focus-visible,
+.swatch:focus-visible,
+.color-area:focus-visible,
+.color-hue:focus-visible,
+.chip:focus-visible {
+  outline: 1px solid var(--ink-focus);
+  outline-offset: 1px;
+}
+
+/* Icon buttons ----------------------------------------------------------------------------- */
 
 .icon-button {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: var(--ink-control);
+  height: var(--ink-control);
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--ink-radius-sm);
   background: transparent;
   color: var(--vscode-icon-foreground, var(--vscode-foreground));
+  font: inherit;
   cursor: pointer;
+  transition: background-color var(--ink-fast) var(--ink-ease);
+}
+
+.icon-button.small {
+  width: var(--ink-control-sm);
+  height: var(--ink-control-sm);
 }
 
 .icon-button:hover:not(:disabled) {
-  background: var(--vscode-toolbar-hoverBackground);
+  background: var(--ink-hover);
+}
+
+.icon-button:active:not(:disabled) {
+  background: var(--ink-pressed);
 }
 
 .icon-button.active {
-  background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground));
+  background: var(--ink-accent-soft);
+  color: var(--vscode-inputOption-activeForeground, var(--vscode-foreground));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink-accent) 60%, transparent);
 }
 
 .icon-button:disabled {
@@ -29,22 +123,35 @@
   cursor: default;
 }
 
-.icon-button:focus-visible,
-.button:focus-visible,
-.link-button:focus-visible,
-.menu-item:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: -1px;
-}
-
 /* Buttons ---------------------------------------------------------------------------------- */
 
 .button {
-  height: 26px;
-  padding: 0 14px;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--ink-control);
+  padding: 0 12px;
   border: 1px solid var(--vscode-button-border, transparent);
-  border-radius: 2px;
+  border-radius: var(--ink-radius-sm);
+  font: inherit;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--ink-fast) var(--ink-ease),
+    border-color var(--ink-fast) var(--ink-ease);
+}
+
+.button.small {
+  gap: 4px;
+  height: var(--ink-control-sm);
+  padding: 0 8px;
+}
+
+.button .codicon {
+  font-size: 14px;
 }
 
 .button.primary {
@@ -52,7 +159,7 @@
   color: var(--vscode-button-foreground);
 }
 
-.button.primary:hover {
+.button.primary:hover:not(:disabled) {
   background: var(--vscode-button-hoverBackground);
 }
 
@@ -61,8 +168,28 @@
   color: var(--vscode-button-secondaryForeground);
 }
 
-.button.secondary:hover {
+.button.secondary:hover:not(:disabled) {
   background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+}
+
+.button.ghost:hover:not(:disabled) {
+  background: var(--ink-hover);
+}
+
+.button.danger {
+  border-color: color-mix(in srgb, var(--ink-danger) 45%, transparent);
+  background: transparent;
+  color: var(--ink-danger);
+}
+
+.button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink-danger) 12%, transparent);
 }
 
 .button:disabled {
@@ -70,7 +197,809 @@
   cursor: default;
 }
 
-/* Menus and popovers ------------------------------------------------------------------------- */
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.link-button:hover:not(:disabled) {
+  color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
+  text-decoration: underline;
+}
+
+.link-button:disabled {
+  color: inherit;
+  cursor: default;
+}
+
+.link-button.danger {
+  color: var(--ink-danger);
+}
+
+/* Text fields ------------------------------------------------------------------------------ */
+
+.text-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: var(--ink-control);
+  padding: 0 8px;
+  border: 1px solid var(--vscode-input-border, var(--ink-border));
+  border-radius: var(--ink-radius-sm);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  transition: border-color var(--ink-fast) var(--ink-ease);
+}
+
+.text-field.size-sm {
+  height: var(--ink-control-sm);
+  padding: 0 6px;
+}
+
+.text-field.size-lg {
+  height: var(--ink-control-lg);
+  padding: 0 12px;
+  border-radius: var(--ink-radius);
+}
+
+.text-field:hover:not(.disabled) {
+  border-color: var(--ink-border-strong);
+}
+
+.text-field:focus-within {
+  border-color: var(--ink-focus);
+  box-shadow: 0 0 0 1px var(--ink-focus);
+}
+
+.text-field.invalid {
+  border-color: var(--vscode-inputValidation-errorBorder, var(--ink-danger));
+}
+
+.text-field.disabled {
+  opacity: 0.5;
+}
+
+.text-field input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.text-field input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--ink-muted));
+}
+
+/* Numbers: no spinner arrows (the fields accept typing and arrow keys). */
+.text-field input::-webkit-outer-spin-button,
+.text-field input::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.text-field input[type='number'] {
+  appearance: textfield;
+  font-variant-numeric: tabular-nums;
+}
+
+.text-field input[type='search']::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.text-field-icon {
+  flex-shrink: 0;
+  color: var(--ink-muted);
+}
+
+.text-field-clear {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--ink-radius-sm);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.text-field-clear:hover {
+  background: var(--ink-hover);
+  color: inherit;
+}
+
+/* Form rows -------------------------------------------------------------------------------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: var(--ink-space-3);
+}
+
+.field.inline {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ink-space-3);
+}
+
+.field-label {
+  color: var(--vscode-foreground);
+  font-weight: 600;
+}
+
+.field.inline .field-label {
+  font-weight: normal;
+}
+
+.field-control {
+  display: flex;
+  align-items: center;
+  gap: var(--ink-space-2);
+  min-width: 0;
+}
+
+.field-control > .text-field,
+.field-control > .select {
+  flex: 1;
+}
+
+.field-hint {
+  flex-basis: 100%;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-sm);
+}
+
+.field-hint.error {
+  color: var(--ink-danger);
+}
+
+/* Select ----------------------------------------------------------------------------------- */
+
+.select {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--ink-control);
+  padding: 0 6px 0 8px;
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, var(--ink-border)));
+  border-radius: var(--ink-radius-sm);
+  background: var(--vscode-dropdown-background, var(--vscode-input-background));
+  color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--ink-fast) var(--ink-ease),
+    border-color var(--ink-fast) var(--ink-ease);
+}
+
+.select.size-sm {
+  height: var(--ink-control-sm);
+  padding: 0 4px 0 6px;
+}
+
+.select:hover:not(:disabled) {
+  border-color: var(--ink-border-strong);
+}
+
+.select.open {
+  border-color: var(--ink-focus);
+}
+
+.select.quiet {
+  border-color: transparent;
+  background: transparent;
+}
+
+.select.quiet:hover:not(:disabled),
+.select.quiet.open {
+  border-color: transparent;
+  background: var(--ink-hover);
+}
+
+.select:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.select-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.select-value.placeholder {
+  color: var(--ink-muted);
+}
+
+.select-chevron {
+  flex-shrink: 0;
+  font-size: 14px !important;
+  opacity: 0.8;
+  transition: transform var(--ink-normal) var(--ink-ease);
+}
+
+.select.open .select-chevron {
+  transform: rotate(180deg);
+}
+
+.select-list,
+.color-picker,
+.menu,
+.popover {
+  background: var(--ink-surface-raised);
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-menu-border, var(--ink-border));
+  border-radius: var(--ink-radius);
+  box-shadow: var(--ink-shadow);
+}
+
+.select-list {
+  position: fixed;
+  z-index: 1000;
+  max-height: min(340px, 60vh);
+  padding: 4px;
+  overflow-y: auto;
+  outline: none;
+  font-family: var(--vscode-font-family);
+  font-size: var(--ink-font);
+  animation: ink-pop-in var(--ink-normal) var(--ink-ease);
+}
+
+.select-group {
+  padding: 8px 8px 4px;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.select-group:first-child {
+  padding-top: 4px;
+}
+
+.select-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 4px;
+  border-radius: var(--ink-radius-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.select-option.active {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+}
+
+.select-option.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.select-check {
+  flex-shrink: 0;
+  font-size: 14px !important;
+}
+
+.select-option-label {
+  flex: 1;
+}
+
+.select-option-detail {
+  margin-left: 16px;
+  opacity: 0.65;
+  font-size: var(--ink-font-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Switch and checkbox ---------------------------------------------------------------------- */
+
+.switch,
+.checkbox {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--ink-space-2);
+  padding: 2px 0;
+  border: none;
+  border-radius: var(--ink-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.switch:disabled,
+.checkbox:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.switch-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 30px;
+  height: 16px;
+  border: 1px solid var(--ink-border-strong);
+  border-radius: var(--ink-radius-pill);
+  background: var(--vscode-input-background, var(--ink-surface-sunken));
+  transition:
+    background-color var(--ink-normal) var(--ink-ease),
+    border-color var(--ink-normal) var(--ink-ease);
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+  transition:
+    transform var(--ink-normal) var(--ink-ease),
+    background-color var(--ink-normal) var(--ink-ease);
+}
+
+.switch.on .switch-track {
+  border-color: var(--vscode-button-background, var(--ink-accent));
+  background: var(--vscode-button-background, var(--ink-accent));
+}
+
+.switch.on .switch-thumb {
+  background: var(--vscode-button-foreground, #fff);
+  transform: translateX(14px);
+}
+
+.checkbox-box {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--vscode-checkbox-border, var(--ink-border-strong));
+  border-radius: 3px;
+  background: var(--vscode-checkbox-background, var(--vscode-input-background));
+  transition: background-color var(--ink-fast) var(--ink-ease);
+}
+
+.checkbox.on .checkbox-box {
+  border-color: var(--vscode-button-background, var(--ink-accent));
+  background: var(--vscode-button-background, var(--ink-accent));
+  color: var(--vscode-button-foreground, #fff);
+}
+
+.checkbox-box .codicon {
+  font-size: 14px !important;
+}
+
+/* Segmented control ------------------------------------------------------------------------ */
+
+.segmented {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  height: var(--ink-control);
+  padding: 2px;
+  border: 1px solid var(--ink-border-subtle);
+  border-radius: var(--ink-radius);
+  background: var(--ink-surface-sunken);
+}
+
+.segmented.size-sm {
+  height: var(--ink-control-sm);
+  padding: 1px;
+  border-radius: var(--ink-radius-sm);
+}
+
+.segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: calc(var(--ink-radius) - 2px);
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--ink-fast) var(--ink-ease),
+    color var(--ink-fast) var(--ink-ease);
+}
+
+.segmented.size-sm .segment {
+  padding: 0 8px;
+  border-radius: 3px;
+}
+
+.segment:hover {
+  color: var(--vscode-foreground);
+}
+
+.segment.checked {
+  background: var(--vscode-button-secondaryBackground, var(--ink-hover));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  box-shadow: var(--ink-shadow-sm);
+}
+
+.segment-count {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: var(--ink-radius-pill);
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  font-size: var(--ink-font-xs);
+  line-height: 16px;
+  text-align: center;
+}
+
+.segment-count.error {
+  background: var(--ink-danger);
+  color: #fff;
+}
+
+/* Slider ----------------------------------------------------------------------------------- */
+
+.slider {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  height: var(--ink-control);
+}
+
+.slider.disabled {
+  opacity: 0.45;
+}
+
+.slider > .codicon {
+  color: var(--ink-muted);
+}
+
+.slider-track {
+  position: relative;
+  width: 84px;
+  height: 18px;
+  cursor: pointer;
+  touch-action: none;
+  border-radius: var(--ink-radius-sm);
+}
+
+.slider-track::before,
+.slider-fill {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  height: 4px;
+  border-radius: var(--ink-radius-pill);
+  transform: translateY(-50%);
+}
+
+.slider-track::before {
+  right: 0;
+  background: var(--ink-border-strong);
+}
+
+.slider-fill {
+  background: var(--ink-accent);
+}
+
+.slider-thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--ink-accent);
+  border-radius: 50%;
+  background: var(--vscode-editor-background, #fff);
+  box-shadow: var(--ink-shadow-sm);
+  transform: translate(-50%, -50%);
+  transition: transform var(--ink-fast) var(--ink-ease);
+}
+
+.slider-track:hover .slider-thumb,
+.slider-track:active .slider-thumb {
+  transform: translate(-50%, -50%) scale(1.15);
+}
+
+.slider-value {
+  min-width: 34px;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Swatches and color picker ---------------------------------------------------------------- */
+
+.swatch {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--vscode-foreground, #888) 30%, transparent);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform var(--ink-fast) var(--ink-ease);
+}
+
+.swatch:hover {
+  transform: scale(1.12);
+}
+
+.swatch.small {
+  width: 16px;
+  height: 16px;
+}
+
+.swatch.active {
+  box-shadow:
+    0 0 0 2px var(--ink-surface),
+    0 0 0 3.5px var(--ink-accent);
+}
+
+.color-picker-trigger {
+  background: conic-gradient(
+    from 90deg,
+    #f43f5e,
+    #f59e0b,
+    #84cc16,
+    #06b6d4,
+    #6366f1,
+    #d946ef,
+    #f43f5e
+  );
+}
+
+.color-picker {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 224px;
+  padding: 10px;
+  font-family: var(--vscode-font-family);
+  font-size: var(--ink-font);
+  animation: ink-pop-in var(--ink-normal) var(--ink-ease);
+}
+
+.color-area {
+  position: relative;
+  height: 140px;
+  border-radius: var(--ink-radius-sm);
+  background-image:
+    linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent) !important;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.color-hue {
+  position: relative;
+  height: 12px;
+  border-radius: var(--ink-radius-pill);
+  background: linear-gradient(
+    to right,
+    #f00 0%,
+    #ff0 17%,
+    #0f0 33%,
+    #0ff 50%,
+    #00f 67%,
+    #f0f 83%,
+    #f00 100%
+  );
+  cursor: pointer;
+  touch-action: none;
+}
+
+.color-handle {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 1px 4px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-preview {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--ink-border-strong);
+  border-radius: var(--ink-radius-sm);
+}
+
+.color-hex {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--vscode-input-border, var(--ink-border));
+  border-radius: var(--ink-radius-sm);
+  outline: none;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--ink-font-sm);
+  text-transform: lowercase;
+}
+
+.color-hex:focus {
+  border-color: var(--ink-focus);
+}
+
+.color-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-top: 8px;
+  border-top: 1px solid var(--ink-border-subtle);
+}
+
+/* Chips and badges ------------------------------------------------------------------------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: var(--ink-radius-pill);
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  font-size: var(--ink-font-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.badge.outline {
+  border: 1px solid var(--ink-border-strong);
+  background: transparent;
+  color: var(--ink-muted);
+}
+
+.badge.success {
+  background: color-mix(in srgb, var(--ink-success) 18%, transparent);
+  color: var(--ink-success);
+}
+
+.badge.danger {
+  background: color-mix(in srgb, var(--ink-danger) 18%, transparent);
+  color: var(--ink-danger);
+}
+
+/* Key caps (shortcuts) --------------------------------------------------------------------- */
+
+.keycaps {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 3px;
+}
+
+.keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid var(--vscode-keybindingLabel-border, var(--ink-border-strong));
+  border-radius: var(--ink-radius-sm);
+  background: var(--vscode-keybindingLabel-background, var(--ink-surface-sunken));
+  box-shadow: inset 0 -1px 0 var(--vscode-keybindingLabel-bottomBorder, var(--ink-border-strong));
+  color: var(--vscode-keybindingLabel-foreground, var(--vscode-foreground));
+  font-family: var(--vscode-font-family);
+  font-size: var(--ink-font-xs);
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.keycaps.size-sm .keycap {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-size: 10.5px;
+}
+
+/* Cards ------------------------------------------------------------------------------------ */
+
+.card {
+  border: 1px solid var(--ink-border-subtle);
+  border-radius: var(--ink-radius-lg);
+  background: var(--ink-surface-sunken);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ink-space-3);
+  padding: var(--ink-space-3) var(--ink-space-4);
+  border-bottom: 1px solid var(--ink-border-subtle);
+}
+
+.card-title {
+  margin: 0;
+  font-size: var(--ink-font);
+  font-weight: 600;
+}
+
+.card-body {
+  padding: var(--ink-space-4);
+}
+
+.card-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ink-space-4);
+  padding: var(--ink-space-3) var(--ink-space-4);
+}
+
+.card-row + .card-row {
+  border-top: 1px solid var(--ink-border-subtle);
+}
+
+.card-row-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.card-row-title {
+  font-weight: 500;
+}
+
+.card-row-description {
+  margin-top: 2px;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-sm);
+}
+
+/* Menus and popovers ----------------------------------------------------------------------- */
 
 .menu,
 .popover {
@@ -79,11 +1008,34 @@
   min-width: 200px;
   max-width: 420px;
   padding: 4px;
-  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
-  color: var(--vscode-menu-foreground, var(--vscode-foreground));
-  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, transparent));
-  border-radius: 6px;
-  box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+  animation: ink-pop-in var(--ink-normal) var(--ink-ease);
+}
+
+.menu {
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+}
+
+/* Submenus open without the pop animation, so they don't jump while the pointer moves. */
+.menu .menu {
+  animation: none;
+}
+
+.menu-item.expanded:not(:focus) {
+  background: var(--ink-hover);
+}
+
+.menu-image {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.menu-arrow {
+  margin-left: 12px;
+  margin-right: -2px;
+  opacity: 0.8;
 }
 
 .menu-item {
@@ -94,8 +1046,10 @@
   height: 26px;
   padding: 0 8px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--ink-radius-sm);
   background: transparent;
+  color: inherit;
+  font: inherit;
   text-align: left;
   cursor: pointer;
 }
@@ -128,10 +1082,7 @@
 .menu-separator {
   height: 1px;
   margin: 4px 6px;
-  background: var(
-    --vscode-menu-separatorBackground,
-    var(--vscode-widget-border, rgba(128, 128, 128, 0.3))
-  );
+  background: var(--vscode-menu-separatorBackground, var(--ink-border));
 }
 
 /* Toast ------------------------------------------------------------------------------------ */
@@ -141,18 +1092,19 @@
   bottom: 16px;
   left: 50%;
   z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   max-width: calc(100% - 32px);
-  padding: 8px 16px;
+  padding: 8px 14px;
   transform: translateX(-50%);
-  background: var(--vscode-notifications-background, var(--vscode-editorWidget-background));
+  background: var(--vscode-notifications-background, var(--ink-surface));
   color: var(--vscode-notifications-foreground, var(--vscode-foreground));
-  border: 1px solid var(--vscode-notifications-border, var(--vscode-widget-border, transparent));
-  border-radius: 6px;
-  box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
-  animation: toast-in 0.15s ease-out;
+  border: 1px solid var(--vscode-notifications-border, var(--ink-border));
+  border-radius: var(--ink-radius);
+  box-shadow: var(--ink-shadow-lg);
+  animation: toast-in var(--ink-normal) var(--ink-ease);
 }
-
-/* Internal pages: lists ------------------------------------------------------------------------ */
 
 .header-actions,
 .button-row {
@@ -162,12 +1114,7 @@
   gap: 8px;
 }
 
-.button.small {
-  height: 24px;
-  padding: 0 8px;
-}
-
-/* Drawing -------------------------------------------------------------------------------------- */
+/* Drawing ---------------------------------------------------------------------------------- */
 
 .draw-toolbar {
   display: flex;
@@ -176,9 +1123,9 @@
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
-  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
-  border-top: 1px solid var(--vscode-widget-border, transparent);
-  border-bottom: 1px solid var(--vscode-widget-border, transparent);
+  background: var(--ink-surface);
+  border-top: 1px solid var(--ink-border);
+  border-bottom: 1px solid var(--ink-border);
 }
 
 .draw-group {
@@ -186,62 +1133,16 @@
   align-items: center;
   gap: 2px;
   padding-right: 6px;
-  border-right: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.25));
+  border-right: 1px solid var(--ink-border-subtle);
 }
 
 .draw-group.colors {
-  gap: 4px;
-}
-
-.swatch {
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 1px solid rgba(128, 128, 128, 0.6);
-  border-radius: 50%;
-  cursor: pointer;
-}
-
-.swatch.active {
-  outline: 2px solid var(--vscode-focusBorder);
-  outline-offset: 1px;
-}
-
-.custom-color {
-  position: relative;
-  overflow: hidden;
-  background: conic-gradient(red, yellow, lime, aqua, blue, magenta, red);
-}
-
-.custom-color input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.draw-range {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.draw-range input {
-  width: 70px;
-}
-
-.draw-toolbar select {
-  height: 24px;
-  border: 1px solid var(--vscode-dropdown-border, transparent);
-  background: var(--vscode-dropdown-background);
-  color: var(--vscode-dropdown-foreground);
-  font: inherit;
+  gap: 6px;
+  padding: 0 8px 0 4px;
 }
 
 .draw-capture {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  margin-left: 2px;
 }
 
 .draw-close {
@@ -263,10 +1164,36 @@
   min-width: 160px;
   min-height: 1.6em;
   padding: 2px 4px;
-  border: 1px dashed var(--vscode-focusBorder);
+  border: 1px dashed var(--ink-accent);
   background: rgba(255, 255, 255, 0.85);
   font-family: system-ui, sans-serif;
   font-weight: 600;
   resize: both;
   outline: none;
+}
+
+/* Motion ----------------------------------------------------------------------------------- */
+
+@keyframes ink-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.985);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .select-list,
+  .color-picker,
+  .menu,
+  .popover,
+  .toast {
+    animation: none;
+  }
 }

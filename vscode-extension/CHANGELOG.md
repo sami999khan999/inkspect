@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+### Shortcuts for everything
+
+- **Every action has a shortcut, and every shortcut can be changed** in the new **Shortcuts** view of the Browser sidebar: search, click a key to record a new one, add a second key, reset, and fix conflicts. Export and import them as JSON.
+- **Each mode has a key**, and its own keys while it is on:
+  - element picker Ctrl+Shift+C (↑/↓ parent and child, Enter copy, S screenshot, A send to agent)
+  - draw Ctrl+Shift+D (a letter per tool, 1–9 colors, [ ] width, F fill, Enter screenshot)
+  - screenshot Ctrl+Shift+S (V visible, F full page, R region, E element, D drawing area)
+  - console Ctrl+Shift+J and device Ctrl+Shift+M (with Alt+ keys, so the page keeps its keys)
+- **Quick actions** (Ctrl+K) lists every action with its key; **Ctrl+/** (or **?** in a mode) shows the keys of the current mode. Tooltips, menus and hints always show your keys.
+- **Your shortcuts follow you:** they are a setting (VS Code Settings Sync), and the paired Inkspect browser extension keeps them in your browser's sync storage too, so a new machine gets them after pairing. Changes made in VS Code (in the Shortcuts view, in settings.json or by Settings Sync) always win over the browser's older copy, even when another device's clock runs ahead.
+- The Shortcuts view and the new tab page show keys as key caps; the view shows the sync status, pins each mode's header while scrolling, and marks changed and clashing shortcuts.
+- The browser's keys are no longer VS Code keybindings (remapped keys would have fired twice); change them in the Shortcuts view.
+
+### Send to Agent
+
+- **Every screenshot is copied to the clipboard**, including element screenshots (Alt+click) and screenshots from the browser extension. `vscodeBrowser.screenshots.saveFile` decides whether a file is also saved (it replaces `screenshots.defaultAction`).
+- **Send to Agent** replaces Send to Chat and Send to Terminal: it types into the agent running in a terminal (Claude Code, Codex, Gemini CLI...) without pressing Enter. The only agent terminal, or the one you chose last, is used without asking; **Browser: Choose Agent Terminal** changes it. Long text is written to `.vscode-browser/context/` and its path is typed. Set `vscodeBrowser.agent.sendTarget` to `chat` to use VS Code chat instead.
+
+### New modes (the Tools button, or their keys)
+
+- **Measure** (Ctrl+Shift+U): the box model and size of any element; click to pin it and see the distances to others. G shows a grid, C copies the measurements.
+- **Eyedropper** (Ctrl+Shift+I): a magnifier; click to copy the color as hex, rgb() or hsl().
+- **Accessibility check** (Ctrl+Shift+A): marks missing alt text, unnamed buttons and links, unlabeled fields and low contrast, and shows the tab order. Copy the report or send it to the agent.
+- **CSS tweak** (Ctrl+Shift+E): click an element and edit its styles live; copy or send the changes as a CSS rule. Leaving puts the page back.
+- **Design overlay** (Ctrl+Shift+O): lay a design image over the page at any opacity, nudge it with Alt+arrows, compare with a difference blend.
+- **Record** (Ctrl+Alt+R): record the page as a video (WebM), saved next to the screenshots and offered to the agent.
+
+### Redesigned interface
+
+- **One design system** for the whole browser: shared tokens for sizes, radii, spacing, surfaces, shadows and motion, and custom controls in place of the native ones.
+  - Themed dropdowns with groups, check marks, sizes and type-ahead (device, throttling, zoom, color scheme, history range, bookmark folders, line style).
+  - Switches, checkboxes, segmented controls, sliders, text fields with icons and clear buttons, and buttons with icons and variants.
+  - A color picker with a saturation/brightness area, a hue bar, a hex field and presets, replacing the system color dialog in drawing mode.
+  - Everything works with the keyboard and follows light, dark and high-contrast themes.
+- **Pages** (`vb://settings`, history, bookmarks, downloads, extensions) share a header, cards, empty states and site badges. Settings is a list of cards; extensions have an on/off switch and a pin toggle.
+- **Device, drawing and developer toolbars** are more compact and consistent; the console/network switch shows error counts.
+- **Engine and crash screens, page dialogs, the find bar and the bookmark editor** have a cleaner layout. Dialogs put the main button last.
+- **Bookmarks bar like Chrome's:** bookmarks that don't fit go into a **»** menu pinned to the right edge, and folders open as cascading submenus (hover or Right arrow) with favicons. Untitled bookmarks show their address.
+- **Colors work in every theme:** accents follow the theme's button color instead of its focus border (dim in many themes), and secondary text stays readable in low-contrast themes.
+
+### Browser link pairing prompt
+
+- When an unpaired Inkspect browser extension connects, VS Code shows "<browser> wants to sync bookmarks with VS Code" with a **Pair** button. The connection stays open for pairing instead of being dropped.
+- **Pairing works in every VS Code window.** Only one window serves the link, but the offer appears in whichever window you focus (once), and **Browser: Connect Browser Extension** works from any window. Before, both only worked in the serving window, which was often a different window in the background.
+- When the window that serves the link closes, another open window takes it over within 15 seconds.
+- The "VS Code Browser" log records browsers connecting, pairing offers and pairings.
+
 ### Browser extension link
 
 - **Link to the Inkspect browser extension.** A WebSocket server on 127.0.0.1:47110 lets the browser extension (Chrome, Edge, Brave, Firefox) link to VS Code.

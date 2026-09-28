@@ -1,5 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { findNode, folderList, type BookmarkRoots } from '@shared/bookmarks';
+import { Button } from '@inkspect/shared/ui/Button';
+import { Field } from '@inkspect/shared/ui/Field';
+import { isInPopup } from '@inkspect/shared/ui/popover';
+import { Select } from '@inkspect/shared/ui/Select';
+import { TextField } from '@inkspect/shared/ui/TextField';
 import { postToHost } from '../vscode';
 
 interface BookmarkEditorProps {
@@ -30,7 +35,7 @@ export function BookmarkEditor({ roots, nodeId, anchor, onClose }: BookmarkEdito
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node)) onClose();
+      if (!ref.current?.contains(event.target as Node) && !isInPopup(event)) onClose();
     };
     window.addEventListener('pointerdown', onPointerDown, true);
     return () => window.removeEventListener('pointerdown', onPointerDown, true);
@@ -66,40 +71,33 @@ export function BookmarkEditor({ roots, nodeId, anchor, onClose }: BookmarkEdito
       }}
     >
       <div className="popover-header">
-        {node?.type === 'folder' ? 'Edit folder' : node ? 'Bookmark' : 'Saving bookmark...'}
+        <span className="codicon codicon-star-full" aria-hidden="true" />
+        {node?.type === 'folder' ? 'Edit folder' : node ? 'Bookmark added' : 'Saving bookmark…'}
       </div>
-      <label className="field">
-        <span>Name</span>
-        <input
-          type="text"
+      <Field label="Name">
+        <TextField
           value={currentTitle}
           disabled={!node}
           autoFocus
           onFocus={(event) => event.target.select()}
           onChange={(event) => setTitle(event.target.value)}
         />
-      </label>
-      <label className="field">
-        <span>Folder</span>
-        <select
+      </Field>
+      <Field label="Folder">
+        <Select
+          label="Folder"
           value={currentFolder}
           disabled={!node}
-          onChange={(event) => setFolder(event.target.value)}
-        >
-          {folderList(roots)
+          onChange={setFolder}
+          options={folderList(roots)
             .filter((f) => f.id !== node?.id)
-            .map((f) => (
-              <option key={f.id} value={f.id}>
-                {'  '.repeat(f.depth)}
-                {f.title}
-              </option>
-            ))}
-        </select>
-      </label>
+            .map((f) => ({ value: f.id, label: f.title, icon: 'folder', indent: f.depth }))}
+        />
+      </Field>
       <div className="dialog-buttons">
-        <button
-          type="button"
-          className="button secondary"
+        <Button
+          variant="danger"
+          icon="trash"
           disabled={!node}
           onClick={() => {
             if (node) postToHost({ type: 'bookmark', action: 'remove', id: node.id });
@@ -107,10 +105,10 @@ export function BookmarkEditor({ roots, nodeId, anchor, onClose }: BookmarkEdito
           }}
         >
           Remove
-        </button>
-        <button type="submit" className="button primary">
+        </Button>
+        <Button type="submit" variant="primary">
           Done
-        </button>
+        </Button>
       </div>
     </form>
   );

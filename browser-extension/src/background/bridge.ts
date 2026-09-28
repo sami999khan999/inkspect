@@ -148,12 +148,13 @@ export class BridgeClient {
     let opened = false;
     socket.onopen = () => {
       opened = true;
-      this.delay = 1000;
-      if (this.token && this.client) {
-        socket.send(encode({ type: 'hello', client: this.client, token: this.token }));
-      } else {
-        this.setStatus({ state: 'unpaired' });
+      // The retry delay resets only once VS Code accepts us (see handle), so a server that keeps
+      // closing the connection gets slower and slower retries instead of one per second.
+      if (this.client) {
+        // Without a token this announces an unpaired browser, so VS Code can offer to pair it.
+        socket.send(encode({ type: 'hello', client: this.client, token: this.token ?? '' }));
       }
+      if (!this.token) this.setStatus({ state: 'unpaired' });
       // Keeps the connection (and Chrome's service worker) alive while VS Code runs.
       clearInterval(this.keepAlive);
       this.keepAlive = setInterval(() => this.send({ type: 'ping' }), 20_000);
@@ -192,6 +193,7 @@ export class BridgeClient {
       await chrome.storage.local.set({ token: message.token });
       this.pairWaiter?.(message);
     } else if (message.type === 'welcome') {
+      this.delay = 1000;
       this.setStatus({ state: 'connected', peer: message.peer });
     } else if (message.type === 'error') {
       if (message.code === 'unpaired') {

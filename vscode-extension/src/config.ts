@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { DEFAULT_BRIDGE_PORT } from '@inkspect/shared/bridge';
 import { ALL_FIELDS, type DetailField } from './shared/elementInfo';
+import { sanitizeOverrides, type ShortcutOverrides } from './shared/shortcuts';
 import { DEFAULT_SEARCH_URL } from './shared/url';
 
 const SEARCH_ENGINES: Record<string, string> = {
@@ -26,7 +27,8 @@ export interface BrowserConfig {
   sessionRestore: 'always' | 'never';
   screenshotsDirectory: string;
   screenshotFormat: 'png' | 'jpeg' | 'webp';
-  screenshotAction: 'saveAndCopy' | 'save' | 'copy' | 'ask';
+  /** Also save screenshots as files (they are always copied). */
+  screenshotSaveFile: boolean;
   annotationPadding: number;
   inspectorCopyFormat: 'markdown' | 'json' | 'selector' | 'html';
   inspectorFields: DetailField[];
@@ -35,6 +37,10 @@ export interface BrowserConfig {
   drawingClearOnNavigation: boolean;
   devtoolsEnabled: boolean;
   agentConfirmNavigation: boolean;
+  agentSendTarget: 'terminal' | 'chat';
+  shortcuts: ShortcutOverrides;
+  shortcutsUpdated: number;
+  recordMaxSeconds: number;
   mcpEnabled: boolean;
   mcpPort: number;
   bridgeEnabled: boolean;
@@ -66,11 +72,7 @@ export function getConfig(): BrowserConfig {
     sessionRestore: c.get<string>('session.restore', 'always') === 'never' ? 'never' : 'always',
     screenshotsDirectory: c.get<string>('screenshots.directory', '').trim(),
     screenshotFormat: oneOf(c.get('screenshots.format'), ['png', 'jpeg', 'webp'] as const, 'png'),
-    screenshotAction: oneOf(
-      c.get('screenshots.defaultAction'),
-      ['saveAndCopy', 'save', 'copy', 'ask'] as const,
-      'saveAndCopy',
-    ),
+    screenshotSaveFile: screenshotSaveFile(c),
     annotationPadding: clamp(c.get<number>('screenshots.annotationPadding', 40), 0, 500),
     inspectorCopyFormat: oneOf(
       c.get('inspector.copyFormat'),
@@ -85,6 +87,10 @@ export function getConfig(): BrowserConfig {
     drawingClearOnNavigation: c.get<boolean>('drawing.clearOnNavigation', true),
     devtoolsEnabled: c.get<boolean>('devtools.enabled', true),
     agentConfirmNavigation: c.get<boolean>('agent.confirmNavigation', true),
+    agentSendTarget: oneOf(c.get('agent.sendTarget'), ['terminal', 'chat'] as const, 'terminal'),
+    shortcuts: sanitizeOverrides(c.get('shortcuts')),
+    shortcutsUpdated: c.get<number>('shortcutsUpdated', 0),
+    recordMaxSeconds: clamp(c.get<number>('record.maxSeconds', 60), 5, 600),
     mcpEnabled: c.get<boolean>('mcp.enabled', false),
     mcpPort: c.get<number>('mcp.port', 0),
     bridgeEnabled: c.get<boolean>('bridge.enabled', true),
@@ -96,6 +102,17 @@ export function getConfig(): BrowserConfig {
 
 function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
   return options.includes(value as T) ? (value as T) : fallback;
+}
+
+/**
+ * `screenshots.saveFile`, or for settings made before it existed, the old
+ * `screenshots.defaultAction` ("copy" meant: don't save a file).
+ */
+function screenshotSaveFile(c: vscode.WorkspaceConfiguration): boolean {
+  const set = c.inspect<boolean>('screenshots.saveFile');
+  const value = set?.workspaceFolderValue ?? set?.workspaceValue ?? set?.globalValue;
+  if (typeof value === 'boolean') return value;
+  return c.get<string>('screenshots.defaultAction') !== 'copy';
 }
 
 function clamp(value: number, min: number, max: number): number {

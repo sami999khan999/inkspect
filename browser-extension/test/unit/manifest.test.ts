@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -15,22 +16,26 @@ describe('manifests', () => {
     });
   });
 
-  it('builds a Chrome manifest with a service worker and the debugger permission', () => {
+  it('builds a Chrome manifest for bookmark sync only (the toolbar is switched off)', () => {
     const manifest = buildManifest(root, 'chrome', { version: '1.2.3' });
     expect(manifest.version).toBe('1.2.3');
     expect(manifest.background).toEqual({ service_worker: 'background.js' });
-    expect(manifest.permissions).toEqual(
-      expect.arrayContaining(['activeTab', 'scripting', 'bookmarks', 'debugger']),
-    );
-    expect(manifest.commands['toggle-toolbar'].suggested_key.default).toBe('Alt+Shift+I');
+    expect(manifest.permissions).toEqual(['storage', 'bookmarks']);
+    expect(manifest.commands).toBeUndefined();
     expect(manifest.host_permissions).toBeUndefined();
+  });
+
+  it('keeps the disabled toolbar entries for later', () => {
+    const toolbar = JSON.parse(readFileSync(join(root, 'manifest', 'toolbar.json'), 'utf8'));
+    expect(toolbar.commands['toggle-toolbar'].suggested_key.default).toBe('Alt+Shift+I');
+    expect(toolbar.permissions).toEqual(expect.arrayContaining(['activeTab', 'scripting']));
   });
 
   it('builds a Firefox manifest with background scripts, a gecko id and no debugger', () => {
     const manifest = buildManifest(root, 'firefox', { version: '1.2.3' });
     expect(manifest.background).toEqual({ scripts: ['background.js'] });
     expect(manifest.browser_specific_settings.gecko.id).toMatch(/@/);
-    expect(manifest.permissions).not.toContain('debugger');
+    expect(manifest.permissions).toEqual(['storage', 'bookmarks']);
   });
 
   it('gives the test build access to all pages', () => {

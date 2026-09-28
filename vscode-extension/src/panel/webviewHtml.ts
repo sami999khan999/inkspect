@@ -1,11 +1,15 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 
-/** HTML that loads the React app built into `dist/webview`. */
-export function renderWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+/** HTML that loads one of the React apps built into `dist/webview` (`index`: the browser). */
+export function renderWebviewHtml(
+  webview: vscode.Webview,
+  extensionUri: vscode.Uri,
+  entry: 'index' | 'shortcuts' = 'index',
+): string {
   const root = vscode.Uri.joinPath(extensionUri, 'dist', 'webview');
-  const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(root, 'index.js'));
-  const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(root, 'index.css'));
+  const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(root, `${entry}.js`));
+  const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(root, `${entry}.css`));
   const nonce = randomBytes(16).toString('base64');
   const csp = [
     `default-src 'none'`,
@@ -23,7 +27,7 @@ export function renderWebviewHtml(webview: vscode.Webview, extensionUri: vscode.
   <meta http-equiv="Content-Security-Policy" content="${csp}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${styleUri}">
-  <title>Browser</title>
+  <title>${entry === 'shortcuts' ? 'Shortcuts' : 'Browser'}</title>
 </head>
 <body>
   <div id="root"></div>
