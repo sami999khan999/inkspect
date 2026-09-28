@@ -1,7 +1,8 @@
 import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
-import { lastScreenshotPath } from './features/screenshots';
-import { sendPathToTerminal } from './features/terminalSend';
+import { sendContextItem } from './agent/chat';
+import { contextTray } from './agent/contextTray';
+import { getAgentTerminals } from './features/terminalSend';
 import { getConfig } from './config';
 import { BrowserPanel, type Services } from './panel/BrowserPanel';
 import { clearBrowsingData, exportBookmarks, importBookmarks } from './panel/browserData';
@@ -180,6 +181,11 @@ export function registerCommands(services: Services): vscode.Disposable {
       extensions: services.extensions.list(),
       history: services.history.items.slice(0, 50),
       panels: BrowserPanel.all().map((panel) => panel.debugState()),
+      context:
+        contextTray()
+          ?.all()
+          .map((item) => contextTray()!.view(item)) ?? [],
+      agents: getAgentTerminals().targets(),
     })),
     vscode.commands.registerCommand(
       'vscodeBrowser.nextTab',
@@ -209,12 +215,30 @@ export function registerCommands(services: Services): vscode.Disposable {
       ),
     ),
     vscode.commands.registerCommand('vscodeBrowser.screenshot.sendToTerminal', async () => {
-      const path = lastScreenshotPath();
-      if (!path) {
+      const item = contextTray()
+        ?.all()
+        .find((i) => i.kind === 'screenshot');
+      if (!item) {
         void vscode.window.showInformationMessage('Take a screenshot first.');
-        return false;
+        return undefined;
       }
-      return sendPathToTerminal(path);
+      return sendContextItem(item);
+    }),
+    // Sends what was captured last (an element, a screenshot, errors...) to the agent.
+    vscode.commands.registerCommand('vscodeBrowser.sendLatestContext', async () => {
+      const item = contextTray()?.latest();
+      if (!item) {
+        void vscode.window.showInformationMessage(
+          'Nothing captured yet. Pick an element, take a screenshot or copy the console errors first.',
+        );
+        return undefined;
+      }
+      const sent = await sendContextItem(item);
+      if (sent) BrowserPanel.active()?.toast(`Sent "${item.title}" to ${sent}`);
+      return sent;
+    }),
+    vscode.commands.registerCommand('vscodeBrowser.chooseAgentTerminal', async () => {
+      await getAgentTerminals().chooseTerminal();
     }),
     vscode.commands.registerCommand(
       'vscodeBrowser.sendPageContextToChat',

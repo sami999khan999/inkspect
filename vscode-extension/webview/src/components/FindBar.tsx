@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { IconButton } from '@inkspect/shared/ui/IconButton';
+import { TextField } from '@inkspect/shared/ui/TextField';
 import { postToHost } from '../vscode';
 
 interface FindBarProps {
@@ -38,13 +40,14 @@ export function FindBar({ tabId, result, focusSignal, onClose }: FindBarProps) {
 
   return (
     <div className="find-bar" role="search">
-      <input
+      <TextField
         ref={inputRef}
-        type="text"
+        size="sm"
+        icon="search"
+        className="find-input"
         value={query}
         placeholder="Find in page"
         aria-label="Find in page"
-        spellCheck={false}
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
@@ -55,49 +58,36 @@ export function FindBar({ tabId, result, focusSignal, onClose }: FindBarProps) {
             close();
           }
         }}
+        trailing={
+          <>
+            <span className="find-count" aria-live="polite">
+              {query ? (result?.count ? `${result.index} of ${result.count}` : 'No results') : ''}
+            </span>
+            <IconButton
+              icon="case-sensitive"
+              label="Match case"
+              className="find-option"
+              active={caseSensitive}
+              onClick={() => setCaseSensitive(!caseSensitive)}
+            />
+          </>
+        }
       />
-      <span className="find-count" aria-live="polite">
-        {query ? (result?.count ? `${result.index} of ${result.count}` : 'No results') : ''}
-      </span>
-      <button
-        type="button"
-        className={`icon-button${caseSensitive ? ' active' : ''}`}
-        title="Match case"
-        aria-label="Match case"
-        aria-pressed={caseSensitive}
-        onClick={() => setCaseSensitive(!caseSensitive)}
-      >
-        <span className="codicon codicon-case-sensitive" aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className="icon-button"
-        title="Previous match (Shift+Enter)"
-        aria-label="Previous match"
+      <IconButton
+        icon="arrow-up"
+        label="Previous match (Shift+Enter)"
+        className="small"
         disabled={!result?.count}
         onClick={() => step('previous')}
-      >
-        <span className="codicon codicon-arrow-up" aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className="icon-button"
-        title="Next match (Enter)"
-        aria-label="Next match"
+      />
+      <IconButton
+        icon="arrow-down"
+        label="Next match (Enter)"
+        className="small"
         disabled={!result?.count}
         onClick={() => step('next')}
-      >
-        <span className="codicon codicon-arrow-down" aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className="icon-button"
-        title="Close (Escape)"
-        aria-label="Close find bar"
-        onClick={close}
-      >
-        <span className="codicon codicon-close" aria-hidden="true" />
-      </button>
+      />
+      <IconButton icon="close" label="Close (Escape)" className="small" onClick={close} />
     </div>
   );
 }

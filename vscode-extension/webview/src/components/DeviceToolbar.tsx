@@ -17,6 +17,10 @@ import {
   type NetworkPreset,
 } from '@shared/devices';
 import type { TabState } from '@shared/protocol';
+import { Button } from '@inkspect/shared/ui/Button';
+import { IconButton } from '@inkspect/shared/ui/IconButton';
+import { Select, type SelectOption } from '@inkspect/shared/ui/Select';
+import { TextField } from '@inkspect/shared/ui/TextField';
 import { postToHost } from '../vscode';
 
 interface DeviceToolbarProps {
@@ -53,149 +57,148 @@ export function DeviceToolbar({ tab, custom, available }: DeviceToolbarProps) {
 
   const selected = responsive ? 'responsive' : (device.presetId ?? 'custom');
 
+  const deviceOptions: SelectOption[] = [
+    { value: 'responsive', label: 'Responsive', icon: 'screen-full' },
+    ...(selected === 'custom' ? [{ value: 'custom', label: 'Custom size', icon: 'edit' }] : []),
+    ...[...GROUPS, 'Custom' as const].flatMap((group) =>
+      presets
+        .filter((p) => p.group === group)
+        .map((p) => ({
+          value: p.id,
+          label: p.name,
+          detail: `${p.width}×${p.height}`,
+          group,
+        })),
+    ),
+  ];
+
   return (
     <div className="device-toolbar" role="toolbar" aria-label="Device emulation">
-      <select
+      <Select
+        size="sm"
+        label="Device"
+        className="device-select"
         value={selected}
-        aria-label="Device"
-        onChange={(event) => {
-          const value = event.target.value;
+        options={deviceOptions}
+        onChange={(value) => {
           if (value === 'responsive') update({ device: responsiveDevice(available) });
           else if (value !== 'custom') {
             const preset = presets.find((p) => p.id === value);
             if (preset) update({ device: presetToDevice(preset) });
           }
         }}
-      >
-        <option value="responsive">Responsive</option>
-        {selected === 'custom' && <option value="custom">Custom size</option>}
-        {[...GROUPS, 'Custom' as const].map((group) => {
-          const items = presets.filter((p) => p.group === group);
-          return items.length ? (
-            <optgroup key={group} label={group}>
-              {items.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </optgroup>
-          ) : null;
-        })}
-      </select>
-      <SizeInput
-        label="Width"
-        value={device?.width ?? responsiveDevice(available).width}
-        onCommit={(width) => updateDevice({ width })}
       />
-      <span className="muted">×</span>
-      <SizeInput
-        label="Height"
-        value={device?.height ?? responsiveDevice(available).height}
-        onCommit={(height) => updateDevice({ height })}
-      />
-      <select
-        aria-label="Device pixel ratio"
-        title="Device pixel ratio"
-        value={device?.dpr ?? ''}
+      <div className="device-size">
+        <SizeInput
+          label="Width"
+          value={device?.width ?? responsiveDevice(available).width}
+          onCommit={(width) => updateDevice({ width })}
+        />
+        <span className="muted" aria-hidden="true">
+          ×
+        </span>
+        <SizeInput
+          label="Height"
+          value={device?.height ?? responsiveDevice(available).height}
+          onCommit={(height) => updateDevice({ height })}
+        />
+      </div>
+      <Select
+        size="sm"
+        appearance="quiet"
+        label="Device pixel ratio"
+        placeholder="DPR"
         disabled={!device}
-        onChange={(event) => updateDevice({ dpr: Number(event.target.value) })}
-      >
-        {!device && <option value="">DPR</option>}
-        {DPR_OPTIONS.map((dpr) => (
-          <option key={dpr} value={dpr}>
-            {dpr}x
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        className="icon-button"
-        title="Rotate"
-        aria-label="Rotate"
+        value={device ? String(device.dpr) : undefined}
+        options={DPR_OPTIONS.map((dpr) => ({
+          value: String(dpr),
+          label: `${dpr}x`,
+          detail: 'DPR',
+        }))}
+        renderValue={(option) => option.label}
+        onChange={(dpr) => updateDevice({ dpr: Number(dpr) })}
+      />
+      <IconButton
+        icon="sync"
+        label="Rotate"
+        className="small"
         disabled={!device}
         onClick={() => device && update({ device: rotate(device) })}
-      >
-        <span className="codicon codicon-sync" aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className={`icon-button${device?.touch ? ' active' : ''}`}
-        title="Touch and mobile viewport"
-        aria-label="Touch and mobile viewport"
-        aria-pressed={!!device?.touch}
+      />
+      <IconButton
+        icon="hubot"
+        label="Touch and mobile viewport"
+        className="small"
+        active={!!device?.touch}
         disabled={!device}
         onClick={() =>
           device && updateDevice({ ...device, touch: !device.touch, mobile: !device.touch })
         }
-      >
-        <span className="codicon codicon-hubot" aria-hidden="true" />
-      </button>
-      <select
-        aria-label="Zoom"
-        title="Zoom"
-        value={String(emulation.scale)}
+      />
+      <Select
+        size="sm"
+        appearance="quiet"
+        label="Zoom"
+        icon="zoom-in"
         disabled={!device}
-        onChange={(event) =>
-          update({ scale: event.target.value === 'fit' ? 'fit' : Number(event.target.value) })
-        }
-      >
-        {SCALE_OPTIONS.map((scale) => (
-          <option key={scale} value={String(scale)}>
-            {scale === 'fit' ? 'Fit' : `${scale * 100}%`}
-          </option>
-        ))}
-      </select>
-      <span className="device-separator" />
-      <select
-        aria-label="Network throttling"
-        title="Network throttling"
+        value={String(emulation.scale)}
+        options={SCALE_OPTIONS.map((scale) => ({
+          value: String(scale),
+          label: scale === 'fit' ? 'Fit to window' : `${scale * 100}%`,
+        }))}
+        renderValue={(option) => (option.value === 'fit' ? 'Fit' : option.label)}
+        onChange={(value) => update({ scale: value === 'fit' ? 'fit' : Number(value) })}
+      />
+      <span className="toolbar-separator" />
+      <Select
+        size="sm"
+        appearance="quiet"
+        label="Network throttling"
+        icon="radio-tower"
         value={emulation.network}
-        onChange={(event) => update({ network: event.target.value as NetworkPreset })}
-      >
-        {Object.entries(NETWORK_CONDITIONS).map(([id, preset]) => (
-          <option key={id} value={id}>
-            {preset.label}
-          </option>
-        ))}
-      </select>
-      <select
-        aria-label="CPU throttling"
-        title="CPU throttling"
-        value={emulation.cpu}
-        onChange={(event) => update({ cpu: Number(event.target.value) })}
-      >
-        {CPU_RATES.map((rate) => (
-          <option key={rate} value={rate}>
-            {rate === 1 ? 'CPU: normal' : `CPU: ${rate}x slower`}
-          </option>
-        ))}
-      </select>
-      <select
-        aria-label="Color scheme"
-        title="prefers-color-scheme"
+        options={Object.entries(NETWORK_CONDITIONS).map(([id, preset]) => ({
+          value: id as NetworkPreset,
+          label: preset.label,
+        }))}
+        onChange={(network) => update({ network })}
+      />
+      <Select
+        size="sm"
+        appearance="quiet"
+        label="CPU throttling"
+        icon="pulse"
+        value={String(emulation.cpu)}
+        options={CPU_RATES.map((rate) => ({
+          value: String(rate),
+          label: rate === 1 ? 'No CPU throttling' : `${rate}x slower`,
+        }))}
+        renderValue={(option) => (option.value === '1' ? 'CPU' : option.label)}
+        onChange={(cpu) => update({ cpu: Number(cpu) })}
+      />
+      <Select
+        size="sm"
+        appearance="quiet"
+        label="Color scheme (prefers-color-scheme)"
+        icon="color-mode"
         value={emulation.colorScheme}
-        onChange={(event) =>
-          update({ colorScheme: event.target.value as EmulationSettings['colorScheme'] })
-        }
-      >
-        <option value="default">Theme: page default</option>
-        <option value="light">Theme: light</option>
-        <option value="dark">Theme: dark</option>
-      </select>
-      <button
-        type="button"
-        className={`icon-button${emulation.print ? ' active' : ''}`}
-        title="Emulate print media"
-        aria-label="Emulate print media"
-        aria-pressed={emulation.print}
+        options={[
+          { value: 'default', label: 'Page default' },
+          { value: 'light', label: 'Light' },
+          { value: 'dark', label: 'Dark' },
+        ]}
+        onChange={(colorScheme) => update({ colorScheme })}
+      />
+      <IconButton
+        icon="file-pdf"
+        label="Emulate print media"
+        className="small"
+        active={emulation.print}
         onClick={() => update({ print: !emulation.print })}
-      >
-        <span className="codicon codicon-file-pdf" aria-hidden="true" />
-      </button>
+      />
       {device && (!device.presetId || responsive) && !saving && (
-        <button type="button" className="button secondary small" onClick={() => setSaving(true)}>
+        <Button size="sm" variant="ghost" icon="save" onClick={() => setSaving(true)}>
           Save device
-        </button>
+        </Button>
       )}
       {saving && device && (
         <form
@@ -210,27 +213,32 @@ export function DeviceToolbar({ tab, custom, available }: DeviceToolbarProps) {
             setSaving(false);
           }}
         >
-          <input
+          <TextField
+            size="sm"
             autoFocus
-            placeholder="Device name"
+            placeholder={`${device.width}×${device.height}`}
             aria-label="Device name"
             value={name}
             onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => event.key === 'Escape' && setSaving(false)}
           />
-          <button type="submit" className="button primary small">
+          <Button type="submit" size="sm" variant="primary">
             Save
-          </button>
+          </Button>
+          <IconButton
+            icon="close"
+            label="Cancel"
+            className="small"
+            onClick={() => setSaving(false)}
+          />
         </form>
       )}
-      <button
-        type="button"
-        className="icon-button device-close"
-        title="Close device toolbar"
-        aria-label="Close device toolbar"
+      <IconButton
+        icon="close"
+        label="Close device toolbar"
+        className="small device-close"
         onClick={() => update({ enabled: false })}
-      >
-        <span className="codicon codicon-close" aria-hidden="true" />
-      </button>
+      />
     </div>
   );
 }
@@ -258,8 +266,10 @@ function SizeInput({
     }
   };
   return (
-    <input
+    <TextField
+      size="sm"
       type="number"
+      inputMode="numeric"
       min={MIN_DEVICE_SIZE}
       max={MAX_DEVICE_SIZE}
       aria-label={label}

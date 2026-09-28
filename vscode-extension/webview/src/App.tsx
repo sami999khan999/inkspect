@@ -9,6 +9,7 @@ import {
   type ShapeStyle,
 } from '@shared/annotations';
 import { emptyRoots, type BookmarkRoots } from '@shared/bookmarks';
+import { SHORTCUT_ACTIONS, type ShortcutScope } from '@shared/shortcuts';
 import type { DevicePreset } from '@shared/devices';
 import type { HistoryItem, Suggestion } from '@shared/history';
 import type { ConsoleEntry, NetworkEntry } from '@shared/devtools';
@@ -39,8 +40,23 @@ import { Toolbar } from './components/Toolbar';
 import { Viewport, type ViewportMapper, type ViewportMode } from './components/Viewport';
 import { compositeScreenshot } from './drawing/composite';
 import { DrawingLayer } from './drawing/DrawingLayer';
-import { captureMenu, DrawToolbar, TOOL_KEYS, type CaptureMode } from './drawing/DrawToolbar';
-import { historyMenu, pageContextMenu, screenshotMenu } from './menus';
+import { captureMenu, DrawToolbar, type CaptureMode } from './drawing/DrawToolbar';
+import { buildHandlers, type DevCommand } from './actions';
+import { CheatSheet, QuickActions } from './components/ShortcutOverlays';
+import { A11yCheck } from './tools/A11yCheck';
+import { CssTweak } from './tools/CssTweak';
+import { DesignOverlay, type OverlayState } from './tools/DesignOverlay';
+import { Eyedropper } from './tools/Eyedropper';
+import { Measure } from './tools/Measure';
+import { Recorder } from './tools/Recorder';
+import {
+  setShortcutOverrides,
+  shortcutLabel,
+  useShortcutDispatch,
+  useShortcutMap,
+  type ShortcutHandlers,
+} from './shortcuts';
+import { historyMenu, pageContextMenu, screenshotMenu, toolsMenu } from './menus';
 import { BookmarksPage } from './pages/BookmarksPage';
 import { DownloadsPage } from './pages/DownloadsPage';
 import { ExtensionsPage } from './pages/ExtensionsPage';
@@ -52,7 +68,17 @@ import { onHostMessage, postToHost, saveWebviewState } from './vscode';
 const TOAST_MS = 2_500;
 
 /** A tool that takes over the pointer on the page. */
-type Tool = { kind: 'inspect'; purpose: InspectPurpose } | { kind: 'region' } | { kind: 'draw' };
+type Tool =
+  | { kind: 'inspect'; purpose: InspectPurpose }
+  | { kind: 'region' }
+  | { kind: 'draw' }
+  | { kind: 'measure' }
+  | { kind: 'eyedropper' }
+  | { kind: 'tweak' }
+  | { kind: 'a11y' };
+
+/** Modes that take over the pointer on the page (a Tool), by shortcut scope. */
+const TOOL_SCOPES = ['inspect', 'draw', 'measure', 'eyedropper', 'tweak', 'a11y'] as const;
 
 interface DrawingState {
   tabId: string;
@@ -150,6 +176,28 @@ export function App() {
   const syncTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pendingCaptures = useRef(new Map<string, (image: CapturedImage) => void>());
   const [menu, setMenu] = useState<MenuState | null>(null);
+  /** The screenshot chooser is a menu whose letters are shortcuts (the `screenshot` scope). */
+  const [menuScope, setMenuScope] = useState<ShortcutScope | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [devCommand, setDevCommand] = useState<{ name: DevCommand; seq: number } | null>(null);
+  /** Design overlays per tab. */
+  const [overlays, setOverlays] = useState<Record<string, OverlayState>>({});
+  const [recording, setRecording] = useState(false);
+  const [recordMaxSeconds, setRecordMaxSeconds] = useState(60);
+  /**
+   * Shortcut handlers registered by mode components (measure, overlay, recorder...), one entry
+   * per component. A scope's keys only run while that scope is active, so stale entries are inert.
+   */
+  const toolHandlers = useRef<Record<string, ShortcutHandlers>>({});
+  const registerToolHandlers = useCallback(
+    (key: string) => (handlers: ShortcutHandlers) => {
+      toolHandlers.current[key] = handlers;
+    },
+    [],
+  );
+  // Re-render when the user changes a shortcut, so labels and tooltips show the new keys.
+  useShortcutMap();
   const [findTabId, setFindTabId] = useState<string | null>(null);
   const [findFocus, setFindFocus] = useState(0);
   const [findResult, setFindResult] = useState<{
@@ -167,11 +215,14 @@ export function App() {
   const activeTab = windowState.tabs.find((tab) => tab.id === windowState.activeTabId);
 
   const showToast = useCallback((message: string) => setToast({ id: Date.now(), message }), []);
-  const openMenu = useCallback(
-    (x: number, y: number, items: MenuItem[]) => setMenu(items.length ? { x, y, items } : null),
-    [],
-  );
-  const closeMenu = useCallback(() => setMenu(null), []);
+  const openMenu = useCallback((x: number, y: number, items: MenuItem[]) => {
+    setMenuScope(null);
+    setMenu(items.length ? { x, y, items } : null);
+  }, []);
+  const closeMenu = useCallback(() => {
+    setMenu(null);
+    setMenuScope(null);
+  }, []);
   const closeEditor = useCallback(() => setEditor(null), []);
 
   useEffect(() => {
@@ -239,7 +290,7 @@ export function App() {
 
   /** Screenshots with the drawings composited on top (see CaptureMode). */
   const captureDrawing = useCallback(
-    async (mode: CaptureMode) => {
+    async (mode: CaptureMode, toAgent = false) => {
       const { tabId, shapes } = drawingRef.current;
       if (!tabId) return;
       if (!shapes.length && (mode === 'area' || mode === 'groups' || mode === 'clean')) {
@@ -263,7 +314,7 @@ export function App() {
         );
         const label =
           groups.length > 1 ? `Drawing ${index + 1} of ${groups.length}` : CAPTURE_LABELS[mode];
-        postToHost({ type: 'saveImage', tabId, base64, label });
+        postToHost({ type: 'saveImage', tabId, base64, label, toAgent });
       }
     },
     [requestCapture, showToast],
@@ -361,9 +412,15 @@ export function App() {
           if (message.tabId === windowStateRef.current.activeTabId)
             setInspectSelection(message.rects);
           break;
-        case 'setInspect':
-          changeTool(message.purpose ? { kind: 'inspect', purpose: message.purpose } : null);
+        case 'setInspect': {
+          // "Select an Element" from the command palette toggles the picker, like its shortcut.
+          const current = toolRef.current;
+          const same = current?.kind === 'inspect' && current.purpose === message.purpose;
+          changeTool(
+            message.purpose && !same ? { kind: 'inspect', purpose: message.purpose } : null,
+          );
           break;
+        }
         case 'startRegionSelect':
           changeTool({ kind: 'region' });
           break;
@@ -399,7 +456,7 @@ export function App() {
           setPopup(null);
           break;
         case 'setDrawing':
-          changeTool(message.on ? { kind: 'draw' } : null);
+          changeTool(message.on && toolRef.current?.kind !== 'draw' ? { kind: 'draw' } : null);
           break;
         case 'captureAnnotations':
           void captureDrawing('area');
@@ -459,6 +516,34 @@ export function App() {
         case 'toast':
           showToast(message.message);
           break;
+        case 'shortcuts':
+          setShortcutOverrides(message.overrides);
+          break;
+        case 'settings':
+          setRecordMaxSeconds(message.recordMaxSeconds);
+          break;
+        case 'overlayImage': {
+          const url = URL.createObjectURL(
+            new Blob([message.data as Uint8Array<ArrayBuffer>], { type: message.mimeType }),
+          );
+          setOverlays((current) => {
+            const previous = current[message.tabId];
+            if (previous) URL.revokeObjectURL(previous.url);
+            return {
+              ...current,
+              [message.tabId]: {
+                url,
+                name: message.name,
+                opacity: previous?.opacity ?? 0.5,
+                x: previous?.x ?? 0,
+                y: previous?.y ?? 0,
+                difference: previous?.difference ?? false,
+                hidden: false,
+              },
+            };
+          });
+          break;
+        }
       }
     });
     postToHost({ type: 'ready' });
@@ -487,64 +572,6 @@ export function App() {
     return () => postToHost({ type: 'devConsole', tabId: devTabId, open: false });
   }, [devTabId]);
 
-  // Drawing keys: tool letters, undo/redo, Esc to stop drawing.
-  useEffect(() => {
-    if (tool?.kind !== 'draw') return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'SELECT' ||
-          (target.tagName === 'TEXTAREA' && !target.classList.contains('viewport-input')))
-      ) {
-        return;
-      }
-      const primary = event.ctrlKey || event.metaKey;
-      if (event.key === 'Escape') changeTool(null);
-      else if (primary && event.key.toLowerCase() === 'z' && !event.shiftKey) undo();
-      else if (
-        primary &&
-        (event.key.toLowerCase() === 'y' || (event.key.toLowerCase() === 'z' && event.shiftKey))
-      )
-        redo();
-      else if (!primary && !event.altKey && TOOL_KEYS[event.key.toLowerCase()])
-        setDrawTool(TOOL_KEYS[event.key.toLowerCase()]!);
-      else if (!primary) {
-        // Keep other keys away from the page while drawing.
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      } else return;
-      event.preventDefault();
-      event.stopPropagation();
-    };
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [tool, changeTool, undo, redo]);
-
-  // Element picker keys: Esc exits, arrows walk the tree, Enter copies the multi-selection.
-  useEffect(() => {
-    if (tool?.kind !== 'inspect') return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      const tabId = windowStateRef.current.activeTabId;
-      if (!tabId) return;
-      const actions: Record<string, 'parent' | 'child' | 'copySelection' | undefined> = {
-        ArrowUp: 'parent',
-        ArrowDown: 'child',
-        Enter: 'copySelection',
-      };
-      if (event.key === 'Escape') changeTool(null);
-      else if (actions[event.key])
-        postToHost({ type: 'inspect', tabId, action: actions[event.key]! });
-      else return;
-      event.preventDefault();
-      event.stopPropagation();
-    };
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [tool, changeTool]);
-
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), TOAST_MS);
@@ -571,6 +598,138 @@ export function App() {
   const topSites: HistoryItem[] | undefined =
     pageData.newtab?.page === 'newtab' ? pageData.newtab.topSites : undefined;
   const settings = pageData.settings?.page === 'settings' ? pageData.settings : undefined;
+
+  // Keyboard: the mode's keys first, then the concurrent panels, then browser-wide keys.
+  const pageTab = activeTab && !activeTab.internalPage ? activeTab : undefined;
+  const toolScope: ShortcutScope | undefined = TOOL_SCOPES.find((scope) => scope === tool?.kind);
+  const overlay = pageTab ? overlays[pageTab.id] : undefined;
+  const updateOverlay = (changes: Partial<OverlayState>) =>
+    pageTab &&
+    setOverlays((current) => {
+      const existing = current[pageTab.id];
+      return existing ? { ...current, [pageTab.id]: { ...existing, ...changes } } : current;
+    });
+  const closeOverlay = () => {
+    if (!pageTab || !overlay) return;
+    URL.revokeObjectURL(overlay.url);
+    setOverlays((current) => {
+      const next = { ...current };
+      delete next[pageTab.id];
+      return next;
+    });
+  };
+  const openOverlay = () => pageTab && postToHost({ type: 'overlayOpen', tabId: pageTab.id });
+  const helpScope: ShortcutScope = menuScope ?? toolScope ?? 'global';
+  const scopes: ShortcutScope[] =
+    helpOpen || quickOpen
+      ? ['global']
+      : ([
+          menuScope,
+          toolScope,
+          recording ? 'record' : undefined,
+          overlay ? 'overlay' : undefined,
+          devOpen && pageTab ? 'devtools' : undefined,
+          pageTab?.emulation.enabled ? 'device' : undefined,
+          'global',
+        ].filter(Boolean) as ShortcutScope[]);
+  const drawStyle = styles[drawTool] ?? DEFAULT_STYLE;
+  const setDrawStyle = (changes: Partial<ShapeStyle>) => {
+    setStyles((current) => ({
+      ...current,
+      [drawTool]: { ...(current[drawTool] ?? DEFAULT_STYLE), ...changes },
+    }));
+    if (changes.color) {
+      const color = changes.color;
+      setRecentColors((current) => [color, ...current.filter((c) => c !== color)].slice(0, 4));
+    }
+  };
+  const openScreenshotChooser = () => {
+    if (!pageTab) return;
+    // Under the toolbar's camera button (or the tools group when the toolbar is narrow).
+    const anchor = (
+      document.querySelector('.toolbar-tools .icon-button:nth-of-type(3)') ??
+      document.querySelector('.toolbar-tools')
+    )?.getBoundingClientRect();
+    setMenu({
+      x: anchor?.left ?? innerWidth / 2,
+      y: (anchor?.bottom ?? 40) + 2,
+      items: screenshotMenu(pageTab, {
+        region: () => changeTool({ kind: 'region' }),
+        element: () => changeTool({ kind: 'inspect', purpose: 'screenshot' }),
+        drawing: drawing.shapes.length ? () => void captureDrawing('area') : undefined,
+      }),
+    });
+    setMenuScope('screenshot');
+  };
+  // Built when a key is pressed (not during render): the handlers read refs and post messages.
+  const handlers = (): ShortcutHandlers => ({
+    ...buildHandlers({
+      tab: pageTab,
+      customDevices,
+      pageArea,
+      toggleMode: (mode) => {
+        if (mode === 'inspect') {
+          changeTool(tool?.kind === 'inspect' ? null : { kind: 'inspect', purpose: 'copy' });
+        } else if (mode === 'draw') {
+          if (pageTab) changeTool(tool?.kind === 'draw' ? null : { kind: 'draw' });
+        } else if (mode === 'screenshot') {
+          if (menuScope === 'screenshot') closeMenu();
+          else openScreenshotChooser();
+        } else if (mode === 'devtools') {
+          setDevOpen((open) => !open);
+        } else if (mode === 'device') {
+          toggleDeviceToolbar();
+        } else if (mode === 'overlay') {
+          if (overlay) closeOverlay();
+          else openOverlay();
+        } else if (mode === 'record') {
+          if (recording) toolHandlers.current.record?.['record.stop']?.();
+          else if (pageTab) setRecording(true);
+        } else if (
+          pageTab &&
+          (mode === 'measure' || mode === 'eyedropper' || mode === 'tweak' || mode === 'a11y')
+        ) {
+          changeTool(tool?.kind === mode ? null : { kind: mode });
+        }
+      },
+      exitMode: () => {
+        if (menuScope) closeMenu();
+        else changeTool(null);
+      },
+      showHelp: () => setHelpOpen(true),
+      openQuickActions: () => setQuickOpen(true),
+      setDrawTool,
+      drawStyle,
+      setDrawStyle,
+      undo,
+      redo,
+      clearDrawing: () => updateShapes([], true),
+      toggleDrawingVisible: () => setDrawingVisible((v) => !v),
+      captureDrawing: (toAgent) => void captureDrawing('area', toAgent),
+      screenshotRegion: () => {
+        closeMenu();
+        changeTool({ kind: 'region' });
+      },
+      screenshotElement: () => {
+        closeMenu();
+        changeTool({ kind: 'inspect', purpose: 'screenshot' });
+      },
+      devCommand: (name) => {
+        setDevOpen(true);
+        setDevCommand((current) => ({ name, seq: (current?.seq ?? 0) + 1 }));
+      },
+      closeDev: () => setDevOpen(false),
+    }),
+    ...Object.assign({}, ...Object.values(toolHandlers.current)),
+  });
+  useShortcutDispatch(scopes, handlers);
+  /** Runs an action from the quick actions list (like its shortcut would). */
+  const runAction = (id: string) => {
+    const handler = handlers()[id];
+    const command = SHORTCUT_ACTIONS.find((a) => a.id === id)?.command;
+    if (handler) handler();
+    else if (command) postToHost({ type: 'command', command });
+  };
 
   return (
     <div
@@ -605,17 +764,24 @@ export function App() {
             onToggleInspect={() =>
               changeTool(tool?.kind === 'inspect' ? null : { kind: 'inspect', purpose: 'copy' })
             }
-            onScreenshotMenu={(x, y) => {
-              if (!activeTab) return;
+            onScreenshotMenu={openScreenshotChooser}
+            toolsActive={
+              !!(toolScope && !['inspect', 'draw'].includes(toolScope)) || !!overlay || recording
+            }
+            onToolsMenu={(x, y) =>
               openMenu(
                 x,
                 y,
-                screenshotMenu(activeTab, {
-                  region: () => changeTool({ kind: 'region' }),
-                  element: () => changeTool({ kind: 'inspect', purpose: 'screenshot' }),
+                toolsMenu(runAction, {
+                  measure: tool?.kind === 'measure',
+                  eyedropper: tool?.kind === 'eyedropper',
+                  tweak: tool?.kind === 'tweak',
+                  a11y: tool?.kind === 'a11y',
+                  overlay: !!overlay,
+                  record: recording,
                 }),
-              );
-            }}
+              )
+            }
             onStar={(anchor) => {
               starAnchor.current = { x: anchor.right, y: anchor.bottom + 4 };
               editActiveBookmark();
@@ -639,18 +805,8 @@ export function App() {
               hasShapes={drawing.shapes.length > 0}
               visible={drawingVisible}
               onTool={setDrawTool}
-              onStyle={(changes) => {
-                setStyles((current) => ({
-                  ...current,
-                  [drawTool]: { ...(current[drawTool] ?? DEFAULT_STYLE), ...changes },
-                }));
-                if (changes.color) {
-                  const color = changes.color;
-                  setRecentColors((current) =>
-                    [color, ...current.filter((c) => c !== color)].slice(0, 4),
-                  );
-                }
-              }}
+              onStyle={setDrawStyle}
+              keyOf={shortcutLabel}
               onUndo={undo}
               onRedo={redo}
               onClear={() => updateShapes([], true)}
@@ -709,7 +865,7 @@ export function App() {
             }}
             mode={viewportMode(tool)}
             renderOverlay={
-              tool || (drawing.shapes.length > 0 && drawing.tabId === activeTab.id)
+              tool || overlay || (drawing.shapes.length > 0 && drawing.tabId === activeTab.id)
                 ? (mapper: ViewportMapper) => (
                     <>
                       {((drawing.tabId === activeTab.id && drawing.shapes.length > 0) ||
@@ -729,6 +885,42 @@ export function App() {
                           mapper={mapper}
                           purpose={tool.purpose}
                           selection={inspectSelection}
+                        />
+                      )}
+                      {overlay && (
+                        <DesignOverlay
+                          mapper={mapper}
+                          overlay={overlay}
+                          onChange={updateOverlay}
+                          onOpen={openOverlay}
+                          onClose={closeOverlay}
+                          onHandlers={registerToolHandlers('overlay')}
+                        />
+                      )}
+                      {tool?.kind === 'measure' && (
+                        <Measure
+                          mapper={mapper}
+                          tabId={activeTab.id}
+                          onHandlers={registerToolHandlers('tool')}
+                        />
+                      )}
+                      {tool?.kind === 'eyedropper' && (
+                        <Eyedropper mapper={mapper} onHandlers={registerToolHandlers('tool')} />
+                      )}
+                      {tool?.kind === 'tweak' && (
+                        <CssTweak
+                          mapper={mapper}
+                          tabId={activeTab.id}
+                          onHandlers={registerToolHandlers('tool')}
+                          onExit={() => changeTool(null)}
+                        />
+                      )}
+                      {tool?.kind === 'a11y' && (
+                        <A11yCheck
+                          mapper={mapper}
+                          tabId={activeTab.id}
+                          onHandlers={registerToolHandlers('tool')}
+                          onExit={() => changeTool(null)}
                         />
                       )}
                       {tool?.kind === 'region' && (
@@ -786,6 +978,7 @@ export function App() {
             height={devHeight}
             onResize={setDevHeight}
             onClose={() => setDevOpen(false)}
+            command={devCommand}
           />
         )}
         {showFind && (
@@ -835,7 +1028,19 @@ export function App() {
           onClose={closeEditor}
         />
       )}
+      {recording && pageTab && (
+        <Recorder
+          tabId={pageTab.id}
+          maxSeconds={recordMaxSeconds}
+          onDone={() => setRecording(false)}
+          onHandlers={registerToolHandlers('record')}
+        />
+      )}
       {menu && <Menu menu={menu} onClose={closeMenu} />}
+      {helpOpen && <CheatSheet scope={helpScope} onClose={() => setHelpOpen(false)} />}
+      {quickOpen && (
+        <QuickActions scope={helpScope} run={runAction} onClose={() => setQuickOpen(false)} />
+      )}
       {toast && (
         <div key={toast.id} className="toast" role="status">
           {toast.message}

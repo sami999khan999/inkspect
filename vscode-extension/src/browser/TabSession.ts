@@ -26,7 +26,16 @@ import {
   type NetworkEntry,
 } from '../shared/devtools';
 import type { ElementDetails } from '../shared/elementInfo';
+import { sanitizeScan, type A11yScan, type MeasureBox } from '../shared/tools';
 import type { BrowserEngine } from './BrowserEngine';
+import {
+  A11Y_SCAN_FUNCTION,
+  MEASURE_FUNCTION,
+  TWEAK_PROPERTIES,
+  TWEAK_READ_FUNCTION,
+  TWEAK_RESTORE_FUNCTION,
+  TWEAK_SET_FUNCTION,
+} from './toolScripts';
 import {
   ANCESTRY_FUNCTION,
   COLLECT_DETAILS_FUNCTION,
@@ -1022,6 +1031,76 @@ export class TabSession {
       this.logger.debug(`Element details failed: ${errorMessage(error)}`);
       return undefined;
     }
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Measure, CSS tweak and accessibility check
+  // -------------------------------------------------------------------------------------------
+
+  /** Runs an element page script (`this` is the element) with JSON arguments. */
+  private async callOn<T>(
+    backendNodeId: number,
+    fn: string,
+    ...args: unknown[]
+  ): Promise<T | undefined> {
+    try {
+      const { object } = await this.send('DOM.resolveNode', { backendNodeId });
+      const { result, exceptionDetails } = await this.send('Runtime.callFunctionOn', {
+        objectId: object.objectId,
+        functionDeclaration: fn,
+        arguments: args.map((value) => ({ value })),
+        returnByValue: true,
+      });
+      void this.send('Runtime.releaseObject', { objectId: object.objectId! }).catch(() => {});
+      if (exceptionDetails) {
+        this.logger.debug(`Element script failed: ${exceptionDetails.exception?.description}`);
+        return undefined;
+      }
+      return result.value as T;
+    } catch (error) {
+      if (!this.closed) this.logger.debug(`Element script failed: ${errorMessage(error)}`);
+      return undefined;
+    }
+  }
+
+  /** The boxes of the element at a point (viewport CSS pixels), for the measure mode. */
+  async measureAt(x: number, y: number): Promise<MeasureBox | undefined> {
+    const node = await this.nodeAt(x, y);
+    return node === undefined ? undefined : this.callOn<MeasureBox>(node, MEASURE_FUNCTION);
+  }
+
+  /** The element at a point, with its selector, `style` attribute and tweakable values. */
+  async tweakTarget(
+    x: number,
+    y: number,
+  ): Promise<
+    | { node: number; selector: string; styleText: string; values: Record<string, string> }
+    | undefined
+  > {
+    const node = await this.nodeAt(x, y);
+    if (node === undefined) return undefined;
+    const read = await this.callOn<{
+      selector: string;
+      styleText: string;
+      values: Record<string, string>;
+    }>(node, TWEAK_READ_FUNCTION, TWEAK_PROPERTIES);
+    return read && { node, ...read };
+  }
+
+  /** Sets one of the tweakable properties inline; returns its new computed value. */
+  async setInlineStyle(node: number, property: string, value: string): Promise<string | undefined> {
+    if (!(TWEAK_PROPERTIES as readonly string[]).includes(property)) return undefined;
+    return this.callOn<string>(node, TWEAK_SET_FUNCTION, property, value.slice(0, 500));
+  }
+
+  /** Puts an element's original `style` attribute back (leaving CSS tweak mode). */
+  async restoreInlineStyle(node: number, styleText: string): Promise<void> {
+    await this.callOn(node, TWEAK_RESTORE_FUNCTION, styleText);
+  }
+
+  /** Scans the page for accessibility problems and its tab order. */
+  async accessibilityScan(): Promise<A11yScan | undefined> {
+    return sanitizeScan(await this.call<unknown>(A11Y_SCAN_FUNCTION));
   }
 
   // -------------------------------------------------------------------------------------------

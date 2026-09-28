@@ -12,7 +12,12 @@ import type { BookmarksStore } from '../features/bookmarks';
 import type { DownloadsManager } from '../features/downloads';
 import type { ExtensionsManager } from '../features/extensions';
 import type { HistoryStore } from '../features/historyStore';
-import { deliverScreenshot, displayPath, saveScreenshot } from '../features/screenshots';
+import {
+  deliverRecording,
+  deliverScreenshot,
+  displayPath,
+  saveScreenshot,
+} from '../features/screenshots';
 import { formatDetails } from '../shared/elementInfo';
 import type { SavedWindow, SessionStore } from '../features/sessions';
 import { acceptToFilters } from '../features/fileChooser';
@@ -64,12 +69,20 @@ import {
   suggestions,
 } from './browserData';
 import { editorHost, webviewOptions, type BrowserHost } from './hosts';
-import { sendToChat } from '../agent/chat';
+import { captureAndSend } from '../agent/chat';
+import { addContext, type ContextInput } from '../agent/contextTray';
+import { CONTEXT_KIND_LABELS, type ContextKind } from '../shared/agentContext';
+import { SHORTCUT_ACTIONS } from '../shared/shortcuts';
 import { NATIVE_CLIPBOARD_TYPES } from '../features/imageClipboard';
 import type { ScreenshotResult } from '../agent/tools';
 import { closeDevTools, openDevTools } from './devtoolsPanel';
 import { Inspector, workspaceComponentPath } from './inspector';
 import { renderWebviewHtml } from './webviewHtml';
+
+/** Commands a shortcut in the webview may run. */
+const SHORTCUT_COMMANDS = new Set(
+  SHORTCUT_ACTIONS.flatMap((action) => (action.command ? [action.command] : [])),
+);
 
 export interface Services {
   context: vscode.ExtensionContext;
@@ -208,6 +221,8 @@ export class BrowserPanel implements vscode.Disposable {
   /** The tab whose console/network log streams to the open developer drawer. */
   private devConsoleTabId?: string;
   private devDataTimer?: NodeJS.Timeout;
+  /** Pending console error collection per tab (see collectErrorsSoon). */
+  private readonly errorTimers = new Map<string, NodeJS.Timeout>();
   /** An open extension popup (streamed into an overlay, not a tab). */
   private popup?: { tab: Tab; extensionId: string };
   private readonly disposables: vscode.Disposable[] = [];
@@ -255,6 +270,12 @@ export class BrowserPanel implements vscode.Disposable {
           this.post(bookmarksMessage(services));
         }
         if (event.affectsConfiguration('vscodeBrowser.devices.custom')) this.postDevices();
+        if (event.affectsConfiguration('vscodeBrowser.shortcuts')) {
+          this.post({ type: 'shortcuts', overrides: getConfig().shortcuts });
+        }
+        if (event.affectsConfiguration('vscodeBrowser.record')) {
+          this.post({ type: 'settings', recordMaxSeconds: getConfig().recordMaxSeconds });
+        }
       }),
     );
     if (init.tab) this.adoptTab(init.tab);
@@ -596,6 +617,12 @@ export class BrowserPanel implements vscode.Disposable {
           case 'copySelection':
             await this.inspector.copySelection(session);
             return;
+          case 'agent':
+            await this.inspector.copySelection(session, true);
+            return;
+          case 'screenshot':
+            await this.inspector.screenshotCurrent(session, tab.url);
+            return;
           case 'stop':
             await this.inspector.stop(session);
             return;
@@ -604,7 +631,7 @@ export class BrowserPanel implements vscode.Disposable {
       }
       case 'screenshot': {
         const tab = this.tab(message.tabId);
-        if (tab) await this.captureScreenshot(tab, message.mode, message.rect);
+        if (tab) await this.captureScreenshot(tab, message.mode, message.rect, message.toAgent);
         return;
       }
       case 'annotations': {
@@ -628,6 +655,7 @@ export class BrowserPanel implements vscode.Disposable {
           globalStorage: this.services.context.globalStorageUri.fsPath,
           copyImage: (data, mimeType) => void this.copyImage(data, mimeType),
           label: message.label.slice(0, 80),
+          toAgent: message.toAgent,
         });
         return;
       }
@@ -682,6 +710,75 @@ export class BrowserPanel implements vscode.Disposable {
         this.post({ type: 'toast', message: `Saved "${message.name}"` });
         return;
       }
+      case 'command': {
+        // Only the commands behind shortcuts; the webview can't run arbitrary commands.
+        if (!SHORTCUT_COMMANDS.has(message.command)) return;
+        BrowserPanel.lastActive = this;
+        await vscode.commands.executeCommand(message.command);
+        return;
+      }
+      case 'copyText':
+        await copyText(message.text);
+        if (message.kind) {
+          addContext(this.textContext(message.kind, message.label ?? message.toast, message.text));
+        }
+        if (message.toast) this.post({ type: 'toast', message: message.toast });
+        return;
+      case 'sendToAgent': {
+        const sent = await captureAndSend(
+          this.textContext(message.kind ?? 'text', message.label, message.text),
+        );
+        if (sent) this.post({ type: 'toast', message: `Sent to ${sent}` });
+        return;
+      }
+      case 'measure': {
+        const box = await this.tab(message.tabId)?.session?.measureAt(message.x, message.y);
+        this.post({ type: 'measureResult', requestId: message.requestId, box });
+        return;
+      }
+      case 'a11yScan': {
+        const tab = this.tab(message.tabId);
+        const scan =
+          tab?.session && !tab.internalPage ? await tab.session.accessibilityScan() : undefined;
+        this.post({ type: 'a11yResult', tabId: message.tabId, scan });
+        return;
+      }
+      case 'tweak':
+        await this.onTweak(message);
+        return;
+      case 'overlayOpen': {
+        const [uri] =
+          (await vscode.window.showOpenDialog({
+            title: 'Design image to lay over the page',
+            canSelectMany: false,
+            filters: { Images: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif'] },
+          })) ?? [];
+        if (!uri) return;
+        const data = await vscode.workspace.fs.readFile(uri);
+        const extension = uri.path.split('.').pop()?.toLowerCase() ?? 'png';
+        const mimeType =
+          extension === 'svg'
+            ? 'image/svg+xml'
+            : `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+        this.post({
+          type: 'overlayImage',
+          tabId: message.tabId,
+          data,
+          mimeType,
+          name: uri.path.split('/').pop() ?? 'image',
+        });
+        return;
+      }
+      case 'saveRecording': {
+        const tab = this.tab(message.tabId);
+        await deliverRecording(
+          message.data,
+          tab?.url ?? '',
+          message.seconds,
+          this.services.context.globalStorageUri.fsPath,
+        );
+        return;
+      }
       case 'toggleBookmarksBar':
         await vscode.workspace
           .getConfiguration('vscodeBrowser')
@@ -707,6 +804,8 @@ export class BrowserPanel implements vscode.Disposable {
     this.post(bookmarksMessage(this.services));
     this.post({ type: 'extensions', list: this.services.extensions.list() });
     this.postDevices();
+    this.post({ type: 'shortcuts', overrides: getConfig().shortcuts });
+    this.post({ type: 'settings', recordMaxSeconds: getConfig().recordMaxSeconds });
     this.postState();
     const active = this.activeTab;
     if (active) this.post({ type: 'annotations', tabId: active.id, shapes: active.annotations });
@@ -1318,6 +1417,7 @@ export class BrowserPanel implements vscode.Disposable {
     });
     events.on('devtools', () => {
       if (tab.id === this.devConsoleTabId) this.postDevDataSoon();
+      this.collectErrorsSoon(tab);
     });
     events.on('crashed', () => {
       tab.crashed = true;
@@ -1694,13 +1794,79 @@ export class BrowserPanel implements vscode.Disposable {
           ? 'failedRequests'
           : 'context',
     );
+    const context = this.devContext(tab, action, text);
     if (chat) {
-      await sendToChat(text);
+      const sent = await captureAndSend(context);
+      if (sent) this.post({ type: 'toast', message: `Sent to ${sent}` });
     } else {
+      addContext(context);
       await copyText(text);
       this.post({ type: 'toast', message: 'Copied for AI' });
     }
     return text;
+  }
+
+  /** An Agent Context item for a Copy-for-AI summary (one per page, replaced when redone). */
+  private devContext(
+    tab: Tab,
+    action: 'copyErrors' | 'copyFailedRequests' | 'copyContext',
+    text: string,
+  ): ContextInput {
+    const kind =
+      action === 'copyErrors' ? 'errors' : action === 'copyFailedRequests' ? 'network' : 'page';
+    return {
+      kind,
+      title: CONTEXT_KIND_LABELS[kind],
+      detail: tab.title || hostOf(tab.url),
+      text,
+      url: tab.url,
+      key: `${kind}:${tab.id}:${tab.url}`,
+    };
+  }
+
+  /** An Agent Context item for text from the webview (measurements, reports, CSS changes). */
+  private textContext(kind: ContextKind, label: string | undefined, text: string): ContextInput {
+    const tab = this.activeTab;
+    const title = label
+      ? label.charAt(0).toUpperCase() + label.slice(1)
+      : CONTEXT_KIND_LABELS[kind];
+    return {
+      kind,
+      title,
+      detail: tab ? tab.title || hostOf(tab.url) : undefined,
+      text,
+      url: tab?.url,
+    };
+  }
+
+  /**
+   * Keeps the console errors of a page in the Agent Context list as they happen (one item per
+   * page, updated in place), so they can be sent without opening the console.
+   */
+  private collectErrorsSoon(tab: Tab): void {
+    if (!getConfig().agentCollectConsoleErrors) return;
+    clearTimeout(this.errorTimers.get(tab.id));
+    this.errorTimers.set(
+      tab.id,
+      setTimeout(() => {
+        this.errorTimers.delete(tab.id);
+        const session = tab.session;
+        if (!session || tab.internalPage) return;
+        const count = session.console.filter((e) => e.level === 'error').length;
+        if (!count) return;
+        addContext(
+          {
+            ...this.devContext(
+              tab,
+              'copyErrors',
+              formatConsoleErrors(this.workspaceConsole(session.console), tab.url),
+            ),
+            title: `${count} console error${count === 1 ? '' : 's'}`,
+          },
+          { quiet: true },
+        );
+      }, 800),
+    );
   }
 
   private async devText(
@@ -1938,10 +2104,63 @@ export class BrowserPanel implements vscode.Disposable {
     await this.inspector.stop(tab.session);
   }
 
+  /** The element being tweaked in CSS tweak mode and its original `style` attribute. */
+  private tweaking?: { tabId: string; node: number; styleText: string };
+
+  /** CSS tweak mode: pick an element, change one property at a time, or put it all back. */
+  private async onTweak(message: Extract<WebviewToHost, { type: 'tweak' }>): Promise<void> {
+    const session = this.tab(message.tabId)?.session;
+    if (!session) return;
+    const restore = async () => {
+      const current = this.tweaking;
+      this.tweaking = undefined;
+      if (current) {
+        await this.tab(current.tabId)
+          ?.session?.restoreInlineStyle(current.node, current.styleText)
+          .catch(() => {});
+      }
+    };
+    switch (message.action) {
+      case 'pick': {
+        await restore();
+        const target = await session.tweakTarget(message.x, message.y);
+        if (target) {
+          this.tweaking = { tabId: message.tabId, node: target.node, styleText: target.styleText };
+          await session.highlight(target.node).catch(() => {});
+        }
+        this.post({
+          type: 'tweakTarget',
+          tabId: message.tabId,
+          target: target && { selector: target.selector, values: target.values },
+        });
+        return;
+      }
+      case 'set': {
+        const current = this.tweaking;
+        if (!current || current.tabId !== message.tabId) return;
+        const value = await session.setInlineStyle(current.node, message.property, message.value);
+        if (value !== undefined) {
+          this.post({
+            type: 'tweakValue',
+            tabId: message.tabId,
+            property: message.property,
+            value,
+          });
+        }
+        return;
+      }
+      case 'restore':
+        await restore();
+        await session.hideHighlight();
+        return;
+    }
+  }
+
   private async captureScreenshot(
     tab: Tab,
     mode: 'viewport' | 'fullPage' | 'region',
     rect?: Rect,
+    toAgent = false,
   ): Promise<string | undefined> {
     const session = tab.session;
     if (!session || tab.internalPage) {
@@ -1967,6 +2186,7 @@ export class BrowserPanel implements vscode.Disposable {
         fullPage: 'Full-page screenshot',
         region: 'Region screenshot',
       }[mode],
+      toAgent,
     });
   }
 
@@ -2000,6 +2220,11 @@ export class BrowserPanel implements vscode.Disposable {
     if (!anyPrivate) void services.engineHost.releasePrivateContext();
   }
 
+  /** Shows a short message over the page (when the window is visible). */
+  toast(message: string): void {
+    this.post({ type: 'toast', message });
+  }
+
   private post(message: HostToWebview): void {
     if (this.ready && !this.disposed) void this.host.webview.postMessage(message);
   }
@@ -2011,6 +2236,7 @@ export class BrowserPanel implements vscode.Disposable {
     BrowserPanel.onDidChangeTabsEmitter.fire();
     clearTimeout(this.stateTimer);
     clearTimeout(this.sessionTimer);
+    for (const timer of this.errorTimers.values()) clearTimeout(timer);
     const hadPrivate = this.tabs.some((tab) => tab.private);
     for (const tab of this.tabs) {
       tab.closed = true;
@@ -2059,4 +2285,12 @@ function isUrlLikeTitle(title: string, url: string): boolean {
   if (!title) return true;
   const bare = url.replace(/^[a-z]+:\/\//i, '');
   return title === url || title === bare || title === bare.replace(/\/$/, '');
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
 }

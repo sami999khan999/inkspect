@@ -69,3 +69,50 @@ export function passesAA(ratio: number, fontSizePx: number, fontWeight: number):
   const large = fontSizePx >= 24 || (fontSizePx >= 18.66 && fontWeight >= 700);
   return ratio >= (large ? 3 : 4.5);
 }
+
+/** Hue (0–360), saturation and value (0–1): the color picker's coordinates. */
+export interface Hsv {
+  h: number;
+  s: number;
+  v: number;
+}
+
+export function rgbToHsv({ r, g, b }: Rgba): Hsv {
+  const [rn, gn, bn] = [r / 255, g / 255, b / 255];
+  const max = Math.max(rn, gn, bn);
+  const delta = max - Math.min(rn, gn, bn);
+  let h = 0;
+  if (delta) {
+    if (max === rn) h = ((gn - bn) / delta) % 6;
+    else if (max === gn) h = (bn - rn) / delta + 2;
+    else h = (rn - gn) / delta + 4;
+  }
+  return { h: (h * 60 + 360) % 360, s: max ? delta / max : 0, v: max };
+}
+
+export function hsvToRgb({ h, s, v }: Hsv): Rgba {
+  const f = (n: number) => {
+    const k = (n + h / 60) % 6;
+    return (v - v * s * Math.max(0, Math.min(k, 4 - k, 1))) * 255;
+  };
+  return { r: f(5), g: f(3), b: f(1), a: 1 };
+}
+
+/** `#rrggbb` from a hex the user typed (`#abc`, `abc`, `#aabbcc`), or undefined if invalid. */
+export function normalizeHex(value: string): string | undefined {
+  const text = value.trim().replace(/^#?/, '#');
+  const color = parseColor(text);
+  return color ? toHex(color).toLowerCase() : undefined;
+}
+
+/** `hsl(h s% l%)` text for a color (CSS Color 4 syntax), rounded to whole numbers. */
+export function toHslText({ r, g, b }: Rgba): string {
+  const [rn, gn, bn] = [r / 255, g / 255, b / 255];
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  const d = max - min;
+  const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
+  const h = rgbToHsv({ r, g, b, a: 1 }).h;
+  return `hsl(${Math.round(h)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%)`;
+}

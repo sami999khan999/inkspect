@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Button } from '@inkspect/shared/ui/Button';
 import type { Rect } from '@shared/protocol';
 import type { ViewportMapper } from './Viewport';
 
@@ -108,16 +109,17 @@ export function RegionSelect({ mapper, onCapture, onCancel }: RegionSelectProps)
                 {Math.round(rect.width)} × {Math.round(rect.height)}
               </span>
               <div className="region-actions" onPointerDown={(event) => event.stopPropagation()}>
-                <button
-                  type="button"
-                  className="button primary small"
+                <Button size="sm" onClick={onCancel}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  icon="device-camera"
                   onClick={() => onCapture(rect)}
                 >
                   Capture
-                </button>
-                <button type="button" className="button secondary small" onClick={onCancel}>
-                  Cancel
-                </button>
+                </Button>
               </div>
             </>
           )}

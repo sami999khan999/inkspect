@@ -1,11 +1,17 @@
 import { useState, type ReactElement } from 'react';
 import {
+  bookmarkLabel,
   folderList,
   searchBookmarks,
   type BookmarkNode,
   type BookmarkRoots,
 } from '@shared/bookmarks';
+import { Button } from '@inkspect/shared/ui/Button';
+import { IconButton } from '@inkspect/shared/ui/IconButton';
+import { Select } from '@inkspect/shared/ui/Select';
+import { TextField } from '@inkspect/shared/ui/TextField';
 import { postToHost } from '../vscode';
+import { EmptyState, PageLayout, SiteIcon } from './PageLayout';
 
 interface BookmarksPageProps {
   roots: BookmarkRoots | undefined;
@@ -51,57 +57,65 @@ export function BookmarksPage({ roots }: BookmarksPageProps) {
         )),
   ];
 
+  const results = query.trim() ? searchBookmarks(roots, query) : undefined;
+
   return (
-    <div className="internal-page bookmarks-page">
-      <div className="internal-page-inner">
-        <header className="internal-page-header">
-          <h1>Bookmarks</h1>
-          <div className="header-actions">
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() =>
-                postToHost({
-                  type: 'bookmark',
-                  action: 'addFolder',
-                  parentId: roots.other.id,
-                  title: 'New folder',
-                })
-              }
-            >
-              New folder
-            </button>
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => postToHost({ type: 'bookmark', action: 'import' })}
-            >
-              Import...
-            </button>
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => postToHost({ type: 'bookmark', action: 'export' })}
-            >
-              Export...
-            </button>
-          </div>
-        </header>
-        <input
-          className="page-search"
+    <PageLayout
+      name="bookmarks"
+      icon="bookmark"
+      title="Bookmarks"
+      description="Synced with linked browsers when the Inkspect browser extension is paired."
+      actions={
+        <>
+          <Button
+            icon="new-folder"
+            onClick={() =>
+              postToHost({
+                type: 'bookmark',
+                action: 'addFolder',
+                parentId: roots.other.id,
+                title: 'New folder',
+              })
+            }
+          >
+            New folder
+          </Button>
+          <Button
+            icon="cloud-download"
+            onClick={() => postToHost({ type: 'bookmark', action: 'import' })}
+          >
+            Import…
+          </Button>
+          <Button icon="export" onClick={() => postToHost({ type: 'bookmark', action: 'export' })}>
+            Export…
+          </Button>
+        </>
+      }
+      toolbar={
+        <TextField
+          size="lg"
+          icon="search"
           type="search"
           value={query}
           placeholder="Search bookmarks"
           aria-label="Search bookmarks"
           onChange={(event) => setQuery(event.target.value)}
+          onClear={() => setQuery('')}
         />
-        <div className="bookmark-tree" role="tree">
-          {query.trim()
-            ? searchBookmarks(roots, query).map((node) => row(node, 0))
+      }
+    >
+      {results?.length === 0 ? (
+        <EmptyState icon="search" title="No matching bookmarks">
+          Try a different search.
+        </EmptyState>
+      ) : (
+        <div className="card list-card bookmark-tree" role="tree" aria-label="Bookmarks">
+          {results
+            ? results.map((node) => row(node, 0))
             : [...tree(roots.bar, 0), ...tree(roots.other, 0)]}
         </div>
-      </div>
-    </div>
+      )}
+    </PageLayout>
   );
 }
 
@@ -149,125 +163,112 @@ function BookmarkRow({
           if (event.key === 'Escape') onEdit(false);
         }}
       >
-        <input
+        <TextField
+          size="sm"
+          className="edit-title"
           value={title}
           autoFocus
           aria-label="Name"
           onChange={(e) => setTitle(e.target.value)}
         />
         {node.type === 'bookmark' && (
-          <input value={url} aria-label="URL" onChange={(e) => setUrl(e.target.value)} />
+          <TextField
+            size="sm"
+            className="edit-url"
+            value={url}
+            aria-label="URL"
+            onChange={(e) => setUrl(e.target.value)}
+          />
         )}
-        <button type="submit" className="button primary">
+        <Button type="submit" size="sm" variant="primary">
           Save
-        </button>
-        <button type="button" className="button secondary" onClick={() => onEdit(false)}>
+        </Button>
+        <Button size="sm" onClick={() => onEdit(false)}>
           Cancel
-        </button>
+        </Button>
       </form>
     );
   }
 
+  const moveOptions = folders
+    .filter((f) => f.id !== node.id)
+    .map((f) => ({ value: f.id, label: f.title, icon: 'folder', indent: f.depth }));
+
   return (
-    <div className="list-row" role="treeitem" style={{ paddingLeft: 8 + depth * 18 }}>
+    <div
+      className={`list-row${node.type === 'folder' ? ' folder-row' : ''}`}
+      role="treeitem"
+      aria-expanded={node.type === 'folder' ? !collapsed : undefined}
+      style={{ paddingLeft: 8 + depth * 20 }}
+    >
       {node.type === 'folder' ? (
-        <button
-          type="button"
-          className="icon-button"
-          aria-label={collapsed ? 'Expand' : 'Collapse'}
-          onClick={onToggle}
-        >
+        <>
+          <IconButton
+            icon={`chevron-${collapsed ? 'right' : 'down'}`}
+            label={collapsed ? 'Expand' : 'Collapse'}
+            className="small tree-toggle"
+            onClick={onToggle}
+          />
           <span
-            className={`codicon codicon-chevron-${collapsed ? 'right' : 'down'}`}
+            className={`codicon codicon-${collapsed ? 'folder' : 'folder-opened'} row-icon`}
             aria-hidden="true"
           />
-        </button>
-      ) : node.favicon ? (
-        <img className="favicon row-icon" src={node.favicon} alt="" referrerPolicy="no-referrer" />
+          <span className="row-title folder-title">{node.title}</span>
+          <span className="badge">{node.children?.length ?? 0}</span>
+        </>
       ) : (
-        <span className="codicon codicon-globe row-icon" aria-hidden="true" />
-      )}
-      {node.type === 'folder' ? (
-        <span className="row-title folder-title">
-          <span className="codicon codicon-folder" aria-hidden="true" /> {node.title}
-          <span className="muted"> ({node.children?.length ?? 0})</span>
-        </span>
-      ) : (
-        <button
-          type="button"
-          className="link-button row-title"
-          title={node.url}
-          onClick={(event) =>
-            postToHost({
-              type: 'bookmark',
-              action: 'open',
-              url: node.url!,
-              newTab: event.ctrlKey || event.metaKey,
-            })
-          }
-        >
-          {node.title}
-        </button>
-      )}
-      {node.type === 'bookmark' && <span className="row-detail">{node.url}</span>}
-      <span className="row-actions">
-        {node.type === 'folder' && (
+        <>
+          <SiteIcon url={node.url ?? ''} favicon={node.favicon} />
           <button
             type="button"
-            className="icon-button"
-            title="Open all in new tabs"
-            aria-label="Open all in new tabs"
-            onClick={() => postToHost({ type: 'bookmark', action: 'openAll', id: node.id })}
+            className="link-button row-title"
+            title={node.url}
+            onClick={(event) =>
+              postToHost({
+                type: 'bookmark',
+                action: 'open',
+                url: node.url!,
+                newTab: event.ctrlKey || event.metaKey,
+              })
+            }
           >
-            <span className="codicon codicon-multiple-windows" aria-hidden="true" />
+            {bookmarkLabel(node)}
           </button>
+          <span className="row-detail">{node.url}</span>
+        </>
+      )}
+      <span className="row-actions">
+        {node.type === 'folder' && (
+          <IconButton
+            icon="multiple-windows"
+            label="Open all in new tabs"
+            className="small"
+            onClick={() => postToHost({ type: 'bookmark', action: 'openAll', id: node.id })}
+          />
         )}
         {!isRoot && (
           <>
-            <select
-              className="move-select"
-              aria-label="Move to folder"
-              title="Move to folder"
-              value=""
-              onChange={(event) => {
-                if (event.target.value) {
-                  postToHost({
-                    type: 'bookmark',
-                    action: 'move',
-                    id: node.id,
-                    parentId: event.target.value,
-                  });
-                }
-              }}
-            >
-              <option value="">Move to...</option>
-              {folders
-                .filter((f) => f.id !== node.id)
-                .map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {'  '.repeat(f.depth)}
-                    {f.title}
-                  </option>
-                ))}
-            </select>
-            <button
-              type="button"
-              className="icon-button"
-              title="Edit"
-              aria-label="Edit"
-              onClick={() => onEdit(true)}
-            >
-              <span className="codicon codicon-edit" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              title="Delete"
-              aria-label="Delete"
+            <Select
+              size="sm"
+              appearance="quiet"
+              label="Move to folder"
+              icon="folder-active"
+              placeholder="Move"
+              align="end"
+              value={undefined}
+              options={moveOptions}
+              renderValue={() => 'Move'}
+              onChange={(parentId) =>
+                postToHost({ type: 'bookmark', action: 'move', id: node.id, parentId })
+              }
+            />
+            <IconButton icon="edit" label="Edit" className="small" onClick={() => onEdit(true)} />
+            <IconButton
+              icon="trash"
+              label="Delete"
+              className="small"
               onClick={() => postToHost({ type: 'bookmark', action: 'remove', id: node.id })}
-            >
-              <span className="codicon codicon-trash" aria-hidden="true" />
-            </button>
+            />
           </>
         )}
       </span>

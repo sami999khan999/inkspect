@@ -108,24 +108,56 @@ export function pageContextMenu(
 }
 
 /** The toolbar's camera button. */
+/** The screenshot chooser (toolbar camera button, or its shortcut); each item has a key. */
 export function screenshotMenu(
   tab: TabState,
-  pick: { region: () => void; element: () => void },
+  pick: { region: () => void; element: () => void; drawing?: () => void },
 ): MenuItem[] {
   const capture = (mode: 'viewport' | 'fullPage') => () =>
     postToHost({ type: 'screenshot', tabId: tab.id, mode });
-  return [
-    { label: 'Visible area', icon: 'device-camera', onSelect: capture('viewport') },
-    { label: 'Full page', icon: 'file-media', onSelect: capture('fullPage') },
-    { label: 'Select region...', icon: 'screen-full', onSelect: pick.region },
-    { label: 'Select element...', icon: 'inspect', onSelect: pick.element },
+  return tidyMenu([
+    {
+      label: 'Visible area',
+      icon: 'device-camera',
+      shortcut: shortcutLabel('shot.viewport'),
+      onSelect: capture('viewport'),
+    },
+    {
+      label: 'Full page',
+      icon: 'file-media',
+      shortcut: shortcutLabel('shot.fullPage'),
+      onSelect: capture('fullPage'),
+    },
+    {
+      label: 'Select region…',
+      icon: 'screen-full',
+      shortcut: shortcutLabel('shot.region'),
+      onSelect: pick.region,
+    },
+    {
+      label: 'Select element…',
+      icon: 'inspect',
+      shortcut: shortcutLabel('shot.element'),
+      onSelect: pick.element,
+    },
+    ...(pick.drawing
+      ? [
+          {
+            label: 'Drawing area',
+            icon: 'edit',
+            shortcut: shortcutLabel('shot.drawing'),
+            onSelect: pick.drawing,
+          },
+        ]
+      : []),
     { separator: true },
     {
-      label: 'Send last screenshot to terminal agent',
-      icon: 'terminal',
+      label: 'Send last screenshot to agent',
+      icon: 'sparkle',
+      shortcut: shortcutLabel('shot.lastToAgent'),
       onSelect: () => postToHost({ type: 'screenshotToTerminal' }),
     },
-  ];
+  ]);
 }
 
 export function tabContextMenu(tab: TabState, tabCount: number, canReopen: boolean): MenuItem[] {
@@ -318,4 +350,31 @@ export function historyMenu(tabId: string, entries: HistoryEntry[]): MenuItem[] 
     icon: 'globe',
     onSelect: () => postToHost({ type: 'goToHistoryEntry', tabId, entryId: entry.id }),
   }));
+}
+
+/** The toolbar's tools menu: the modes without their own button, and the keyboard helpers. */
+export function toolsMenu(run: (id: string) => void, active: Record<string, boolean>): MenuItem[] {
+  const item = (id: string, label: string, icon: string, on?: boolean): MenuItem => ({
+    label: on ? `${label} (on)` : label,
+    icon,
+    shortcut: shortcutLabel(id),
+    onSelect: () => run(id),
+  });
+  return [
+    item('mode.measure', 'Measure', 'symbol-ruler', active.measure),
+    item('mode.eyedropper', 'Eyedropper', 'symbol-color', active.eyedropper),
+    item('mode.tweak', 'CSS tweak', 'symbol-property', active.tweak),
+    item('mode.a11y', 'Accessibility check', 'accessibility', active.a11y),
+    item(
+      'mode.overlay',
+      active.overlay ? 'Close design overlay' : 'Design overlay…',
+      'layers',
+      false,
+    ),
+    item('mode.record', active.record ? 'Stop recording' : 'Record the page', 'record', false),
+    { separator: true },
+    item('open.quickActions', 'Quick actions', 'zap'),
+    item('open.cheatSheet', 'Keyboard shortcuts', 'keyboard'),
+    item('open.shortcuts', 'Change shortcuts…', 'edit'),
+  ];
 }

@@ -1,5 +1,9 @@
 import { COLORS, type DrawTool, type ShapeStyle } from '../annotations';
+import { Button } from './Button';
+import { ColorPicker } from './ColorPicker';
 import type { MenuItem } from './Menu';
+import { Select, type SelectOption } from './Select';
+import { Slider } from './Slider';
 import { ToolIcon } from './icons';
 
 const TOOL_GROUPS: { tool: DrawTool; label: string; key?: string }[][] = [
@@ -27,6 +31,12 @@ const TOOL_GROUPS: { tool: DrawTool; label: string; key?: string }[][] = [
   ],
 ];
 
+const DASH_OPTIONS: SelectOption<ShapeStyle['dash']>[] = [
+  { value: 'solid', label: 'Solid' },
+  { value: 'dashed', label: 'Dashed' },
+  { value: 'dotted', label: 'Dotted' },
+];
+
 /** Single-key shortcuts for the tools (while drawing and not typing). */
 export const TOOL_KEYS: Record<string, DrawTool> = Object.fromEntries(
   TOOL_GROUPS.flat()
@@ -50,11 +60,17 @@ interface DrawToolbarProps {
   onToggleVisible: () => void;
   onCapture: (x: number, y: number) => void;
   onClose: () => void;
+  /** The current key of a shortcut id (`draw.pen`, `draw.undo`...), when keys can be remapped. */
+  keyOf?: (id: string) => string | undefined;
 }
 
 /** Tools, colours and stroke options for drawing on the page. */
 export function DrawToolbar(props: DrawToolbarProps) {
   const { tool, style } = props;
+  const titled = (label: string, id: string, fallback?: string) => {
+    const key = props.keyOf ? props.keyOf(id) : fallback;
+    return key ? `${label} (${key})` : label;
+  };
   const colors = [
     ...COLORS,
     ...props.recentColors.filter((c) => !(COLORS as readonly string[]).includes(c)),
@@ -68,7 +84,7 @@ export function DrawToolbar(props: DrawToolbarProps) {
               key={t}
               type="button"
               className={`icon-button${tool === t ? ' active' : ''}`}
-              title={key ? `${label} (${key})` : label}
+              title={titled(label, `draw.${t}`, key)}
               aria-label={label}
               aria-pressed={tool === t}
               onClick={() => props.onTool(t)}
@@ -92,52 +108,45 @@ export function DrawToolbar(props: DrawToolbarProps) {
             onClick={() => props.onStyle({ color })}
           />
         ))}
-        <label className="swatch custom-color" title="Custom colour">
-          <input
-            type="color"
-            value={style.color}
-            aria-label="Custom colour"
-            onChange={(event) => props.onStyle({ color: event.target.value })}
-          />
-        </label>
+        <ColorPicker
+          value={style.color}
+          label="Custom colour"
+          presets={COLORS}
+          onChange={(color) => props.onStyle({ color })}
+        />
       </div>
       <div className="draw-group">
-        <label className="draw-range" title="Width">
-          <span className="codicon codicon-circle-small-filled" aria-hidden="true" />
-          <input
-            type="range"
-            min={1}
-            max={24}
-            value={style.width}
-            aria-label="Width"
-            onChange={(event) => props.onStyle({ width: Number(event.target.value) })}
-          />
-        </label>
-        <label className="draw-range" title="Opacity">
-          <span className="codicon codicon-color-mode" aria-hidden="true" />
-          <input
-            type="range"
-            min={10}
-            max={100}
-            value={Math.round(style.opacity * 100)}
-            aria-label="Opacity"
-            onChange={(event) => props.onStyle({ opacity: Number(event.target.value) / 100 })}
-          />
-        </label>
-        <select
+        <Slider
+          icon="circle-small-filled"
+          label="Width"
+          min={1}
+          max={24}
+          value={style.width}
+          format={(n) => `${n}px`}
+          onChange={(width) => props.onStyle({ width })}
+        />
+        <Slider
+          icon="color-mode"
+          label="Opacity"
+          min={10}
+          max={100}
+          step={5}
+          value={Math.round(style.opacity * 100)}
+          format={(n) => `${n}%`}
+          onChange={(opacity) => props.onStyle({ opacity: opacity / 100 })}
+        />
+        <Select
+          size="sm"
+          appearance="quiet"
+          label="Line style"
           value={style.dash}
-          aria-label="Line style"
-          title="Line style"
-          onChange={(event) => props.onStyle({ dash: event.target.value as ShapeStyle['dash'] })}
-        >
-          <option value="solid">Solid</option>
-          <option value="dashed">Dashed</option>
-          <option value="dotted">Dotted</option>
-        </select>
+          options={DASH_OPTIONS}
+          onChange={(dash) => props.onStyle({ dash })}
+        />
         <button
           type="button"
           className={`icon-button${style.fill ? ' active' : ''}`}
-          title="Fill shapes"
+          title={titled('Fill shapes', 'draw.fill')}
           aria-label="Fill shapes"
           aria-pressed={style.fill}
           onClick={() => props.onStyle({ fill: !style.fill })}
@@ -149,7 +158,7 @@ export function DrawToolbar(props: DrawToolbarProps) {
         <button
           type="button"
           className="icon-button"
-          title="Undo (Ctrl+Z)"
+          title={titled('Undo', 'draw.undo', 'Ctrl+Z')}
           aria-label="Undo"
           disabled={!props.canUndo}
           onClick={props.onUndo}
@@ -159,7 +168,7 @@ export function DrawToolbar(props: DrawToolbarProps) {
         <button
           type="button"
           className="icon-button"
-          title="Redo (Ctrl+Y)"
+          title={titled('Redo', 'draw.redo', 'Ctrl+Y')}
           aria-label="Redo"
           disabled={!props.canRedo}
           onClick={props.onRedo}
@@ -169,7 +178,7 @@ export function DrawToolbar(props: DrawToolbarProps) {
         <button
           type="button"
           className="icon-button"
-          title="Clear all drawings"
+          title={titled('Clear all drawings', 'draw.clear')}
           aria-label="Clear all drawings"
           disabled={!props.hasShapes}
           onClick={props.onClear}
@@ -179,7 +188,7 @@ export function DrawToolbar(props: DrawToolbarProps) {
         <button
           type="button"
           className={`icon-button${props.visible ? '' : ' active'}`}
-          title={props.visible ? 'Hide drawings' : 'Show drawings'}
+          title={titled(props.visible ? 'Hide drawings' : 'Show drawings', 'draw.visible')}
           aria-label={props.visible ? 'Hide drawings' : 'Show drawings'}
           onClick={props.onToggleVisible}
         >
@@ -189,22 +198,25 @@ export function DrawToolbar(props: DrawToolbarProps) {
           />
         </button>
       </div>
-      <button
-        type="button"
-        className="button primary small draw-capture"
+      <Button
+        variant="primary"
+        size="sm"
+        icon="device-camera"
+        iconEnd="chevron-down"
+        className="draw-capture"
         disabled={!props.hasShapes}
-        title="Screenshot of the area around the drawings"
+        title={titled('Screenshot of the area around the drawings', 'draw.capture')}
         onClick={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();
           props.onCapture(rect.left, rect.bottom + 2);
         }}
       >
-        <span className="codicon codicon-device-camera" aria-hidden="true" /> Screenshot
-      </button>
+        Screenshot
+      </Button>
       <button
         type="button"
         className="icon-button draw-close"
-        title="Stop drawing (Esc)"
+        title={titled('Stop drawing', 'draw.exit', 'Esc')}
         aria-label="Stop drawing"
         onClick={props.onClose}
       >

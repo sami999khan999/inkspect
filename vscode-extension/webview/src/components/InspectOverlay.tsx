@@ -21,7 +21,7 @@ export function InspectOverlay({ mapper, purpose, selection }: InspectOverlayPro
       >
         {purpose === 'screenshot'
           ? 'Click an element to capture it · Esc to cancel'
-          : 'Click: copy details · Ctrl+click: send to chat · Shift+click: add to selection · Alt+click: with screenshot · ↑↓ parent/child, Enter: copy · Esc: exit'}
+          : 'Click: copy details · Ctrl+click: send to agent · Shift+click: add to selection · Alt+click: with screenshot · ↑↓ parent/child · Enter copy · S screenshot · A send to agent · Esc exit'}
       </div>
       {selection.map((rect, index) => {
         const point = mapper.toLocal(rect.x - mapper.scroll.x, rect.y - mapper.scroll.y);

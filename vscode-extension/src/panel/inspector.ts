@@ -10,7 +10,8 @@ import {
   localWorkspaceFolder,
   saveScreenshot,
 } from '../features/screenshots';
-import { rememberPick, sendToChat } from '../agent/chat';
+import { captureAndSend, rememberPick } from '../agent/chat';
+import { addContext, type ContextInput } from '../agent/contextTray';
 import { normalizeSourcePath } from '../features/sourcePaths';
 import { elementLabel, formatDetails, type ElementDetails } from '../shared/elementInfo';
 import type { HostToWebview, InspectPurpose, Rect } from '../shared/protocol';
@@ -33,6 +34,8 @@ interface InspectorDeps {
 export class Inspector {
   private tabId?: string;
   /** Element reached with the arrow keys, and the pointer position it was reached from. */
+  /** An element screenshot to copy after the details (Alt+click). */
+  private pendingImage?: { bytes: Uint8Array; mimeType: string; path: string };
   private current?: { node: number; from?: { x: number; y: number } };
   private selection: { nodeId: number; details: Details }[] = [];
 
@@ -44,15 +47,21 @@ export class Inspector {
     await session.startInspect();
   }
 
+  /**
+   * The element being inspected: the one reached with the arrow keys while the pointer stays
+   * where they started, else the one under the pointer.
+   */
+  private async target(session: TabSession): Promise<number | undefined> {
+    const pointer = session.lastMouse;
+    if (this.current && samePoint(this.current.from, pointer)) return this.current.node;
+    return pointer ? session.nodeAt(pointer.x, pointer.y) : undefined;
+  }
+
   /** Arrow Up / Arrow Down: highlight the parent or first child of the element being inspected. */
   async traverse(tabId: string, session: TabSession, direction: 'parent' | 'child'): Promise<void> {
     this.switchTab(tabId);
     const pointer = session.lastMouse;
-    // Start from the element under the pointer unless the pointer stayed where the keys started.
-    const from =
-      this.current && samePoint(this.current.from, pointer)
-        ? this.current.node
-        : pointer && (await session.nodeAt(pointer.x, pointer.y));
+    const from = await this.target(session);
     if (from === undefined) return;
     const next =
       direction === 'parent' ? await session.parentOf(from) : await session.firstChildOf(from);
@@ -106,6 +115,12 @@ export class Inspector {
       const bytes = await session.screenshot('element', { format, backendNodeId: node });
       const path = await saveScreenshot(bytes, options.url, format, this.deps.globalStorage);
       details.screenshot = displayPath(path);
+      // Screenshots are always copied; the image goes last so it stays on the clipboard.
+      this.pendingImage = {
+        bytes,
+        mimeType: format === 'jpeg' ? 'image/jpeg' : `image/${format}`,
+        path,
+      };
       await session.highlight(node).catch(() => {});
     }
     if (options.add) {
@@ -118,20 +133,45 @@ export class Inspector {
     await this.copy([details], options.chat);
   }
 
-  /** Enter: copies every element in the multi-selection. */
-  /** Enter: copies the multi-selection, or the element reached with the arrow keys. */
-  async copySelection(session: TabSession): Promise<void> {
+  /**
+   * Enter: copies the multi-selection, or the element reached with the pointer or arrow keys.
+   * With `toAgent`, sends it to the agent instead.
+   */
+  async copySelection(session: TabSession, toAgent = false): Promise<void> {
     if (this.selection.length) {
-      await this.copy(this.selection.map((s) => s.details));
+      await this.copy(
+        this.selection.map((s) => s.details),
+        toAgent,
+      );
       this.selection = [];
       this.postSelection();
       return;
     }
-    if (this.current === undefined) return;
-    const details = await session.elementDetails(this.current.node, getConfig().inspectorMaxHtml);
+    const node = await this.target(session);
+    if (node === undefined) return;
+    const details = await session.elementDetails(node, getConfig().inspectorMaxHtml);
     if (!details) return;
     workspaceComponentPath(details);
-    await this.copy([details]);
+    await this.copy([details], toAgent);
+  }
+
+  /** S in the picker: a screenshot of the element under the pointer (or reached with arrows). */
+  async screenshotCurrent(session: TabSession, url: string): Promise<void> {
+    const node = await this.target(session);
+    if (node === undefined) {
+      this.deps.toast('Point at an element first.');
+      return;
+    }
+    const format = getConfig().screenshotFormat;
+    const bytes = await session.screenshot('element', { format, backendNodeId: node });
+    await deliverScreenshot({
+      bytes,
+      url,
+      format,
+      globalStorage: this.deps.globalStorage,
+      copyImage: this.deps.copyImage,
+      label: 'Element screenshot',
+    });
   }
 
   async stop(session?: TabSession): Promise<void> {
@@ -152,9 +192,22 @@ export class Inspector {
     const config = getConfig();
     const markdown = formatDetails(elements, 'markdown', config.inspectorFields);
     rememberPick(markdown);
+    const image = this.pendingImage;
+    this.pendingImage = undefined;
+    const first = elements[0]!;
+    const context: ContextInput = {
+      kind: 'element',
+      title: elements.length === 1 ? elementLabel(first) : `${elements.length} elements`,
+      detail: first.component?.name ?? pageHost(first.pageUrl),
+      text: markdown,
+      image: image && { bytes: image.bytes, mimeType: image.mimeType },
+      file: image?.path,
+      url: first.pageUrl,
+    };
     if (chat) {
-      await sendToChat(markdown);
+      await captureAndSend(context);
     } else {
+      addContext(context);
       const text = formatDetails(elements, config.inspectorCopyFormat, config.inspectorFields);
       await copyText(text);
       this.deps.toast(
@@ -163,6 +216,7 @@ export class Inspector {
           : `Copied details of ${elements.length} elements`,
       );
     }
+    if (image) this.deps.copyImage(image.bytes, image.mimeType);
     if (config.inspectorWriteSelectionFile) await this.writeSelectionFile(elements);
   }
 
@@ -191,6 +245,15 @@ export class Inspector {
       height: details.rect.height,
     }));
     this.deps.post({ type: 'inspectSelection', tabId: this.tabId, rects });
+  }
+}
+
+function pageHost(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).host || undefined;
+  } catch {
+    return undefined;
   }
 }
 

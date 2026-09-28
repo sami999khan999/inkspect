@@ -1,0 +1,13 @@
+{
+  "//": "Disabled: the manifest entries the toolbar features need. Not merged by scripts/manifest.mjs while the toolbar is switched off. To restore, merge this into base.json (and add \"debugger\" to chrome.json's permissions for full device emulation).",
+  "action": { "default_title": "Inkspect toolbar (Alt+Shift+I)" },
+  "commands": {
+    "toggle-toolbar": {
+      "suggested_key": { "default": "Alt+Shift+I" },
+      "description": "Show or hide the Inkspect toolbar"
+    }
+  },
+  "permissions": ["activeTab", "scripting", "downloads", "clipboardWrite"],
+  "web_accessible_resources": [{ "resources": ["codicon.ttf"], "matches": ["<all_urls>"] }],
+  "chromePermissions": ["debugger"]
+}

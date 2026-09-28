@@ -6,11 +6,11 @@ Guidance for AI coding agents working in this repository. Read it before changin
 
 **Inkspect** is a monorepo (npm workspaces) with two products:
 
-| Folder               | What it is                                                                                                                                                 | Status                                                    |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `vscode-extension/`  | **VS Code Browser** (working name): a full web browser inside a VS Code editor tab                                                                         | Built; see `plans/vscode-browser-plan.md`                 |
-| `browser-extension/` | **Inkspect** for Chrome/Edge/Brave/Firefox. A shortcut opens a toolbar with the same tools on any page, and it syncs bookmarks with the VS Code extension. | Built (Phases 0–9); see `plans/browser-extension-plan.md` |
-| `shared/`            | `@inkspect/shared`: code both products use                                                                                                                 | See **Shared package** below                              |
+| Folder               | What it is                                                                                                                                                     | Status                                                    |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `vscode-extension/`  | **VS Code Browser** (working name): a full web browser inside a VS Code editor tab                                                                             | Built; see `plans/vscode-browser-plan.md`                 |
+| `browser-extension/` | **Inkspect** for Chrome/Edge/Brave/Firefox: live two-way bookmark sync with the VS Code extension. Its toolbar features are switched off (code commented out). | Bookmark sync only; see `plans/browser-extension-plan.md` |
+| `shared/`            | `@inkspect/shared`: code both products use                                                                                                                     | See **Shared package** below                              |
 
 Unless a section says otherwise, the rest of this file is about the VS Code extension, and **paths are relative to `vscode-extension/`**.
 
@@ -83,7 +83,7 @@ src/browser/            Chromium + CDP: BrowserEngine, TabSession, input mapping
 src/panel/              BrowserPanel (window with tabs), Tab, inspector, DevTools panel, webview HTML
 src/features/           bookmarks, history, sessions, downloads, screenshots, extensions, zoom...
 src/agent/              agent tools (tools.ts), MCP (mcpProtocol.ts, mcpServer.ts), send-to-chat
-src/sidebar/            Activity Bar tree views (actions, tabs, bookmarks)
+src/sidebar/            Activity Bar views: trees (actions, tabs, bookmarks), Agent Context and Shortcuts webviews
 src/shared/             code shared by host AND webview: protocol, url, devices, elementInfo...
 webview/src/            React UI: App.tsx, components/, drawing/, pages/ (vb:// pages)
 test/unit/              Vitest unit tests (vscode module aliased to test/unit/stubs/vscode.ts)
@@ -141,12 +141,16 @@ npm run package      # production build + .vsix
   3. Handle it in `BrowserPanel.handle()`, or in `App.tsx`'s message switch.
 - Frames are binary. Never base64 large payloads on the hot path.
 
-### Commands and keybindings
+### Commands and shortcuts
 
 - Register commands in `src/commands.ts`.
 - Declare them in `package.json` (`contributes.commands`, `menus.commandPalette` with a `when`).
-- Browser-scoped keybindings use `when: activeWebviewPanelId == 'vscodeBrowser.browser'`.
-- Mirror every browser keybinding in `BROWSER_SHORTCUTS` (`src/shared/shortcuts.ts`). A unit test checks the two match.
+- **Every browser shortcut is an action in `SHORTCUT_ACTIONS` (`src/shared/shortcuts.ts`)**, with an id, a label, a scope (`global` or a mode) and default keys:
+  - The webview dispatches them (`webview/src/shortcuts.ts`, one capture-phase listener), so users can remap any of them in the **Shortcuts** sidebar view (`src/sidebar/ShortcutsView.ts`). The map is the `vscodeBrowser.shortcuts` setting, synced by VS Code Settings Sync and, through the bridge, the browser extension's `chrome.storage.sync`.
+  - Don't add browser keys to `contributes.keybindings`. The only exceptions are actions marked `everywhere` (they must also work outside the browser); inside it, the webview consumes the key first, so they run once. A unit test checks that the keybindings match the `everywhere` actions, that ids are unique, that host commands exist, and that the defaults don't conflict.
+  - Actions with a `command` run it through the host (the `command` message, allowed only for registry commands). Other actions are handled in the webview (`webview/src/actions.ts`, or a mode component registering its handlers).
+  - Modes that take over the page use plain keys; modes that leave the page usable (console, device, overlay, record) use Alt+ keys.
+  - Show keys with `shortcutLabel()` / `withShortcut()`, never hard-coded, so remapped keys show everywhere.
 - Commands that tests call return useful values: `screenshot()` returns the saved path, and `runDevAction()` returns the copied text.
 - Hidden test hooks live under `vscodeBrowser.debug.*`: `state`, `copyElementAt`, `setAnnotations`, `crashEngine`, `mcp`. They are not declared in `package.json`.
 
@@ -154,6 +158,11 @@ npm run package      # production build + .vsix
 
 - Add every setting in two places: `contributes.configuration` (with a `markdownDescription`) and the typed `getConfig()` in `src/config.ts`.
 - Read settings through `getConfig()`, not `workspace.getConfiguration` scattered in code.
+
+### Sending to the agent
+
+- Every capture (picked element, screenshot, recording, Copy-for-AI text, report) goes into the Agent Context list with `addContext()`, and every "send to agent" goes through `captureAndSend()` / `sendContextItem()` (`src/agent/chat.ts`), so everything sent also shows in the **Agent Context** view.
+- Terminal sends go only to terminals where `AgentTerminals` (`src/features/terminalSend.ts`) found an agent, or that the user picked. Never type into a plain shell by default, and don't focus the terminal. Agent recognition is pure and unit-tested (`src/agent/agentDetect.ts`).
 
 ### Agent tools
 
@@ -179,8 +188,15 @@ npm run package      # production build + .vsix
 - Use function components and hooks, and follow the react-hooks v7 lint rules:
   - Never call `setState` synchronously inside an effect. Derive the value during render, or adjust state while rendering.
   - Never read refs during render.
+- **Design system (both products):**
+  - Build UI from the shared components in `@inkspect/shared/ui`: `Button`, `IconButton`, `TextField`, `Field`, `Select`, `Switch`, `Checkbox`, `Segmented`, `Slider`, `ColorPicker`, `Menu`.
+  - Don't use native `<select>`, checkboxes, range or color inputs, or hand-styled `<button>`s. If a control is missing, add it to the kit (keyboard support, ARIA roles, a shared stylesheet rule) rather than styling one in place.
+  - Sizes, radii, spacing, surfaces, shadows and motion come from the `--ink-*` tokens in `shared/src/ui/ui.css`. Don't hard-code new values.
+  - Popups are portaled (`portalTarget`) and marked `data-ink-popup`; popovers that close on outside clicks must ignore them (`isInPopup`).
+  - `vb://` pages use `PageLayout`, `EmptyState` and `SiteIcon` (`webview/src/pages/PageLayout.tsx`) and group content in `.card`s.
 - **Styling:**
-  - Style with VS Code theme variables (`var(--vscode-*)`) in `webview/src/styles.css`. Use codicons for icons.
+  - Style with VS Code theme variables (`var(--vscode-*)`) through the tokens. Component styles live in `shared/src/ui/ui.css`, layout in `webview/src/styles.css`. Use codicons for icons.
+  - Hosts outside VS Code (the browser extension's pages) get the variables from `shared/src/ui/theme.css` (`.ink-theme`).
   - Hard-coded colors are only for things drawn over page content.
   - Add high-contrast rules under `body.vscode-high-contrast`.
 - **Accessibility:**
@@ -226,7 +242,7 @@ npm run package      # production build + .vsix
   - drawing (`annotations`, `drawing/render`, `drawing/composite`, `ui/DrawingLayer`, `ui/DrawToolbar`)
   - `devices`, Copy-for-AI formats (`devtools`), `color`
   - the bookmark merge (`bookmarkSync`) and the link protocol (`bridge`)
-  - generic UI (`ui/Menu`, `ui/IconButton`, `ui/ui.css`)
+  - the UI kit: components (`ui/Button`, `ui/Select`, `ui/TextField`...), tokens and styles (`ui/ui.css`), and theme variables for non-VS Code hosts (`ui/theme.css`)
 - **Imports:** `@inkspect/shared/<module>` or `@inkspect/shared/ui/<Component>`. The package exports TypeScript source; each product's bundler compiles it.
 - **No `vscode` or `chrome` imports, no Node-only APIs.** DOM APIs are fine, since both products run the code in pages or webviews.
 - **`collectElementDetails` must stay self-contained:** everything comes in through its parameters. The VS Code extension sends it to Chromium as source text (`toString()`), which only works for self-contained functions, including after minification.
@@ -237,6 +253,19 @@ npm run package      # production build + .vsix
   - The VS Code extension's old paths (`src/shared/elementInfo.ts`, `webview/src/drawing/*`...) are one-line re-exports. Add new shared code to `shared/`, not there.
 
 ## Browser extension (`browser-extension/`)
+
+**Current scope: bookmark sync only.**
+
+- The toolbar features are switched off, and their code is kept, commented out or unbuilt:
+  - the handlers at the end of `src/background/index.ts`
+  - `src/content/` and `src/main-world/` (not built)
+  - the build entries in `scripts/build.mjs`
+  - `manifest/toolbar.json` (not merged)
+  - the toolbar tests in `test/e2e/run.mjs`
+- Don't delete that code, and don't re-enable it unless asked.
+- What runs: the link client, bookmark sync, and the settings page (pairing). The manifest asks only for `storage` and `bookmarks`.
+
+The notes below describe the full design, including the disabled parts.
 
 **Architecture:**
 

@@ -1,65 +1,69 @@
+import { Button } from '@inkspect/shared/ui/Button';
 import type { EngineState } from '@shared/protocol';
 import { postToHost } from '../vscode';
+import { StatusPanel } from './StatusPanel';
 
 /** Shown over the page area while the browser engine is not running. */
 export function EngineOverlay({ engine }: { engine: EngineState }) {
   switch (engine.status) {
     case 'running':
       return null;
-    case 'downloading':
+    case 'downloading': {
+      const percent = Math.floor((engine.progress ?? 0) * 100);
       return (
-        <div className="overlay engine-overlay">
-          <span className="codicon codicon-cloud-download big-icon" aria-hidden="true" />
-          <p>{engine.message ?? 'Downloading Chromium...'}</p>
+        <StatusPanel icon="cloud-download" tone="accent" title="Setting up the browser engine">
+          <p className="status-text">{engine.message ?? 'Downloading Chromium (once)…'}</p>
           <div
             className="progress-track"
             role="progressbar"
-            aria-valuenow={Math.round((engine.progress ?? 0) * 100)}
+            aria-label="Download progress"
+            aria-valuenow={percent}
+            aria-valuemin={0}
+            aria-valuemax={100}
           >
-            <div style={{ width: `${(engine.progress ?? 0) * 100}%` }} />
+            <div style={{ width: `${percent}%` }} />
           </div>
-          <p className="muted">{Math.floor((engine.progress ?? 0) * 100)}%</p>
-        </div>
+          <p className="status-meta">{percent}%</p>
+        </StatusPanel>
       );
+    }
     case 'starting':
     case 'stopped':
       return (
-        <div className="overlay engine-overlay">
-          <span
-            className="codicon codicon-loading codicon-modifier-spin big-icon"
-            aria-hidden="true"
-          />
-          <p>{engine.message ?? 'Starting browser engine...'}</p>
-        </div>
+        <StatusPanel icon="loading" spin title={engine.message ?? 'Starting the browser engine…'} />
       );
     case 'crashed':
     case 'error':
       return (
-        <div className="overlay engine-overlay">
-          <span className="codicon codicon-error big-icon" aria-hidden="true" />
-          <p>
-            {engine.status === 'crashed'
-              ? 'The browser engine stopped.'
-              : 'The browser engine could not start.'}
-          </p>
-          {engine.message && <p className="muted engine-message">{engine.message}</p>}
-          <div className="dialog-buttons">
-            <button
-              type="button"
-              className="button primary"
-              onClick={() => postToHost({ type: 'restartEngine' })}
-            >
-              {engine.status === 'crashed' ? 'Restart' : 'Retry'}
-            </button>
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => postToHost({ type: 'openSettings' })}
-            >
-              Settings
-            </button>
-          </div>
-        </div>
+        <StatusPanel
+          icon="error"
+          tone="danger"
+          title={
+            engine.status === 'crashed'
+              ? 'The browser engine stopped'
+              : 'The browser engine could not start'
+          }
+          actions={
+            <>
+              <Button
+                variant="secondary"
+                icon="settings-gear"
+                onClick={() => postToHost({ type: 'openSettings' })}
+              >
+                Settings
+              </Button>
+              <Button
+                variant="primary"
+                icon="refresh"
+                onClick={() => postToHost({ type: 'restartEngine' })}
+              >
+                {engine.status === 'crashed' ? 'Restart' : 'Retry'}
+              </Button>
+            </>
+          }
+        >
+          {engine.message && <pre className="status-detail">{engine.message}</pre>}
+        </StatusPanel>
       );
   }
 }
@@ -67,16 +71,21 @@ export function EngineOverlay({ engine }: { engine: EngineState }) {
 /** Shown when the tab's renderer process crashed. */
 export function CrashedOverlay({ tabId }: { tabId: string }) {
   return (
-    <div className="overlay engine-overlay">
-      <span className="codicon codicon-bug big-icon" aria-hidden="true" />
-      <p>This page crashed.</p>
-      <button
-        type="button"
-        className="button primary"
-        onClick={() => postToHost({ type: 'tab', action: 'reload', tabId })}
-      >
-        Reload
-      </button>
-    </div>
+    <StatusPanel
+      icon="bug"
+      tone="danger"
+      title="This page crashed"
+      actions={
+        <Button
+          variant="primary"
+          icon="refresh"
+          onClick={() => postToHost({ type: 'tab', action: 'reload', tabId })}
+        >
+          Reload
+        </Button>
+      }
+    >
+      <p className="status-text">Its renderer process stopped. Reloading usually brings it back.</p>
+    </StatusPanel>
   );
 }

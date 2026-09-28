@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { blend, contrastRatio, parseColor, passesAA, toHex } from '../src/color';
+import {
+  blend,
+  contrastRatio,
+  hsvToRgb,
+  normalizeHex,
+  parseColor,
+  passesAA,
+  rgbToHsv,
+  toHslText,
+  toHex,
+} from '../src/color';
 
 describe('colors', () => {
   it('parses computed style colors and hex', () => {
@@ -30,5 +40,40 @@ describe('colors', () => {
     const mixed = blend({ r: 0, g: 0, b: 0, a: 0.5 }, { r: 255, g: 255, b: 255, a: 1 });
     expect(Math.round(mixed.r)).toBe(128);
     expect(mixed.a).toBe(1);
+  });
+});
+
+describe('color picker math', () => {
+  it('converts between RGB and HSV both ways', () => {
+    for (const hex of [
+      '#ff0000',
+      '#00ff00',
+      '#0000ff',
+      '#e11d48',
+      '#123456',
+      '#ffffff',
+      '#000000',
+      '#808080',
+    ]) {
+      const rgb = parseColor(hex)!;
+      expect(toHex(hsvToRgb(rgbToHsv(rgb))).toLowerCase()).toBe(hex);
+    }
+    expect(rgbToHsv(parseColor('#ff0000')!)).toEqual({ h: 0, s: 1, v: 1 });
+    expect(rgbToHsv(parseColor('#00ffff')!).h).toBeCloseTo(180);
+  });
+
+  it('normalizes typed hex values', () => {
+    expect(normalizeHex('ABC')).toBe('#aabbcc');
+    expect(normalizeHex(' #E11D48 ')).toBe('#e11d48');
+    expect(normalizeHex('#12')).toBeUndefined();
+    expect(normalizeHex('red')).toBeUndefined();
+  });
+});
+
+describe('hsl text', () => {
+  it('formats colors as CSS hsl()', () => {
+    expect(toHslText(parseColor('#ff0000')!)).toBe('hsl(0 100% 50%)');
+    expect(toHslText(parseColor('#808080')!)).toBe('hsl(0 0% 50%)');
+    expect(toHslText(parseColor('#3b82f6')!)).toBe('hsl(217 91% 60%)');
   });
 });

@@ -1,0 +1,387 @@
+/* The Shortcuts view in the Browser sidebar. Components and tokens come from @inkspect/shared/ui. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--vscode-sideBar-background, transparent);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+.shortcuts {
+  --header-height: 40px;
+  padding-bottom: var(--ink-space-4);
+}
+
+/* Search and file actions, pinned at the top. */
+.shortcuts-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--header-height);
+  padding: 0 8px 0 12px;
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.shortcuts-header .text-field {
+  flex: 1;
+  margin-right: 4px;
+}
+
+/* Sync status. */
+.shortcuts-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 12px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--ink-border-subtle);
+  border-radius: var(--ink-radius);
+  background: var(--ink-surface-sunken);
+}
+
+.shortcuts-status > .codicon {
+  flex-shrink: 0;
+  color: var(--ink-accent-fg);
+}
+
+.status-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.status-text strong {
+  font-weight: 600;
+}
+
+.status-text span {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.status-pill {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--ink-border-strong);
+  border-radius: var(--ink-radius-pill);
+  color: var(--ink-muted);
+  font-size: var(--ink-font-xs);
+}
+
+.status-pill.on {
+  border-color: color-mix(in srgb, var(--ink-success) 50%, transparent);
+  background: color-mix(in srgb, var(--ink-success) 12%, transparent);
+  color: var(--ink-success);
+}
+
+.status-pill .codicon {
+  font-size: 12px !important;
+}
+
+.shortcuts-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 12px 8px;
+  color: var(--ink-warning);
+  font-size: var(--ink-font-sm);
+}
+
+/* Groups: a pinned header per mode. */
+.group-header {
+  position: sticky;
+  top: var(--header-height);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  padding: 0 12px 0 6px;
+  border: none;
+  border-top: 1px solid var(--ink-border-subtle);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  color: var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground));
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.group-header:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.group-header:focus-visible {
+  outline: 1px solid var(--ink-focus);
+  outline-offset: -1px;
+}
+
+.group-icon {
+  color: var(--ink-accent-fg);
+}
+
+.group-title {
+  font-size: var(--ink-font-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.group-count {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--ink-radius-pill);
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  font-size: var(--ink-font-xs);
+  line-height: 16px;
+}
+
+/* Rows: label, then actions (on hover), then the keys in a right-aligned column. */
+.shortcut-item {
+  position: relative;
+  padding: 0 12px 0 32px;
+}
+
+.shortcut-item::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 20px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+}
+
+.shortcut-item.changed::before {
+  background: var(--ink-accent);
+}
+
+.shortcut-item.conflict::before {
+  background: var(--ink-warning);
+}
+
+.shortcut-item:hover,
+.shortcut-item:focus-within {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.shortcut-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+}
+
+.shortcut-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.shortcut-item.changed .shortcut-label {
+  font-weight: 500;
+}
+
+.shortcut-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity var(--ink-fast) var(--ink-ease);
+}
+
+.shortcut-item:hover .shortcut-actions,
+.shortcut-item:focus-within .shortcut-actions {
+  opacity: 1;
+}
+
+.shortcut-keys-column {
+  display: inline-flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 62%;
+}
+
+.key-button-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.key-button {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--ink-radius);
+  background: transparent;
+  cursor: pointer;
+}
+
+.key-button:hover {
+  border-color: var(--ink-border-strong);
+  background: var(--ink-surface-sunken);
+}
+
+.key-button:focus-visible {
+  outline: 1px solid var(--ink-focus);
+}
+
+/* The remove badge sits on the key's corner, so showing it doesn't move anything. */
+.key-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--ink-border-strong);
+  border-radius: 50%;
+  background: var(--ink-surface-raised);
+  color: var(--ink-muted);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--ink-fast) var(--ink-ease);
+}
+
+.key-remove .codicon {
+  font-size: 10px !important;
+}
+
+.key-button-wrap:hover .key-remove,
+.key-remove:focus-visible {
+  opacity: 1;
+}
+
+.key-remove:hover {
+  border-color: var(--ink-danger);
+  background: var(--ink-danger);
+  color: #fff;
+}
+
+.key-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px dashed var(--ink-border-strong);
+  border-radius: var(--ink-radius-sm);
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: var(--ink-font-xs);
+  cursor: pointer;
+}
+
+.key-empty:hover {
+  border-color: var(--ink-focus);
+  color: var(--vscode-foreground);
+}
+
+.key-empty .codicon {
+  font-size: 12px !important;
+}
+
+.key-recording {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 2px 0 8px;
+  border: 1px solid var(--ink-focus);
+  border-radius: var(--ink-radius-sm);
+  background: var(--ink-accent-soft);
+  box-shadow: 0 0 0 1px var(--ink-focus);
+  font-size: var(--ink-font-xs);
+}
+
+.recording-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.key-recording-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--ink-radius-sm);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.key-recording-cancel:hover {
+  background: var(--ink-hover);
+  color: inherit;
+}
+
+.shortcut-conflict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 0 0 6px;
+  color: var(--ink-warning);
+  font-size: var(--ink-font-sm);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recording-dot {
+    animation: none;
+  }
+}
+
+body.vscode-high-contrast .shortcuts-status,
+body.vscode-high-contrast .key-button:hover {
+  border-color: var(--vscode-contrastBorder);
+}
+
+/* Several keys for one action: "Ctrl T / Ctrl F4". */
+.key-button-wrap + .key-button-wrap::before {
+  content: '/';
+  align-self: center;
+  margin-right: 2px;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-xs);
+}

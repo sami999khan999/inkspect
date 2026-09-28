@@ -18,6 +18,30 @@ export interface ClientInfo {
 
 export type SendTarget = 'chat' | 'terminal' | 'save';
 
+/**
+ * The VS Code browser's shortcut changes, synced through the browser extension's
+ * `chrome.storage.sync` so they follow the user's browser account to other devices.
+ */
+export interface ShortcutSettings {
+  /** Action id to its keys (see the VS Code extension's shortcut registry). */
+  shortcuts: Record<string, string | string[]>;
+  /** When they last changed (ms since the epoch); 0 means never. */
+  updated: number;
+}
+
+/**
+ * Which copy of the shortcut settings should win: the one changed last. `same` when both were
+ * changed at the same moment (nothing to do).
+ */
+export function newerShortcuts(
+  local: ShortcutSettings | undefined,
+  remote: ShortcutSettings | undefined,
+): 'local' | 'remote' | 'same' {
+  const a = local?.updated ?? 0;
+  const b = remote?.updated ?? 0;
+  return a === b ? 'same' : a > b ? 'local' : 'remote';
+}
+
 export type ClientMessage =
   | { type: 'pair'; code: string; client: ClientInfo }
   | { type: 'hello'; client: ClientInfo; token: string }
@@ -34,7 +58,9 @@ export type ClientMessage =
       image?: string;
       label?: string;
       pageUrl?: string;
-    };
+    }
+  /** The shortcuts stored in the browser's sync storage (sent when they are newer). */
+  | ({ type: 'settings.shortcuts' } & ShortcutSettings);
 
 export type ServerMessage =
   | { type: 'paired'; token: string; peer: string }
@@ -43,7 +69,9 @@ export type ServerMessage =
   | { type: 'pong' }
   | { type: 'bookmarks.ops'; ops: RemoteOp[] }
   | { type: 'bookmarks.requestSnapshot' }
-  | { type: 'send.result'; id: string; ok: boolean; path?: string; error?: string };
+  | { type: 'send.result'; id: string; ok: boolean; path?: string; error?: string }
+  /** VS Code's shortcuts, sent after `welcome` and whenever they change. */
+  | ({ type: 'settings.shortcuts' } & ShortcutSettings);
 
 export function encode(message: ClientMessage | ServerMessage): string {
   return JSON.stringify({ v: BRIDGE_VERSION, ...message });
@@ -72,6 +100,12 @@ const arrayOf =
   (v) =>
     Array.isArray(v) && v.length <= max && v.every(check);
 const stringMap: Check = (v) => isRecord(v) && Object.values(v).every(isString);
+/** A shortcut map: a bounded number of ids, each with a key or a few keys. */
+const isKey: Check = (k) => typeof k === 'string' && k.length <= 40;
+const shortcutMap: Check = (v) =>
+  isRecord(v) &&
+  Object.keys(v).length <= 500 &&
+  Object.values(v).every((keys) => isKey(keys) || arrayOf(isKey, 8)(keys));
 
 const flatNode = shape({
   id: isString,
@@ -109,6 +143,7 @@ const CLIENT_MESSAGES: Record<ClientMessage['type'], Record<string, Check>> = {
     label: optional(isString),
     pageUrl: optional(isString),
   },
+  'settings.shortcuts': { shortcuts: shortcutMap, updated: isNumber },
 };
 
 const SERVER_MESSAGES: Record<ServerMessage['type'], Record<string, Check>> = {
@@ -124,6 +159,7 @@ const SERVER_MESSAGES: Record<ServerMessage['type'], Record<string, Check>> = {
     path: optional(isString),
     error: optional(isString),
   },
+  'settings.shortcuts': { shortcuts: shortcutMap, updated: isNumber },
 };
 
 function parse<T extends { type: string }>(

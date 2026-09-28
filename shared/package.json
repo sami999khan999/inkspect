@@ -7,6 +7,7 @@
   "exports": {
     "./*": "./src/*.ts",
     "./ui/ui.css": "./src/ui/ui.css",
+    "./ui/theme.css": "./src/ui/theme.css",
     "./ui/*": "./src/ui/*.tsx"
   },
   "scripts": {
@@ -18,6 +19,7 @@
     "perfect-freehand": "^1.2.3"
   },
   "peerDependencies": {
-    "react": "^19.3.0"
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   }
 }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { encode, isExtensionOrigin, parseClientMessage, parseServerMessage } from '../src/bridge';
+import {
+  encode,
+  isExtensionOrigin,
+  newerShortcuts,
+  parseClientMessage,
+  parseServerMessage,
+} from '../src/bridge';
 
 describe('bridge protocol', () => {
   it('round-trips valid messages', () => {
@@ -30,6 +36,32 @@ describe('bridge protocol', () => {
         JSON.stringify({ v: 1, type: 'bookmarks.ops', ops: [{ op: 'create', ref: 1 }] }),
       ),
     ).toBeUndefined();
+  });
+
+  it('carries shortcut settings both ways, within limits', () => {
+    const settings = {
+      type: 'settings.shortcuts' as const,
+      shortcuts: { 'mode.draw': 'ctrl+alt+d', 'tab.close': [] as string[] },
+      updated: 1_700_000_000_000,
+    };
+    expect(parseServerMessage(encode(settings))).toEqual(settings);
+    expect(parseClientMessage(encode(settings))).toEqual(settings);
+    const bad = (shortcuts: unknown) =>
+      parseClientMessage(
+        JSON.stringify({ v: 1, type: 'settings.shortcuts', shortcuts, updated: 1 }),
+      );
+    expect(bad({ 'mode.draw': 5 })).toBeUndefined();
+    expect(bad({ 'mode.draw': 'x'.repeat(41) })).toBeUndefined();
+    expect(bad(['ctrl+k'])).toBeUndefined();
+  });
+
+  it('keeps the shortcut settings changed last', () => {
+    const at = (updated: number) => ({ shortcuts: {}, updated });
+    expect(newerShortcuts(at(2), at(1))).toBe('local');
+    expect(newerShortcuts(at(1), at(2))).toBe('remote');
+    expect(newerShortcuts(at(1), at(1))).toBe('same');
+    expect(newerShortcuts(undefined, at(1))).toBe('remote');
+    expect(newerShortcuts(undefined, undefined)).toBe('same');
   });
 
   it('only accepts extension origins', () => {

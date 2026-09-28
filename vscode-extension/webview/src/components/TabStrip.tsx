@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import type { TabState } from '@shared/protocol';
-import { shortcutLabel } from '../keyboard';
 import { tabContextMenu } from '../menus';
 import { postToHost } from '../vscode';
+import { withShortcut } from '../shortcuts';
 import type { MenuItem } from './Menu';
 
 const TAB_DRAG_TYPE = 'application/x-vscode-browser-tab';
@@ -93,7 +93,7 @@ export function TabStrip({ tabs, activeTabId, canReopenClosedTab, openMenu }: Ta
               type="button"
               className="tab-close"
               aria-label={`Close ${tab.title}`}
-              title={`Close (${shortcutLabel('vscodeBrowser.closeTab')})`}
+              title={withShortcut('Close', 'tab.close')}
               onClick={(event) => {
                 event.stopPropagation();
                 postToHost({ type: 'tab', action: 'close', tabId: tab.id });
@@ -107,7 +107,7 @@ export function TabStrip({ tabs, activeTabId, canReopenClosedTab, openMenu }: Ta
       <button
         type="button"
         className="icon-button new-tab-button"
-        title={`New tab (${shortcutLabel('vscodeBrowser.newTab')})`}
+        title={withShortcut('New tab', 'tab.new')}
         aria-label="New tab"
         onClick={() => postToHost({ type: 'tab', action: 'new' })}
       >

@@ -15,7 +15,8 @@ import type {
   MouseInput,
   TabState,
 } from '@shared/protocol';
-import { isBrowserShortcut, isEditingCombo, keyInput, modifiersOf } from '../keyboard';
+import { isEditingCombo, keyInput, modifiersOf } from '../keyboard';
+import { endsShortcut } from '../shortcuts';
 import { onHostMessage, postToHost } from '../vscode';
 
 const BUTTONS: MouseButton[] = ['left', 'middle', 'right', 'back', 'forward'];
@@ -508,8 +509,6 @@ export function Viewport({
     // Picking elements, selecting a region or drawing: keys are for the tool, not the page.
     if (modeRef.current.kind !== 'browse') return;
     if (native.isComposing || native.keyCode === 229) return;
-    // Let VS Code run browser shortcuts (they are keybindings) instead of the page.
-    if (isBrowserShortcut(native)) return;
     if (native.key === 'Dead' || native.key === 'Unidentified') return;
     send(keyInput(native, 'keyDown'));
     event.preventDefault();
@@ -520,7 +519,7 @@ export function Viewport({
 
   const onKeyUp = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const native = event.nativeEvent;
-    if (native.isComposing || native.keyCode === 229 || isBrowserShortcut(native)) return;
+    if (native.isComposing || native.keyCode === 229 || endsShortcut(native.code)) return;
     if (native.key === 'Dead' || native.key === 'Unidentified') return;
     send(keyInput(native, 'keyUp'));
     event.preventDefault();

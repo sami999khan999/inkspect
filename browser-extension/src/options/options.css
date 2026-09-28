@@ -1,0 +1,199 @@
+/* The settings page. Components and tokens come from @inkspect/shared/ui (ui.css, theme.css). */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  line-height: 1.45;
+}
+
+.muted {
+  color: var(--ink-muted);
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ink-space-5);
+  width: min(620px, 100% - 32px);
+  margin: 0 auto;
+  padding: 48px 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--ink-space-4);
+}
+
+.brand-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--ink-radius-lg);
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: var(--ink-font-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.brand p {
+  margin: 2px 0 0;
+}
+
+.link-card {
+  overflow: hidden;
+}
+
+.link-status {
+  display: flex;
+  align-items: center;
+  gap: var(--ink-space-3);
+  padding: var(--ink-space-4);
+}
+
+.link-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.link-title {
+  font-weight: 600;
+}
+
+.status {
+  margin: 2px 0 0;
+  color: var(--ink-muted);
+}
+
+.status-dot {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+}
+
+.status-dot.ok {
+  background: var(--ink-success);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ink-success) 22%, transparent);
+}
+
+.status-dot.warn {
+  background: var(--ink-warning);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ink-warning) 22%, transparent);
+}
+
+.status-dot.busy {
+  background: var(--ink-accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.pair {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ink-space-4);
+  padding: var(--ink-space-4);
+  border-top: 1px solid var(--ink-border-subtle);
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.steps li::marker {
+  color: var(--ink-muted);
+}
+
+.pair-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ink-space-3);
+}
+
+.pair-button {
+  height: 44px;
+  padding: 0 18px;
+}
+
+.code-input {
+  display: flex;
+  gap: 8px;
+}
+
+.code-box {
+  width: 40px;
+  height: 44px;
+  border: 1px solid var(--vscode-input-border, var(--ink-border));
+  border-radius: var(--ink-radius);
+  outline: none;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-family: var(--vscode-editor-font-family);
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+  caret-color: var(--ink-accent);
+  transition:
+    border-color var(--ink-fast) var(--ink-ease),
+    box-shadow var(--ink-fast) var(--ink-ease);
+}
+
+.code-box:nth-child(3) {
+  margin-right: 10px;
+}
+
+.code-box:hover:not(:disabled) {
+  border-color: var(--ink-border-strong);
+}
+
+.code-box:focus {
+  border-color: var(--ink-accent);
+  box-shadow: 0 0 0 1px var(--ink-accent);
+}
+
+.code-box:disabled {
+  opacity: 0.6;
+}
+
+.pair-message {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink-danger);
+}
+
+.footnote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--ink-font-sm);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.busy {
+    animation: none;
+  }
+}

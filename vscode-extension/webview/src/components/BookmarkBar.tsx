@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import type { BookmarkNode } from '@shared/bookmarks';
+import { bookmarkLabel, type BookmarkNode } from '@shared/bookmarks';
 import { postToHost } from '../vscode';
 import type { MenuItem } from './Menu';
 
@@ -16,24 +16,29 @@ interface BookmarkBarProps {
 const open = (url: string, newTab: boolean) =>
   postToHost({ type: 'bookmark', action: 'open', url, newTab });
 
-/** Menu listing a folder's contents; sub-folders open their own menu at the same place. */
-function folderMenu(
-  folder: BookmarkNode,
-  x: number,
-  y: number,
-  openMenu: BookmarkBarProps['openMenu'],
-): MenuItem[] {
-  const children = folder.children ?? [];
-  const items: MenuItem[] = children.map((child) =>
-    child.type === 'folder'
+/** Menu items for bookmarks and folders; folders cascade into submenus, like Chrome. */
+function nodeItems(nodes: BookmarkNode[]): MenuItem[] {
+  return nodes.map((node) =>
+    node.type === 'folder'
       ? {
-          label: child.title,
+          label: node.title || 'Untitled folder',
           icon: 'folder',
-          onSelect: () => setTimeout(() => openMenu(x, y, folderMenu(child, x, y, openMenu))),
+          onSelect: () => {},
+          submenu: () => folderItems(node),
         }
-      : { label: child.title, icon: 'globe', onSelect: () => open(child.url!, false) },
+      : {
+          label: bookmarkLabel(node),
+          icon: 'globe',
+          image: node.favicon,
+          onSelect: () => open(node.url!, false),
+        },
   );
-  if (!items.length) return [{ label: '(empty)', disabled: true, onSelect: () => {} }];
+}
+
+/** A folder's contents, then "Open all in new tabs" when it holds bookmarks. */
+function folderItems(folder: BookmarkNode): MenuItem[] {
+  const children = folder.children ?? [];
+  const items = nodeItems(children);
   if (children.some((c) => c.type === 'bookmark')) {
     items.push(
       { separator: true },
@@ -56,7 +61,8 @@ export function BookmarkBar({ items, barId, openMenu, onEdit }: BookmarkBarProps
     const bar = ref.current;
     if (!bar) return;
     const measure = () => {
-      const limit = bar.clientWidth - 32;
+      // Room for the » button, which sits at the right edge.
+      const limit = bar.clientWidth - 36;
       const buttons = [...bar.querySelectorAll<HTMLElement>('.bookmark-item')];
       const overflowing = buttons.filter((b) => b.offsetLeft + b.offsetWidth > limit).length;
       setHidden(overflowing);
@@ -108,6 +114,8 @@ export function BookmarkBar({ items, barId, openMenu, onEdit }: BookmarkBarProps
           className="bookmark-item"
           title={node.type === 'bookmark' ? `${node.title}\n${node.url}` : node.title}
           style={index >= items.length - hidden ? { visibility: 'hidden' } : undefined}
+          tabIndex={index >= items.length - hidden ? -1 : undefined}
+          aria-hidden={index >= items.length - hidden || undefined}
           draggable
           onDragStart={(event) => event.dataTransfer.setData(DRAG_TYPE, node.id)}
           onDragOver={(event) => {
@@ -132,10 +140,11 @@ export function BookmarkBar({ items, barId, openMenu, onEdit }: BookmarkBarProps
               open(node.url!, event.ctrlKey || event.metaKey);
             } else {
               const rect = event.currentTarget.getBoundingClientRect();
+              const items = folderItems(node);
               openMenu(
                 rect.left,
                 rect.bottom + 2,
-                folderMenu(node, rect.left, rect.bottom + 2, openMenu),
+                items.length ? items : [{ label: '(empty)', disabled: true, onSelect: () => {} }],
               );
             }
           }}
@@ -151,7 +160,7 @@ export function BookmarkBar({ items, barId, openMenu, onEdit }: BookmarkBarProps
           ) : (
             <span className="codicon codicon-globe" aria-hidden="true" />
           )}
-          <span className="bookmark-title">{node.title}</span>
+          <span className="bookmark-title">{bookmarkLabel(node)}</span>
         </button>
       ))}
       {overflow.length > 0 && (
@@ -162,20 +171,10 @@ export function BookmarkBar({ items, barId, openMenu, onEdit }: BookmarkBarProps
           aria-label="More bookmarks"
           onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
-            const folder: BookmarkNode = {
-              id: barId,
-              type: 'folder',
-              title: '',
-              createdAt: 0,
-              children: overflow,
-            };
-            openMenu(
-              rect.right - 200,
-              rect.bottom + 2,
-              folderMenu(folder, rect.right - 200, rect.bottom + 2, openMenu),
-            );
+            openMenu(rect.right - 260, rect.bottom + 2, nodeItems(overflow));
           }}
         >
+          <span className="codicon codicon-chevron-right" aria-hidden="true" />
           <span className="codicon codicon-chevron-right" aria-hidden="true" />
         </button>
       )}

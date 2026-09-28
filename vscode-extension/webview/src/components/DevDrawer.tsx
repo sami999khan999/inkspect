@@ -1,5 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { DevCommand } from '../actions';
+import { withShortcut } from '../shortcuts';
 import { isFailedRequest, type ConsoleEntry, type NetworkEntry } from '@shared/devtools';
+import { Button } from '@inkspect/shared/ui/Button';
+import { IconButton } from '@inkspect/shared/ui/IconButton';
+import { Segmented } from '@inkspect/shared/ui/Segmented';
+import { Select } from '@inkspect/shared/ui/Select';
+import { Checkbox } from '@inkspect/shared/ui/Switch';
+import { TextField } from '@inkspect/shared/ui/TextField';
 import { formatBytes } from '../format';
 import { postToHost } from '../vscode';
 
@@ -10,6 +18,8 @@ interface DevDrawerProps {
   height: number;
   onResize: (height: number) => void;
   onClose: () => void;
+  /** A shortcut's request (switch view, focus the filter); `seq` changes each time. */
+  command?: { name: DevCommand; seq: number } | null;
 }
 
 const LEVEL_ICON: Record<ConsoleEntry['level'], string> = {
@@ -29,8 +39,26 @@ function shortUrl(url: string): string {
 }
 
 /** Console and network log docked under the page, with "copy for AI" summaries. */
-export function DevDrawer({ tabId, console, network, height, onResize, onClose }: DevDrawerProps) {
+export function DevDrawer({
+  tabId,
+  console,
+  network,
+  height,
+  onResize,
+  onClose,
+  command,
+}: DevDrawerProps) {
   const [view, setView] = useState<'console' | 'network'>('console');
+  const filterRef = useRef<HTMLInputElement>(null);
+  // Shortcuts switch the view while rendering (no effect needed) and focus the filter.
+  const [seenSeq, setSeenSeq] = useState(command?.seq);
+  if (command && command.seq !== seenSeq) {
+    setSeenSeq(command.seq);
+    if (command.name !== 'filter') setView(command.name);
+  }
+  useEffect(() => {
+    if (command?.name === 'filter') filterRef.current?.focus();
+  }, [command]);
   const [level, setLevel] = useState<'all' | 'error' | 'warning'>('all');
   const [filter, setFilter] = useState('');
   const [failedOnly, setFailedOnly] = useState(false);
@@ -75,114 +103,98 @@ export function DevDrawer({ tabId, console, network, height, onResize, onClose }
         }}
       />
       <div className="dev-toolbar">
-        <div className="dev-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === 'console'}
-            className={view === 'console' ? 'active' : ''}
-            onClick={() => setView('console')}
-          >
-            Console {errors > 0 && <span className="dev-count error">{errors}</span>}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === 'network'}
-            className={view === 'network' ? 'active' : ''}
-            onClick={() => setView('network')}
-          >
-            Network {failures > 0 && <span className="dev-count error">{failures}</span>}
-          </button>
-        </div>
-        <input
-          type="search"
-          placeholder="Filter"
+        <Segmented
+          label="Log"
+          size="sm"
+          value={view}
+          onChange={setView}
+          options={[
+            {
+              value: 'console',
+              label: 'Console',
+              icon: 'terminal',
+              count: errors || undefined,
+              tone: 'error',
+            },
+            {
+              value: 'network',
+              label: 'Network',
+              icon: 'globe',
+              count: failures || undefined,
+              tone: 'error',
+            },
+          ]}
+        />
+        <TextField
+          ref={filterRef}
+          size="sm"
+          icon="filter"
+          className="dev-filter"
+          placeholder={view === 'console' ? 'Filter messages' : 'Filter URLs'}
           aria-label="Filter"
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
+          onClear={() => setFilter('')}
         />
         {view === 'console' ? (
-          <select
+          <Select
+            size="sm"
+            appearance="quiet"
+            label="Level"
             value={level}
-            aria-label="Level"
-            onChange={(event) => setLevel(event.target.value as typeof level)}
-          >
-            <option value="all">All levels</option>
-            <option value="warning">Warnings and errors</option>
-            <option value="error">Errors</option>
-          </select>
+            onChange={setLevel}
+            options={[
+              { value: 'all', label: 'All levels' },
+              { value: 'warning', label: 'Warnings and errors', icon: 'warning' },
+              { value: 'error', label: 'Errors only', icon: 'error' },
+            ]}
+          />
         ) : (
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={failedOnly}
-              onChange={(event) => setFailedOnly(event.target.checked)}
-            />
+          <Checkbox checked={failedOnly} onChange={setFailedOnly}>
             Failed only
-          </label>
+          </Checkbox>
         )}
         <span className="dev-spacer" />
-        <button
-          type="button"
-          className="button secondary small"
+        <Button
+          size="sm"
+          variant="ghost"
+          icon="copy"
           title="Copy console errors as Markdown"
           onClick={() => action('copyErrors')}
         >
-          Copy errors
-        </button>
-        <button
-          type="button"
-          className="button secondary small"
+          Errors
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          icon="copy"
           title="Copy failed requests as Markdown"
           onClick={() => action('copyFailedRequests')}
         >
-          Copy failed requests
-        </button>
-        <button
-          type="button"
-          className="button primary small"
-          title="URL, viewport, selection, recent errors and failed requests"
+          Failed requests
+        </Button>
+        <Button
+          size="sm"
+          variant="primary"
+          icon="sparkle"
+          title="Copy the URL, viewport, selection, recent errors and failed requests for an AI agent"
           onClick={() => action('copyContext')}
         >
           Copy page context
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          title="Send page context to chat"
-          aria-label="Send page context to chat"
+        </Button>
+        <span className="toolbar-separator" />
+        <IconButton
+          icon="comment-discussion"
+          label={withShortcut('Send page context to the agent', 'dev.contextAgent')}
           onClick={() => action('copyContext', true)}
-        >
-          <span className="codicon codicon-comment-discussion" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          title="Clear"
-          aria-label="Clear"
-          onClick={() => action('clear')}
-        >
-          <span className="codicon codicon-clear-all" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          title="Open DevTools (F12)"
-          aria-label="Open DevTools"
+        />
+        <IconButton icon="clear-all" label="Clear" onClick={() => action('clear')} />
+        <IconButton
+          icon="tools"
+          label="Open DevTools (F12)"
           onClick={() => action('openDevTools')}
-        >
-          <span className="codicon codicon-tools" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          title="Close"
-          aria-label="Close"
-          onClick={onClose}
-        >
-          <span className="codicon codicon-close" aria-hidden="true" />
-        </button>
+        />
+        <IconButton icon="close" label="Close" onClick={onClose} />
       </div>
       <div className="dev-content">
         {view === 'console' ? (
@@ -212,7 +224,12 @@ export function DevDrawer({ tabId, console, network, height, onResize, onClose }
               </div>
             ))
           ) : (
-            <p className="muted dev-empty">No console messages.</p>
+            <EmptyState
+              icon="terminal"
+              text={
+                needle || level !== 'all' ? 'No messages match the filter.' : 'No console messages.'
+              }
+            />
           )
         ) : requests.length ? (
           <table className="dev-network">
@@ -252,9 +269,25 @@ export function DevDrawer({ tabId, console, network, height, onResize, onClose }
             </tbody>
           </table>
         ) : (
-          <p className="muted dev-empty">No requests yet. Reload the page to record them.</p>
+          <EmptyState
+            icon="globe"
+            text={
+              network.length
+                ? 'No requests match the filter.'
+                : 'No requests yet. Reload the page to record them.'
+            }
+          />
         )}
       </div>
+    </div>
+  );
+}
+
+function EmptyState({ icon, text }: { icon: string; text: string }) {
+  return (
+    <div className="dev-empty">
+      <span className={`codicon codicon-${icon}`} aria-hidden="true" />
+      {text}
     </div>
   );
 }

@@ -1,3 +1,5 @@
+// DISABLED: the toolbar features are switched off for now and this entry is not built (see
+// src/background/index.ts and scripts/build.mjs). The code is kept to bring them back.
 // Runs in the page's own JavaScript world (injected by the extension when the toolbar opens).
 // Framework internals (React fibers, Vue instances...) are only visible here, and hooking
 // `console` and `fetch` needs the page's own objects. It answers the content script through DOM

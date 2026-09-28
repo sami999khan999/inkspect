@@ -587,6 +587,30 @@ plans/                this plan
 
 ---
 
+## Phase 12: Shortcuts for everything, sending to the agent, more modes
+
+**Shortcuts**
+- [x] One registry (`SHORTCUT_ACTIONS`) for every action: browser-wide keys and each mode's keys. The webview dispatches them; the static VS Code keybindings are gone (they would fire twice).
+- [x] Every mode has a toggle key; while a mode is on, its features have their own keys. Takeover modes use plain keys; the console, device, overlay and record modes use Alt+ keys.
+- [x] The **Shortcuts** view in the Browser sidebar: search, record new keys, add a second key, remove, reset, conflicts with a fix, export and import (JSON).
+- [x] Synced across devices: the `vscodeBrowser.shortcuts` setting (VS Code Settings Sync) and, through the paired browser extension, `chrome.storage.sync` (the newer copy wins).
+- [x] Quick actions (Ctrl+K) and a cheat sheet of the current mode (Ctrl+/ or ?). Tooltips, menus and hint bars show the user's keys.
+
+**Screenshots and the agent**
+- [x] Every screenshot is copied to the clipboard (Alt+click and screenshots from the browser extension too). `screenshots.saveFile` replaces `screenshots.defaultAction`, whose "copy" value still means "don't save".
+- [x] **Send to Agent** everywhere: the agent CLI in a terminal by default (the only agent terminal, or the last one chosen), VS Code chat with `agent.sendTarget`. Long text goes in a file under `.vscode-browser/context/`.
+
+**New modes**
+- [x] Measure: box model and size on hover, click to pin, distances to other elements, grid, copy.
+- [x] Eyedropper: loupe, click to copy the color as hex, rgb() or hsl().
+- [x] Accessibility check: missing alt text, names and labels, low contrast, tab order; step through, copy or send the report.
+- [x] CSS tweak: pick an element, edit its styles live, copy or send the changes as a CSS rule; leaving reverts the page.
+- [x] Design overlay: an image over the page at any opacity, with nudging and a difference blend.
+- [x] Record: the page as a WebM video, saved next to the screenshots and offered to the agent.
+- [ ] Screen recording as GIF: not done (WebM needs no encoder; agents read video paths).
+
+---
+
 ## Milestones
 
 | Milestone | Phases | Result |

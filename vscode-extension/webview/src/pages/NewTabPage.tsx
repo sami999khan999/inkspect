@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react';
 import type { BookmarkNode } from '@shared/bookmarks';
 import type { HistoryItem } from '@shared/history';
-import { shortcutLabel } from '../keyboard';
+import { TextField } from '@inkspect/shared/ui/TextField';
+import { KeyCaps } from '../components/KeyCaps';
+import { useShortcutMap } from '../shortcuts';
 import { postToHost } from '../vscode';
 
-const TIPS: [string, string][] = [
-  ['vscodeBrowser.focusAddressBar', 'Focus the address bar'],
-  ['vscodeBrowser.newTab', 'New tab'],
-  ['vscodeBrowser.reopenClosedTab', 'Reopen closed tab'],
-  ['vscodeBrowser.find', 'Find in page'],
-  ['vscodeBrowser.bookmarkPage', 'Bookmark page'],
+/** Shortcut tiles on the new tab page: [action id, label, codicon]. */
+const TIPS: [string, string, string][] = [
+  ['open.quickActions', 'Quick actions', 'zap'],
+  ['mode.inspect', 'Select an element', 'inspect'],
+  ['mode.draw', 'Draw on the page', 'edit'],
+  ['mode.screenshot', 'Screenshot', 'device-camera'],
+  ['mode.measure', 'Measure', 'symbol-ruler'],
+  ['open.cheatSheet', 'All shortcuts', 'keyboard'],
 ];
 
 interface NewTabPageProps {
@@ -36,6 +40,7 @@ export function NewTabPage({
   changeSignal,
 }: NewTabPageProps) {
   const [text, setText] = useState('');
+  const map = useShortcutMap();
 
   useEffect(() => {
     if (!isPrivate) postToHost({ type: 'requestPageData', page: 'newtab' });
@@ -72,19 +77,19 @@ export function NewTabPage({
           </p>
         )}
         <form
-          className="newtab-search"
+          className="newtab-form"
           onSubmit={(event) => {
             event.preventDefault();
             if (text.trim()) postToHost({ type: 'navigate', tabId, input: text });
           }}
         >
-          <span className="codicon codicon-search" aria-hidden="true" />
-          <input
-            type="text"
+          <TextField
+            size="lg"
+            icon="search"
+            className="newtab-search"
             value={text}
             placeholder="Search the web or enter an address"
             aria-label="Search the web or enter an address"
-            spellCheck={false}
             onChange={(event) => setText(event.target.value)}
           />
         </form>
@@ -113,13 +118,30 @@ export function NewTabPage({
             ))}
           </div>
         )}
-        <ul className="newtab-tips">
-          {TIPS.map(([command, label]) => (
-            <li key={command}>
-              <kbd>{shortcutLabel(command)}</kbd> {label}
-            </li>
-          ))}
-        </ul>
+        <section className="newtab-shortcuts" aria-label="Keyboard shortcuts">
+          <header>
+            <span className="codicon codicon-keyboard" aria-hidden="true" />
+            <span>Keyboard shortcuts</span>
+            <button
+              type="button"
+              className="link-button"
+              onClick={() =>
+                postToHost({ type: 'command', command: 'vscodeBrowser.editShortcuts' })
+              }
+            >
+              Customize
+            </button>
+          </header>
+          <ul>
+            {TIPS.filter(([id]) => map[id]?.length).map(([id, label, icon]) => (
+              <li key={id}>
+                <span className={`codicon codicon-${icon}`} aria-hidden="true" />
+                <span className="newtab-shortcut-label">{label}</span>
+                <KeyCaps binding={map[id]![0]!} size="sm" />
+              </li>
+            ))}
+          </ul>
+        </section>
       </div>
     </div>
   );
