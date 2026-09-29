@@ -255,13 +255,18 @@ function NoAgent() {
         <div className="no-agent-actions">
           <Button
             size="sm"
-            variant="primary"
+            variant="accent"
             icon="play"
             onClick={() => post({ type: 'startAgent' })}
           >
             Start agent
           </Button>
-          <Button size="sm" icon="terminal" onClick={() => post({ type: 'chooseTerminal' })}>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon="terminal"
+            onClick={() => post({ type: 'chooseTerminal' })}
+          >
             Pick terminal
           </Button>
         </div>
@@ -287,6 +292,7 @@ function ContextCard({
 }) {
   const chooseRef = useRef<HTMLButtonElement>(null);
   const [broken, setBroken] = useState(false);
+  const [tall, setTall] = useState(false);
   const send = () => post({ type: 'send', id: item.id });
   const sent = item.sentTo.length > 0;
   const picture = thumbnail && !broken ? thumbnail : undefined;
@@ -309,11 +315,19 @@ function ContextCard({
       {picture && (
         <button
           type="button"
-          className="card-thumb"
+          className={`card-thumb${tall ? ' tall' : ''}`}
           aria-label={`Open ${item.title}`}
           onClick={() => post({ type: 'open', id: item.id })}
         >
-          <img src={picture} alt="" onError={() => setBroken(true)} />
+          <img
+            src={picture}
+            alt=""
+            onError={() => setBroken(true)}
+            onLoad={(event) => {
+              const { naturalWidth: w, naturalHeight: h } = event.currentTarget;
+              setTall(w > 0 && h / w > 1.1);
+            }}
+          />
         </button>
       )}
       <div className="card-head">
@@ -345,7 +359,7 @@ function ContextCard({
         <div className="send-split">
           <Button
             size="sm"
-            variant={sent ? 'secondary' : 'primary'}
+            variant={sent ? 'secondary' : 'accent'}
             icon={sent ? 'check' : 'send'}
             onClick={send}
             title={target ? `Send to ${target.label}` : 'Send to an agent'}
@@ -356,7 +370,7 @@ function ContextCard({
             <Button
               ref={chooseRef}
               size="sm"
-              variant={sent ? 'secondary' : 'primary'}
+              variant={sent ? 'secondary' : 'accent'}
               icon="chevron-down"
               className="send-more"
               aria-label="Send to another agent"

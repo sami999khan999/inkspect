@@ -67,10 +67,18 @@ export function BookmarkBar({ items, barId, openMenu, onEdit }: BookmarkBarProps
       const overflowing = buttons.filter((b) => b.offsetLeft + b.offsetWidth > limit).length;
       setHidden(overflowing);
     };
+    // Items change width after the first layout too (favicons and the icon font load late), so
+    // they are watched as well as the bar; otherwise the last one can grow under the » button.
     const observer = new ResizeObserver(measure);
     observer.observe(bar);
+    for (const item of bar.querySelectorAll('.bookmark-item')) observer.observe(item);
+    let live = true;
+    void document.fonts.ready.then(() => live && measure());
     measure();
-    return () => observer.disconnect();
+    return () => {
+      live = false;
+      observer.disconnect();
+    };
   }, [items]);
 
   const contextMenu = (event: React.MouseEvent, node: BookmarkNode) => {

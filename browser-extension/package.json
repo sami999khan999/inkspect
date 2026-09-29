@@ -11,7 +11,7 @@
     "typecheck": "tsc -p .",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:e2e": "node scripts/build.mjs --browser chrome --test && node test/e2e/run.mjs"
+    "test:e2e": "node scripts/build.mjs --browser chrome && node scripts/build.mjs --browser chrome --test && node test/e2e/run.mjs"
   },
   "dependencies": {
     "@inkspect/shared": "*",

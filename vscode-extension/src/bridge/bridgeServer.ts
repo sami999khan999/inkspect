@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
@@ -19,6 +19,7 @@ import {
   type ShortcutSettings,
 } from '@inkspect/shared/bridge';
 import { captureAndSend } from '../agent/chat';
+import { addContext } from '../agent/contextTray';
 import { errorMessage } from '../browser/logger';
 import { getConfig } from '../config';
 import type { BookmarksStore } from '../features/bookmarks';
@@ -34,6 +35,7 @@ import {
   writeShortcuts,
 } from '../features/shortcutSettings';
 import { sanitizeOverrides } from '../shared/shortcuts';
+import { WindowRelay, type RelayResult } from './windowRelay';
 
 const CLIENTS_KEY = 'vscodeBrowser.bridge.clients';
 const PAIRING_MS = 2 * 60_000;
@@ -46,6 +48,21 @@ const RETRY_MS = 15_000;
 // pairing can start from any of them.
 const PAIRING_FILE = 'bridge-pairing.json';
 const OFFERS_FILE = 'bridge-offers.json';
+/** The serving window's linked browsers, so every window's status bar can show them. */
+const LINK_FILE = 'bridge-link.json';
+/** A link file this old means its window closed without saying so. */
+const LINK_STALE_MS = 30_000;
+
+interface SharedLink {
+  browsers: string[];
+  /** The serving window's name. */
+  servedBy: string;
+  at: number;
+}
+/** Sends relayed from the serving window to the window the user used last. */
+const SENDS_FOLDER = 'bridge-sends';
+
+type SendMessage = Extract<ClientMessage, { type: 'send' }>;
 
 interface SharedPairing {
   codeHash: string;
@@ -96,10 +113,20 @@ export class BridgeServer implements vscode.Disposable {
   private requestTimer?: NodeJS.Timeout;
   private retryTimer?: NodeJS.Timeout;
   private loggedPortInUse = false;
+  private warnedOlderServer = false;
+  private readonly startedAt = Date.now();
   private readonly disposables: vscode.Disposable[] = [];
   private readonly statusItem: vscode.StatusBarItem;
   private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChange = this.onDidChangeEmitter.event;
+  /** Runs sends in the VS Code window used last, not only in the one serving the link. */
+  private readonly relay: WindowRelay<SendMessage>;
+  private relayTimer?: NodeJS.Timeout;
+  private relayTicks = 0;
+  /** The window list browsers were sent last. */
+  private lastWindows = '';
+  /** The status bar item's last text and tooltip ('' when hidden). */
+  private lastStatus: string | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -111,6 +138,31 @@ export class BridgeServer implements vscode.Disposable {
       version: 1,
       defaults: () => ({}),
     });
+    this.relay = new WindowRelay(
+      join(context.globalStorageUri.fsPath, SENDS_FOLDER),
+      randomUUID(),
+      () => vscode.workspace.name ?? 'No folder',
+      (message) => this.runSend(message),
+    );
+    if (vscode.window.state.focused) this.relay.markFocused();
+    else this.relay.announce();
+    // The heartbeat that keeps this window in the list, and a check for sends handed to it (the
+    // folder watcher below can miss events). The serving window also tells browsers when the
+    // list of windows changes.
+    this.relayTimer = setInterval(() => {
+      void this.relay.poll();
+      if (++this.relayTicks % 10 === 0) {
+        try {
+          this.relay.announce();
+        } catch (error) {
+          this.logger.warn(`Browser link: could not announce this window: ${errorMessage(error)}`);
+        }
+        // The serving window's heartbeat for the others' status bar.
+        if (this.server) this.shareLink();
+      }
+      this.sendWindowsIfChanged();
+      if (!this.server) this.updateStatus();
+    }, 1_000);
     this.statusItem = vscode.window.createStatusBarItem(
       'vscodeBrowser.bridge',
       vscode.StatusBarAlignment.Right,
@@ -144,8 +196,21 @@ export class BridgeServer implements vscode.Disposable {
       }),
       // Offers are shown by whichever window has focus, which is rarely the serving one.
       vscode.window.onDidChangeWindowState((state) => {
-        if (state.focused) this.showOffers();
+        if (!state.focused) return;
+        this.showOffers();
+        this.relay.markFocused();
+        void this.relay.poll();
+        this.sendWindowsIfChanged();
       }),
+    );
+    // Sends handed to this window by the one serving the link.
+    const sends = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.joinPath(context.globalStorageUri, SENDS_FOLDER), '*'),
+    );
+    this.disposables.push(
+      sends,
+      sends.onDidCreate(() => void this.relay.poll()),
+      sends.onDidChange(() => void this.relay.poll()),
     );
     const offers = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(context.globalStorageUri, OFFERS_FILE),
@@ -487,7 +552,29 @@ export class BridgeServer implements vscode.Disposable {
     const syncBookmarks = getConfig().bridgeSyncBookmarks;
     this.send(connection, { type: 'welcome', peer: this.peerName(), syncBookmarks });
     this.send(connection, this.shortcutsMessage());
+    this.send(connection, this.windowsMessage());
     this.updateStatus();
+  }
+
+  /** The open VS Code windows, for the browser to offer as places to send to. */
+  private windowsMessage(): ServerMessage {
+    const windows = this.relay.windows();
+    return {
+      type: 'windows',
+      windows: windows.map((w, index) => ({ id: w.id, name: w.name, lastUsed: index === 0 })),
+    };
+  }
+
+  /** Serving window: tells linked browsers when windows open, close or take focus. */
+  private sendWindowsIfChanged(): void {
+    if (!this.server) return;
+    const message = this.windowsMessage();
+    const json = JSON.stringify(message);
+    if (json === this.lastWindows) return;
+    this.lastWindows = json;
+    for (const connection of this.connections) {
+      if (connection.client) this.send(connection, message);
+    }
   }
 
   private peerName(): string {
@@ -614,15 +701,38 @@ export class BridgeServer implements vscode.Disposable {
     this.logger.info(`Bookmarks backed up (${reason}) in ${folder}`);
   }
 
-  private async handleSend(
-    connection: Connection,
-    message: Extract<ClientMessage, { type: 'send' }>,
-  ): Promise<void> {
-    const reply = (ok: boolean, extra: { path?: string; error?: string } = {}) =>
-      this.send(connection, { type: 'send.result', id: message.id, ok, ...extra });
+  /** A send from the browser: it runs in the VS Code window used last (see WindowRelay). */
+  private async handleSend(connection: Connection, message: SendMessage): Promise<void> {
+    const result = await this.relay.dispatch(message, message.window);
+    this.send(connection, { type: 'send.result', id: message.id, ...result });
+  }
+
+  /**
+   * Runs a send in this window: added to the Agent Context list (every capture, as it is taken),
+   * saved into the workspace, or sent to the chat or an agent. Sends of one capture share one
+   * Agent Context item (its key).
+   */
+  private async runSend(message: SendMessage): Promise<RelayResult> {
     try {
       const globalStorage = this.context.globalStorageUri.fsPath;
       const label = message.label || 'From the browser';
+      const key = message.capture ? `browser:${message.capture}` : undefined;
+      const kind = message.kind ?? (message.image ? 'screenshot' : 'text');
+      if (message.target === 'context') {
+        // Only the list: nothing is copied (the browser did), saved or sent.
+        addContext({
+          kind,
+          title: label,
+          detail: message.pageUrl,
+          text: message.image ? undefined : message.text,
+          image: message.image
+            ? { bytes: new Uint8Array(Buffer.from(message.image, 'base64')), mimeType: 'image/png' }
+            : undefined,
+          url: message.pageUrl,
+          key,
+        });
+        return { ok: true };
+      }
       let path: string | undefined;
       if (message.image) {
         const bytes = new Uint8Array(Buffer.from(message.image, 'base64'));
@@ -640,7 +750,8 @@ export class BridgeServer implements vscode.Disposable {
         // Sends from the browser show in the Agent Context list too.
         const sent = await captureAndSend(
           {
-            kind: message.image ? 'screenshot' : 'text',
+            kind,
+            key,
             title: label,
             detail: message.pageUrl,
             text: message.image ? undefined : message.text,
@@ -651,31 +762,100 @@ export class BridgeServer implements vscode.Disposable {
           message.target === 'terminal' ? 'terminal' : undefined,
         );
         if (!sent) {
-          reply(false, {
+          return {
+            ok: false,
             path: path && displayPath(path),
             error: 'Nothing was sent: no agent is running in a VS Code terminal.',
-          });
-          return;
+          };
         }
       }
-      reply(true, { path: path && displayPath(path) });
+      return { ok: true, path: path && displayPath(path) };
     } catch (error) {
-      reply(false, { error: errorMessage(error) });
+      return { ok: false, error: errorMessage(error) };
     }
   }
 
+  /**
+   * Another process holds the link's port but writes no link file: an older version of this
+   * extension, in a window that wasn't reloaded after an update. Browser sends then fail (it
+   * doesn't know newer messages), so say which windows to reload, once per session.
+   */
+  private warnIfServedByOlderVersion(): void {
+    if (
+      this.warnedOlderServer ||
+      !this.loggedPortInUse ||
+      !vscode.window.state.focused ||
+      Date.now() - this.startedAt < LINK_STALE_MS
+    ) {
+      return;
+    }
+    this.warnedOlderServer = true;
+    void vscode.window.showWarningMessage(
+      'The browser link runs in a VS Code window with an older version of VS Code Browser, so captures from the browser may not arrive. Reload your other VS Code windows (Developer: Reload Window).',
+    );
+  }
+
+  /** Serving window: writes its linked browsers for the other windows' status bars. */
+  private shareLink(): void {
+    const link: SharedLink = {
+      browsers: this.connected.map((c) => c.browser),
+      servedBy: vscode.workspace.name ?? 'another window',
+      at: Date.now(),
+    };
+    this.writeShared(LINK_FILE, link);
+  }
+
   private updateStatus(): void {
-    const connected = this.connected;
-    if (!this.server) {
-      this.statusItem.hide();
+    let status: { text: string; tooltip: string } | undefined;
+    if (this.server) {
+      this.shareLink();
+      const connected = this.connected;
+      status = connected.length
+        ? {
+            text: `$(plug) ${connected.length}`,
+            tooltip: `Linked browsers: ${connected.map((c) => c.browser).join(', ')}`,
+          }
+        : {
+            text: '$(debug-disconnect)',
+            tooltip: 'No browser linked. Click to pair the Inkspect browser extension.',
+          };
     } else {
-      this.statusItem.text = connected.length
-        ? `$(plug) ${connected.length}`
-        : '$(debug-disconnect)';
-      this.statusItem.tooltip = connected.length
-        ? `Linked browsers: ${connected.map((c) => c.browser).join(', ')}`
-        : 'No browser linked. Click to pair the Inkspect browser extension.';
+      // Another window serves the link: show what it reports, while it is still around.
+      const link = this.readShared<SharedLink>(LINK_FILE);
+      if (
+        link &&
+        Array.isArray(link.browsers) &&
+        typeof link.at === 'number' &&
+        Date.now() - link.at < LINK_STALE_MS
+      ) {
+        const browsers = link.browsers.filter((b): b is string => typeof b === 'string');
+        const through = `through the "${String(link.servedBy)}" window`;
+        status = browsers.length
+          ? {
+              text: `$(plug) ${browsers.length}`,
+              tooltip: `Linked browsers: ${browsers.join(', ')} (${through}). Sends from the browser go to the window you pick, or the one you used last.`,
+            }
+          : {
+              text: '$(debug-disconnect)',
+              tooltip: `No browser linked (${through}). Click to pair the Inkspect browser extension.`,
+            };
+      } else {
+        this.warnIfServedByOlderVersion();
+      }
+    }
+    // Other windows check every second: only a change is applied and announced.
+    const key = status
+      ? `${status.text}
+${status.tooltip}`
+      : '';
+    if (key === this.lastStatus) return;
+    this.lastStatus = key;
+    if (status) {
+      this.statusItem.text = status.text;
+      this.statusItem.tooltip = status.tooltip;
       this.statusItem.show();
+    } else {
+      this.statusItem.hide();
     }
     this.onDidChangeEmitter.fire();
   }
@@ -685,6 +865,8 @@ export class BridgeServer implements vscode.Disposable {
     for (const connection of this.connections) connection.socket.terminate();
     this.connections.clear();
     this.sockets?.close();
+    // The other windows stop showing a link that is gone.
+    if (this.server) this.writeShared(LINK_FILE, undefined);
     this.server?.close();
     this.server = undefined;
     this.sockets = undefined;
@@ -693,6 +875,8 @@ export class BridgeServer implements vscode.Disposable {
 
   dispose(): void {
     clearTimeout(this.requestTimer);
+    clearInterval(this.relayTimer);
+    this.relay.leave();
     this.stop();
     this.links.flushSync();
     for (const d of this.disposables) d.dispose();

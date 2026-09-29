@@ -17,7 +17,19 @@ interface InspectorProps {
   /** Enter: copy the multi-selection (or the element under the pointer). */
   onCommit: (element: Element | null) => void;
   onExit: () => void;
+  /**
+   * The `inspect.*` action a key press is (from the shared, remappable shortcuts), if any.
+   * Without it the default keys apply.
+   */
+  actionOf?: (event: KeyboardEvent) => string | undefined;
 }
+
+const DEFAULT_KEYS: Record<string, string> = {
+  Escape: 'inspect.exit',
+  ArrowUp: 'inspect.parent',
+  ArrowDown: 'inspect.child',
+  Enter: 'inspect.copy',
+};
 
 interface Box {
   x: number;
@@ -127,14 +139,22 @@ function tooltipInfo(el: Element) {
 }
 
 /** Chrome-style element picker: highlight and tooltip under the pointer. */
-export function Inspector({ host, purpose, selection, onPick, onCommit, onExit }: InspectorProps) {
+export function Inspector({
+  host,
+  purpose,
+  selection,
+  onPick,
+  onCommit,
+  onExit,
+  actionOf,
+}: InspectorProps) {
   const [target, setTarget] = useState<Element | null>(null);
   const [, setTick] = useState(0);
   const targetRef = useRef<Element | null>(null);
-  const handlers = useRef({ onPick, onCommit, onExit });
+  const handlers = useRef({ onPick, onCommit, onExit, actionOf });
 
   useEffect(() => {
-    handlers.current = { onPick, onCommit, onExit };
+    handlers.current = { onPick, onCommit, onExit, actionOf };
   });
 
   useEffect(() => {
@@ -168,13 +188,19 @@ export function Inspector({ host, purpose, selection, onPick, onCommit, onExit }
       }
     };
     const onKey = (event: KeyboardEvent) => {
-      if (ours(event)) return;
+      const action = handlers.current.actionOf
+        ? handlers.current.actionOf(event)
+        : DEFAULT_KEYS[event.key];
+      // Keys typed in the toolbar are its own, except the exit key: focus stays on the picker's
+      // button after clicking it, and that key must still leave the picker.
+      if (ours(event) && action !== 'inspect.exit') return;
       const current = targetRef.current;
-      if (event.key === 'Escape') handlers.current.onExit();
-      else if (event.key === 'ArrowUp' && current) setCurrent(parentElementOf(current) ?? current);
-      else if (event.key === 'ArrowDown' && current)
+      if (action === 'inspect.exit') handlers.current.onExit();
+      else if (action === 'inspect.parent' && current)
+        setCurrent(parentElementOf(current) ?? current);
+      else if (action === 'inspect.child' && current)
         setCurrent(firstChildElementOf(current) ?? current);
-      else if (event.key === 'Enter') handlers.current.onCommit(current);
+      else if (action === 'inspect.copy') handlers.current.onCommit(current);
       else return;
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -228,7 +254,7 @@ export function Inspector({ host, purpose, selection, onPick, onCommit, onExit }
       <div className="inspect-hint">
         {purpose === 'screenshot'
           ? 'Click an element to capture it · Esc to cancel'
-          : 'Click: copy · Ctrl+click: send to VS Code chat · Shift+click: add · Alt+click: with screenshot · ↑↓ parent/child · Enter: copy · Esc: exit'}
+          : 'Click: copy · Ctrl+click: send to VS Code chat · Shift+click: add · Alt+click: screenshot · ↑↓ parent/child · Enter: copy · Esc: exit'}
       </div>
       {boxes && (
         <>
@@ -236,6 +262,8 @@ export function Inspector({ host, purpose, selection, onPick, onCommit, onExit }
           <div className="hl hl-border" style={style(boxes.border)} />
           <div className="hl hl-padding" style={style(boxes.padding)} />
           <div className="hl hl-content" style={style(boxes.content)} />
+          {/* A crisp edge, so the element stands out on any page (fills alone wash out on dark ones). */}
+          <div className="hl hl-outline" style={style(boxes.border)} />
         </>
       )}
       {selection.map((el, index) => {

@@ -6,11 +6,11 @@ Guidance for AI coding agents working in this repository. Read it before changin
 
 **Inkspect** is a monorepo (npm workspaces) with two products:
 
-| Folder               | What it is                                                                                                                                                     | Status                                                    |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `vscode-extension/`  | **VS Code Browser** (working name): a full web browser inside a VS Code editor tab                                                                             | Built; see `plans/vscode-browser-plan.md`                 |
-| `browser-extension/` | **Inkspect** for Chrome/Edge/Brave/Firefox: live two-way bookmark sync with the VS Code extension. Its toolbar features are switched off (code commented out). | Bookmark sync only; see `plans/browser-extension-plan.md` |
-| `shared/`            | `@inkspect/shared`: code both products use                                                                                                                     | See **Shared package** below                              |
+| Folder               | What it is                                                                                                                                                                                   | Status                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `vscode-extension/`  | **VS Code Browser** (working name): a full web browser inside a VS Code editor tab                                                                                                           | Built; see `plans/vscode-browser-plan.md`    |
+| `browser-extension/` | **Inkspect** for Chrome/Edge/Brave/Firefox: a page toolbar for AI agents (element details, screenshots, drawing, responsive view) and live two-way bookmark sync with the VS Code extension. | Built; see `plans/browser-extension-plan.md` |
+| `shared/`            | `@inkspect/shared`: code both products use                                                                                                                                                   | See **Shared package** below                 |
 
 Unless a section says otherwise, the rest of this file is about the VS Code extension, and **paths are relative to `vscode-extension/`**.
 
@@ -145,7 +145,7 @@ npm run package      # production build + .vsix
 
 - Register commands in `src/commands.ts`.
 - Declare them in `package.json` (`contributes.commands`, `menus.commandPalette` with a `when`).
-- **Every browser shortcut is an action in `SHORTCUT_ACTIONS` (`src/shared/shortcuts.ts`)**, with an id, a label, a scope (`global` or a mode) and default keys:
+- **Every browser shortcut is an action in `SHORTCUT_ACTIONS` (`@inkspect/shared/shortcuts`, re-exported as `src/shared/shortcuts.ts`)**, with an id, a label, a scope (`global` or a mode) and default keys. The browser extension's toolbar uses the same actions and the same key map (it lists the ones it handles in `browser-extension/src/shortcuts.ts`):
   - The webview dispatches them (`webview/src/shortcuts.ts`, one capture-phase listener), so users can remap any of them in the **Shortcuts** sidebar view (`src/sidebar/ShortcutsView.ts`). The map is the `vscodeBrowser.shortcuts` setting, synced by VS Code Settings Sync and, through the bridge, the browser extension's `chrome.storage.sync`.
   - Don't add browser keys to `contributes.keybindings`. The only exceptions are actions marked `everywhere` (they must also work outside the browser); inside it, the webview consumes the key first, so they run once. A unit test checks that the keybindings match the `everywhere` actions, that ids are unique, that host commands exist, and that the defaults don't conflict.
   - Actions with a `command` run it through the host (the `command` message, allowed only for registry commands). Other actions are handled in the webview (`webview/src/actions.ts`, or a mode component registering its handlers).
@@ -254,18 +254,9 @@ npm run package      # production build + .vsix
 
 ## Browser extension (`browser-extension/`)
 
-**Current scope: bookmark sync only.**
+**What it does:** a toolbar on any page (opened with Alt+Shift+I, or from the popup of the toolbar button), the link to VS Code, bookmark sync, and the full page (`options.html`: VS Code and its windows, shortcuts, about).
 
-- The toolbar features are switched off, and their code is kept, commented out or unbuilt:
-  - the handlers at the end of `src/background/index.ts`
-  - `src/content/` and `src/main-world/` (not built)
-  - the build entries in `scripts/build.mjs`
-  - `manifest/toolbar.json` (not merged)
-  - the toolbar tests in `test/e2e/run.mjs`
-- Don't delete that code, and don't re-enable it unless asked.
-- What runs: the link client, bookmark sync, and the settings page (pairing). The manifest asks only for `storage` and `bookmarks`.
-
-The notes below describe the full design, including the disabled parts.
+**Shortcuts:** the toolbar dispatches VS Code Browser's shortcut actions (`browser-extension/src/shortcuts.ts` lists the ones it handles), with the same key map: sync storage (`inkspectShortcuts`), synced both ways through the link. Edit them with the shared `ShortcutList` (`@inkspect/shared/ui/ShortcutList`), in the toolbar's panel or on the full page. Save with `setShortcutKeys()`, which stamps a newer time so the change wins over VS Code's copy.
 
 **Architecture:**
 
@@ -273,9 +264,11 @@ The notes below describe the full design, including the disabled parts.
   - the shortcut and the toolbar button
   - injecting the toolbar on demand (`activeTab` + `scripting`), including the MAIN-world helper
   - `captureVisibleTab` (queued to Chrome's limit of about 2 per second)
-  - device emulation (`chrome.debugger`, or a device-sized window)
+  - the responsive view's emulation (`chrome.debugger`: user agent, touch, network, CPU, media) and its framing rule (`declarativeNetRequest` session rule, see below)
   - the VS Code link client (`bridge.ts`) and the browser half of bookmark sync (`bookmarks.ts`)
-- **Content** (`src/content/`): the toolbar is React in a **closed** shadow root on `<inkspect-toolbar>`. It holds the inspector, drawing, region select, panels, and capture and stitching (`capture.ts`).
+- **Content** (`src/content/`): the toolbar is React in a **closed** shadow root on `<inkspect-toolbar>`. It holds the inspector, drawing, region select, panels, the responsive view (`ResponsiveView.tsx`), and capture and stitching (`capture.ts`).
+  - The toolbar is a **full-width bar at the top**, and the page moves down to make room (`pagePush.ts`: the `html` margin, plus fixed and sticky elements anchored at the top). Anything measuring the page (captures) uses `pushOffset()`.
+  - The **responsive view** shows the page in a device-sized `<iframe>` of the same tab, centered and scaled to fit. The debugger's device metrics can't do this: they always draw the page at the tab's top-left. While it is open, a session rule drops `X-Frame-Options` and `Content-Security-Policy` for frames of the page's own origin, **in that tab only**, and it is removed when the view closes. The frame is sandboxed without scripted top navigation, so frame-busting scripts can't end the view. Tools that act on the page (picker, drawing, console, page context) don't reach into the frame yet and are disabled while it is open.
 - **MAIN world** (`src/main-world/`): runs in the page's own JS world. It collects element details (framework components are only visible there) and hooks console, errors, `fetch` and XHR.
 
 **Rules:**
@@ -286,9 +279,10 @@ The notes below describe the full design, including the disabled parts.
   - Nothing is ever exposed to the page's JS.
 - **Styling:** stylesheets are bundled as text into the shadow root. The shared components use VS Code theme variables, defined in `toolbar.css` for light and dark. Icons are codicons, whose font is registered from bytes (`FontFace`), because `@font-face` doesn't work inside shadow roots and URLs can be blocked by page CSP.
 - **Hide the toolbar during captures** (`hideUi`), and never capture our own UI.
-- **Manifests:** `manifest/base.json` plus `chrome.json` / `firefox.json`, merged by `scripts/manifest.mjs` (unit-tested). Keep required permissions minimal. Chrome needs `debugger` only for full emulation.
+- **Manifests:** `manifest/base.json` plus `chrome.json` / `firefox.json`, merged by `scripts/manifest.mjs` (unit-tested). Keep required permissions minimal: pages are reached through `activeTab` only (no host permissions), and only Chrome gets `debugger`.
 - **Test hooks:**
   - The **test build** (`--test`, `dist/chrome-test`) adds host access (tests can't press the shortcut that grants `activeTab`) and opens the shadow root.
+  - The open root hides bugs of the real build: from outside a **closed** shadow root, events don't show what they hit inside it (`composedPath()` stops at the host). Judge "inside our UI" from the root (`listenOutside` in `shared/src/ui/popover.tsx`), and keep the real-build tests in `test/e2e/run.mjs` passing: they open the real build through its button (`Extensions.triggerAction`) and click through DevTools-protocol boxes.
   - `globalThis.__inkspectTest` in the background exposes `toggleToolbar`, `reconnect`, `pair`, `bridgeStatus` and `syncState`.
   - Never ship the test build.
 - **Checks:** `npm run test:e2e:browser` must pass. It runs Chrome for Testing with the unpacked extension against a fixture site and a fake VS Code link that uses the real merge code.

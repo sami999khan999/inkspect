@@ -2,6 +2,7 @@
 // hides the toolbar, crops, and scrolls and stitches for areas taller than the viewport.
 import type { Bounds } from '@inkspect/shared/annotations';
 import { toBackground } from '../messages';
+import { pushOffset } from './pagePush';
 
 /** Hides the toolbar while capturing; returns a function that shows it again. */
 export type HideUi = () => () => void;
@@ -135,12 +136,48 @@ export async function captureArea(
   return { dataUrl: canvas.toDataURL('image/png'), area: clipped };
 }
 
+/** What the user sees of the page: the viewport below the toolbar. */
 export function viewportArea(): Bounds {
   const doc = document.documentElement;
-  return { x: scrollX, y: scrollY, width: doc.clientWidth, height: doc.clientHeight };
+  const top = pushOffset();
+  return { x: scrollX, y: scrollY + top, width: doc.clientWidth, height: doc.clientHeight - top };
 }
 
+/** The whole page, without the room made for the toolbar above it. */
 export function fullPageArea(): Bounds {
   const doc = document.documentElement;
-  return { x: 0, y: 0, width: doc.clientWidth, height: Math.max(doc.scrollHeight, innerHeight) };
+  const top = pushOffset();
+  return {
+    x: 0,
+    y: top,
+    width: doc.clientWidth,
+    height: Math.max(doc.scrollHeight, innerHeight) - top,
+  };
+}
+
+/**
+ * The responsive view's screen, as shown (scaled like on screen). Nothing of ours covers the
+ * frame, so nothing is hidden.
+ */
+export async function captureElementRect(el: Element): Promise<string> {
+  const rect = el.getBoundingClientRect();
+  const image = await captureVisible(() => () => {});
+  const ratio = image.width / innerWidth;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(rect.width * ratio);
+  canvas.height = Math.round(rect.height * ratio);
+  canvas
+    .getContext('2d')!
+    .drawImage(
+      image,
+      rect.x * ratio,
+      rect.y * ratio,
+      rect.width * ratio,
+      rect.height * ratio,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
+  return canvas.toDataURL('image/png');
 }

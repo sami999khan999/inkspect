@@ -27,7 +27,8 @@ function writeStatic(browser, outdir) {
     copyFileSync(join(root, 'icons', `${size}.png`), join(outdir, 'icons', `${size}.png`));
   }
   copyFileSync(join(root, 'src', 'options', 'options.html'), join(outdir, 'options.html'));
-  // The icon font of the settings page (and of the toolbar, when it is enabled again).
+  copyFileSync(join(root, 'src', 'popup', 'popup.html'), join(outdir, 'popup.html'));
+  // The icon font of the settings page and the toolbar.
   const codicons = dirname(require.resolve('@vscode/codicons/dist/codicon.css'));
   copyFileSync(join(codicons, 'codicon.ttf'), join(outdir, 'codicon.ttf'));
 }
@@ -41,10 +42,10 @@ for (const browser of browsers) {
   const context = await esbuild.context({
     entryPoints: {
       background: join(root, 'src/background/index.ts'),
-      // Disabled: the toolbar and its page-world helper (see src/background/index.ts).
-      // content: join(root, 'src/content/index.tsx'),
-      // 'main-world': join(root, 'src/main-world/index.ts'),
+      content: join(root, 'src/content/index.tsx'),
+      'main-world': join(root, 'src/main-world/index.ts'),
       options: join(root, 'src/options/index.tsx'),
+      popup: join(root, 'src/popup/index.tsx'),
     },
     outdir,
     bundle: true,

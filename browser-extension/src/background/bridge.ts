@@ -34,6 +34,25 @@ export function browserName(): string {
 
 type Listener = (message: ServerMessage) => void;
 
+/**
+ * Whether something listens on the port. Chrome logs every refused WebSocket on the extension's
+ * Errors page (JS can't catch it), and the link retries while VS Code is closed, so a plain
+ * request goes first: a refused `fetch` only rejects. VS Code answers it with a 404; a timeout
+ * also means something is there.
+ */
+async function listening(port: number): Promise<boolean> {
+  try {
+    await fetch(`http://127.0.0.1:${port}${BRIDGE_PATH}`, {
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal: AbortSignal.timeout(2_000),
+    });
+    return true;
+  } catch (error) {
+    return error instanceof DOMException && error.name === 'TimeoutError';
+  }
+}
+
 export class BridgeClient {
   status: BridgeStatus = { state: 'offline' };
   private socket?: WebSocket;
@@ -42,6 +61,9 @@ export class BridgeClient {
   private retry?: ReturnType<typeof setTimeout>;
   private keepAlive?: ReturnType<typeof setInterval>;
   private delay = 1000;
+  /** Counts connection attempts, so a probe that a newer attempt replaced is dropped. */
+  private attempt = 0;
+  private probing = false;
   /** First port to try (a stored override exists for tests). */
   private basePort = DEFAULT_BRIDGE_PORT;
   private readonly listeners = new Set<Listener>();
@@ -75,7 +97,7 @@ export class BridgeClient {
 
   /** Connects now if not connected (called on any wake-up of the background). */
   ensureConnected(): void {
-    if (!this.socket && !this.retry) this.connect();
+    if (!this.socket && !this.retry && !this.probing) this.connect();
   }
 
   send(message: ClientMessage): boolean {
@@ -87,8 +109,12 @@ export class BridgeClient {
   /** Pairs with the code VS Code shows. */
   async pair(code: string): Promise<BridgeStatus> {
     // Wait for a connection that is still opening (or start one).
-    if (!this.socket) this.connect();
-    for (let i = 0; i < 30 && this.socket?.readyState === WebSocket.CONNECTING; i++) {
+    if (!this.socket && !this.probing) this.connect();
+    for (
+      let i = 0;
+      i < 30 && (this.probing || this.socket?.readyState === WebSocket.CONNECTING);
+      i++
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (!this.client || !this.send({ type: 'pair', code: code.trim(), client: this.client })) {
@@ -137,6 +163,17 @@ export class BridgeClient {
     this.retry = undefined;
     const target = port ?? this.basePort;
     this.setStatus({ ...this.status, state: this.token ? 'connecting' : this.status.state });
+    const current = ++this.attempt;
+    this.probing = true;
+    void listening(target).then((up) => {
+      if (current !== this.attempt) return;
+      this.probing = false;
+      if (up) this.open(target, attempt);
+      else this.closed(target, attempt, false);
+    });
+  }
+
+  private open(target: number, attempt: number): void {
     let socket: WebSocket;
     try {
       socket = new WebSocket(`ws://127.0.0.1:${target}${BRIDGE_PATH}`);
@@ -168,14 +205,19 @@ export class BridgeClient {
       if (this.socket !== socket) return;
       clearInterval(this.keepAlive);
       this.socket = undefined;
-      if (!opened && attempt < BRIDGE_PORT_RANGE - 1) {
-        // Nothing on this port: try the next one (another VS Code install may use it).
-        this.connect(target + 1, attempt + 1);
-        return;
-      }
-      if (this.status.state !== 'unpaired') this.setStatus({ state: 'offline' });
-      this.scheduleRetry();
+      this.closed(target, attempt, opened);
     };
+  }
+
+  /** Nothing (more) on this port: try the next one, or wait and start over. */
+  private closed(target: number, attempt: number, opened: boolean): void {
+    if (!opened && attempt < BRIDGE_PORT_RANGE - 1) {
+      // Nothing on this port: try the next one (another VS Code install may use it).
+      this.connect(target + 1, attempt + 1);
+      return;
+    }
+    if (this.status.state !== 'unpaired') this.setStatus({ state: 'offline' });
+    this.scheduleRetry();
   }
 
   private scheduleRetry(): void {
@@ -195,6 +237,10 @@ export class BridgeClient {
     } else if (message.type === 'welcome') {
       this.delay = 1000;
       this.setStatus({ state: 'connected', peer: message.peer });
+    } else if (message.type === 'windows') {
+      if (this.status.state === 'connected') {
+        this.setStatus({ ...this.status, windows: message.windows });
+      }
     } else if (message.type === 'error') {
       if (message.code === 'unpaired') {
         this.token = undefined;

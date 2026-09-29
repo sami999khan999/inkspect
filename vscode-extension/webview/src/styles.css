@@ -1133,6 +1133,14 @@ kbd {
   width: 26px;
   height: 24px;
   transform: translateY(-50%);
+  /* Covers, with a short fade, anything that reaches it before the bar measures again. */
+  background: var(--vscode-editor-background);
+  box-shadow: -10px 0 8px -2px var(--vscode-editor-background);
+}
+
+.bookmark-overflow:hover {
+  /* The hover color is often translucent, so it is layered over the solid background. */
+  background: linear-gradient(var(--ink-hover), var(--ink-hover)), var(--vscode-editor-background);
 }
 
 .bookmark-overflow .codicon + .codicon {

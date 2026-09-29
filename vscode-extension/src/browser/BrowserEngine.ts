@@ -55,6 +55,11 @@ export class BrowserEngine {
     const args = [
       // The initial window size only matters until each page gets a device metrics override.
       '--window-size=1280,800',
+      // Headless screencast frames are capped at the window's own scale factor (1), whatever
+      // `deviceScaleFactor` a page emulates, so HiDPI displays got CSS-pixel frames stretched up
+      // (blurry). A higher cap lets frames reach the emulated scale; `maxWidth`/`maxHeight` of
+      // the screencast still size each frame to exactly what the webview needs.
+      '--force-device-scale-factor=3',
       ...(options.allowInsecureLocalhost ? ['--allow-insecure-localhost'] : []),
       // Puppeteer adds `--remote-debugging-pipe` itself unless another `--remote-debugging-*`
       // switch is present, so both are passed when the port is wanted.

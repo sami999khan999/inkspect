@@ -1,0 +1,183 @@
+/* LinkGraph: the browser, and a branch to each VS Code window (a tree connector drawn in CSS).
+   The branch to the window used last is lit: that is where sends go. */
+
+.link-graph {
+  --line: color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
+  --lit: var(--ink-blue);
+  --node: 44px;
+  --stem: 32px;
+  --stroke: 2px;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.link-graph.size-sm {
+  --node: 30px;
+  --stem: 18px;
+}
+
+.link-graph.state-unpaired {
+  --line: color-mix(in srgb, var(--ink-yellow) 70%, transparent);
+}
+
+.link-graph.state-connecting {
+  --line: color-mix(in srgb, var(--ink-blue) 55%, transparent);
+}
+
+.graph-node {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: var(--node);
+  height: var(--node);
+  border: 1px solid var(--ink-border-strong);
+  border-radius: calc(var(--node) / 3.2);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--vscode-foreground) 7%, var(--vscode-editor-background)),
+    var(--vscode-editor-background)
+  );
+  color: var(--vscode-foreground);
+  box-shadow: var(--ink-shadow-sm);
+}
+
+.size-lg .graph-node .codicon {
+  font-size: 22px !important;
+}
+
+.size-sm .graph-node .codicon {
+  font-size: 15px !important;
+}
+
+/* The source's stem into the branches. */
+.graph-node.source {
+  position: relative;
+  margin-right: var(--stem);
+}
+
+.graph-node.source::after {
+  content: '';
+  position: absolute;
+  top: calc(50% - var(--stroke) / 2);
+  left: 100%;
+  width: var(--stem);
+  height: var(--stroke);
+  background: var(--line);
+}
+
+.link-graph.state-connected .graph-node.source::after {
+  background: var(--lit);
+}
+
+.link-graph:not(.state-connected) .graph-node.source::after {
+  background: repeating-linear-gradient(90deg, var(--line) 0 5px, transparent 5px 9px);
+}
+
+.graph-targets {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.graph-target {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 5px 0 5px var(--stem);
+}
+
+.size-sm .graph-target {
+  gap: 9px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+/* The branch into this target, and the bus down to the next (rounded into the bus). */
+.graph-target::before {
+  content: '';
+  position: absolute;
+  top: calc(50% - var(--stroke) / 2);
+  left: 0;
+  width: var(--stem);
+  height: var(--stroke);
+  border-radius: var(--stroke);
+  background: var(--line);
+}
+
+.graph-target::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--stroke);
+  background: var(--line);
+}
+
+.graph-target:first-child::after {
+  top: 50%;
+}
+
+.graph-target:last-child::after {
+  bottom: 50%;
+}
+
+.graph-target:only-child::after {
+  display: none;
+}
+
+.graph-target.pending::before {
+  background: repeating-linear-gradient(90deg, var(--line) 0 5px, transparent 5px 9px);
+}
+
+/* Where sends go: lit. */
+.graph-target.lit::before {
+  background: var(--lit);
+}
+
+.graph-target.lit .graph-node {
+  border-color: var(--lit);
+  background: color-mix(in srgb, var(--lit) 14%, var(--vscode-editor-background));
+  color: var(--lit);
+}
+
+.graph-target.pending .graph-node {
+  color: var(--ink-blue);
+}
+
+.graph-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.graph-target.lit .graph-name {
+  font-weight: 600;
+}
+
+.graph-target.more .graph-name {
+  color: var(--ink-muted);
+}
+
+.graph-target.more::before {
+  background: repeating-linear-gradient(90deg, var(--line) 0 2px, transparent 2px 5px);
+}
+
+.graph-tag {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: var(--ink-radius-pill);
+  background: color-mix(in srgb, var(--lit) 16%, transparent);
+  color: var(--lit);
+  font-size: var(--ink-font-xs);
+  font-weight: 600;
+}

@@ -35,6 +35,18 @@ interface DrawingLayerProps {
   style: ShapeStyle;
   /** Replaces the shapes; `commit` adds an undo step. */
   onChange: (shapes: Shape[], commit: boolean) => void;
+  /**
+   * Redactions blur the live page behind them (CSS backdrop blur) instead of pixelating a page
+   * image: for hosts, like the browser extension, that draw over the real page and have no image
+   * of it. Screenshots still pixelate.
+   */
+  liveRedactions?: boolean;
+  /**
+   * An image of the page under the layer, in the canvas's pixel grid (the viewport in device
+   * pixels): redactions pixelate it, like over the VS Code browser's page canvas. With
+   * `liveRedactions`, the backdrop blur stands in while there is none (say, after scrolling).
+   */
+  pixelSource?: CanvasImageSource;
 }
 
 let nextId = 1;
@@ -52,7 +64,10 @@ export function DrawingLayer({
   tool,
   style,
   onChange,
+  liveRedactions,
+  pixelSource,
 }: DrawingLayerProps) {
+  const blurRedactions = liveRedactions && !pixelSource;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [draft, setDraftState] = useState<Shape | null>(null);
   // Pointer events can arrive faster than React re-renders, so handlers read the draft from a ref.
@@ -89,9 +104,15 @@ export function DrawingLayer({
       ctx,
       draft ? [...shapes, draft] : shapes,
       { scale: scale * dpr, offsetX: scroll.x, offsetY: scroll.y },
-      { pixelSource: pageCanvas ?? undefined, selectedId: interactive ? selectedId : undefined },
+      {
+        pixelSource: pixelSource ?? pageCanvas ?? undefined,
+        skipRedactions: blurRedactions,
+        selectedId: interactive ? selectedId : undefined,
+      },
     );
   }, [
+    blurRedactions,
+    pixelSource,
     shapes,
     draft,
     visible,
@@ -251,6 +272,24 @@ export function DrawingLayer({
       className="drawing-layer"
       style={{ ...bounds, pointerEvents: visible && interactive ? 'auto' : 'none' }}
     >
+      {blurRedactions &&
+        visible &&
+        (draft ? [...shapes, draft] : shapes).map((shape) => {
+          if (shape.kind !== 'blur') return null;
+          const [a, b] = [shape.start, shape.end];
+          return (
+            <div
+              key={shape.id}
+              className="drawing-redaction"
+              style={{
+                left: (Math.min(a[0], b[0]) - scroll.x) * scale,
+                top: (Math.min(a[1], b[1]) - scroll.y) * scale,
+                width: Math.abs(b[0] - a[0]) * scale,
+                height: Math.abs(b[1] - a[1]) * scale,
+              }}
+            />
+          );
+        })}
       <canvas
         ref={canvasRef}
         style={{ width: bounds.width, height: bounds.height, cursor }}

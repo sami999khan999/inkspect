@@ -55,6 +55,23 @@ describe('bridge protocol', () => {
     expect(bad(['ctrl+k'])).toBeUndefined();
   });
 
+  it('lists VS Code windows, and sends can name one', () => {
+    const windows = {
+      type: 'windows' as const,
+      windows: [
+        { id: 'w1', name: 'shop', lastUsed: true },
+        { id: 'w2', name: 'api', lastUsed: false },
+      ],
+    };
+    expect(parseServerMessage(encode(windows))).toEqual(windows);
+    expect(
+      parseServerMessage(encode({ ...windows, windows: [{ id: 'w1', name: 1 }] } as never)),
+    ).toBeUndefined();
+    const send = { type: 'send' as const, id: 's1', target: 'save' as const, window: 'w2' };
+    expect(parseClientMessage(encode(send))).toEqual(send);
+    expect(parseClientMessage(encode({ ...send, window: 5 } as never))).toBeUndefined();
+  });
+
   it('keeps the shortcut settings changed last', () => {
     const at = (updated: number) => ({ shortcuts: {}, updated });
     expect(newerShortcuts(at(2), at(1))).toBe('local');

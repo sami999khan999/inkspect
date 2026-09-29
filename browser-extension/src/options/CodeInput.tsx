@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { Fragment, useRef } from 'react';
 
 interface CodeInputProps {
   value: string;
@@ -30,39 +30,41 @@ export function CodeInput({ value, onChange, onComplete, length = 6, disabled }:
   return (
     <div className="code-input" role="group" aria-label="Pairing code">
       {digits.map((digit, index) => (
-        <input
-          key={index}
-          ref={(element) => {
-            boxes.current[index] = element;
-          }}
-          className="code-box"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          aria-label={`Digit ${index + 1}`}
-          maxLength={length}
-          disabled={disabled}
-          value={digit}
-          onFocus={(event) => event.currentTarget.select()}
-          onChange={(event) => write(Math.min(index, value.length), event.target.value)}
-          onPaste={(event) => {
-            event.preventDefault();
-            write(0, event.clipboardData.getData('text'));
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Backspace') {
+        <Fragment key={index}>
+          {index === length / 2 && <span className="code-sep" aria-hidden="true" />}
+          <input
+            ref={(element) => {
+              boxes.current[index] = element;
+            }}
+            className="code-box"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            aria-label={`Digit ${index + 1}`}
+            maxLength={length}
+            disabled={disabled}
+            value={digit}
+            onFocus={(event) => event.currentTarget.select()}
+            onChange={(event) => write(Math.min(index, value.length), event.target.value)}
+            onPaste={(event) => {
               event.preventDefault();
-              const at = digit ? index : index - 1;
-              if (at >= 0) onChange(value.slice(0, at));
-              focus(at);
-            } else if (event.key === 'ArrowLeft') {
-              event.preventDefault();
-              focus(index - 1);
-            } else if (event.key === 'ArrowRight') {
-              event.preventDefault();
-              focus(index + 1);
-            }
-          }}
-        />
+              write(0, event.clipboardData.getData('text'));
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Backspace') {
+                event.preventDefault();
+                const at = digit ? index : index - 1;
+                if (at >= 0) onChange(value.slice(0, at));
+                focus(at);
+              } else if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                focus(index - 1);
+              } else if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                focus(index + 1);
+              }
+            }}
+          />
+        </Fragment>
       ))}
     </div>
   );

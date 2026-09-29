@@ -3,7 +3,9 @@
 import { newerShortcuts, type ShortcutSettings } from '@inkspect/shared/bridge';
 import type { BridgeClient } from './bridge';
 
-export const SHORTCUTS_KEY = 'inkspectShortcuts';
+import { SHORTCUTS_KEY } from '../shortcuts';
+
+export { SHORTCUTS_KEY };
 
 async function stored(): Promise<ShortcutSettings | undefined> {
   const value = (await chrome.storage.sync.get(SHORTCUTS_KEY))[SHORTCUTS_KEY] as unknown;

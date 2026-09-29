@@ -2,7 +2,7 @@
 
 ## Goal
 
-A browser extension for **Chrome, Edge, Brave, Vivaldi, Opera and Firefox**. A keyboard shortcut opens a **floating toolbar on the current page**. It offers the tools of the VS Code browser (`vscode-extension/`):
+A browser extension for **Chrome, Edge, Brave, Vivaldi, Opera and Firefox**. A keyboard shortcut opens a **toolbar across the top of the current page**. It offers the tools of the VS Code browser (`vscode-extension/`):
 
 - element selector (copy details for AI agents)
 - drawing with area screenshots
@@ -13,7 +13,7 @@ A browser extension for **Chrome, Edge, Brave, Vivaldi, Opera and Firefox**. A k
 
 It also links to the VS Code extension. **Bookmarks sync both ways**: a bookmark added in the browser shows up in VS Code, and a bookmark added in VS Code shows up in the browser.
 
-**Status:** Phases 0–9 were built and tested. The extension is now reduced to **bookmark sync with VS Code** (Phases 7–8). The toolbar features (Phases 1–6 and 9) are switched off, with their code commented out; see "Disabled features" in `browser-extension/README.md`. Phase 10 (browsers other than Chrome) and store publishing are open.
+**Status:** Phases 0–9 are built and tested. The toolbar, switched off for a while, is back: now a full-width bar that pushes the page down, with a centered responsive view. Phase 10 (browsers other than Chrome) and store publishing are open.
 
 This plan lives next to `plans/vscode-browser-plan.md`. Tasks that change the VS Code extension are marked **[vscode]**.
 
@@ -183,15 +183,18 @@ browser-extension/
 - [x] **Opening it:** shortcut `toggle-toolbar` (Alt+Shift+I) and the toolbar button. The toolbar is injected on demand (`activeTab` + `scripting`) with its MAIN-world helper.
 - [x] **The toolbar:**
   - React in a **closed** shadow root on a custom element, so page CSS can't reach it.
-  - Draggable; follows the system light/dark theme through VS Code theme variables.
+  - A full-width bar that slides down from the top; the page moves down to make room, and fixed and sticky elements anchored at the top move with it (`pagePush.ts`). While drawing, the drawing tools are its second row.
+  - Follows the system light/dark theme through VS Code theme variables.
   - The codicon font is registered from bytes (`FontFace`), so page CSP can't block it.
   - Hidden during captures.
 - [x] **Buttons:** Select element, Draw, Screenshot ▾, Devices, Console & network, Copy page context, Bookmark this page, VS Code link, Close.
 - [x] **Keys:** Esc leaves the current tool; drawing tool letters and Ctrl+Z/Y as in VS Code.
 - [x] **Unsupported pages** (`chrome://`, the Web Store, the PDF viewer): the toolbar button shows ✕ with an explanation.
 - [x] **Options page:** VS Code pairing, copy format, HTML length, drawing padding, a shortcut link.
+- [x] **Shortcuts:** the shared registry (`@inkspect/shared/shortcuts`) and the same key map as VS Code Browser, kept in sync storage and synced both ways through the link; a shortcuts panel in the bar and on the full page (the shared `ShortcutList`, also used by VS Code's Shortcuts view).
+- [x] **Popup and full page:** the toolbar button opens a popup (link, VS Code windows, main keys, open the toolbar, open the full page); the full page has VS Code, Shortcuts and About tabs.
 - [ ] Not done yet:
-  - docking to the top or bottom edge, and collapsing to a pill
+  - collapsing to a pill
   - remembering "open" per tab across full navigations (press the shortcut again after navigating)
 
 ## Phase 2: Element selector
@@ -231,14 +234,15 @@ browser-extension/
 
 ## Phase 5: Devices and resolutions
 
-- [x] **Resize window:** moves the tab into a popup window whose page area matches the chosen size; "Restore window" puts it back.
-- [x] **Full emulation** (Chrome, through `chrome.debugger`):
-  - shared device presets or a custom size; pixel ratio; rotate
-  - touch plus mobile user agent
-  - network and CPU throttling; color scheme; print media
-  - "Stop emulating" detaches, and closing Chrome's debugging bar is handled
+- [x] **Responsive view:** the page in a device-sized frame of the same tab, **centered** and scaled to fit (zoom: fit, 50–125%), below the bar. The debugger's device metrics can't center: they always draw the page at the tab's top-left, which is why the old "Full emulation" and "Resize window" modes were replaced.
+  - shared device presets or a custom size; rotate; a caption with the size and zoom
+  - framing: a `declarativeNetRequest` session rule drops `X-Frame-Options` / CSP for frames of the page's origin in that tab while the view is open; the frame is sandboxed without scripted top navigation (frame busting)
+  - the page behind doesn't scroll while the view is open; screenshots take the device screen
+- [x] **Emulation** (Chrome, through `chrome.debugger`, applied as you change it): device user agent and touch, network and CPU throttling, color scheme, print media. Detaches when nothing is set, and closing Chrome's debugging bar is handled.
 - [ ] Not done yet:
-  - the in-page responsive frame with drag handles and breakpoint bar (the emulated page renders at the top left)
+  - the picker, drawing, console and page context inside the frame (disabled while the view is open)
+  - pixel ratio (the frame can't have its own)
+  - drag handles and a breakpoint bar on the frame
   - `debugger` is a required permission in the Chrome build (optional permissions can't be requested from a content script)
 
 ## Phase 6: Console and network
