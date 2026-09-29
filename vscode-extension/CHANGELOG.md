@@ -27,6 +27,7 @@
 - Each item has **Send** (to the default agent, or another from its menu), copy, open and remove. When several agents run, choose where sends go at the top of the view.
 - Agent CLIs get each part as a real paste (like Ctrl+V): text arrives as the text itself (not a file path) and image paths become attached images. Plain shells still get the parts typed on one line.
 - **Ctrl+Shift+Alt+A** shows the view and **Ctrl+Shift+Alt+V** sends the latest capture to the agent, from the browser or anywhere in VS Code.
+- The view takes its colors from the theme's own palette (its terminal colors), so it fits themes such as Tokyo Night whose button and error colors are dim: cards are soft raised panels without outlines, Send is a solid button in the theme's blue, the newest capture has a "Latest" chip, and each kind of capture has its own hue. Previews show the whole capture, so short element strips are no longer cropped to an empty box.
 
 ### New modes (the Tools button, or their keys)
 
@@ -73,7 +74,31 @@
 
 - **Send screenshots to a terminal agent.** Every screenshot notification has **Send to Terminal**. It types the image's path into a terminal's input without pressing Enter, so an agent CLI running there (Claude Code, Codex, Gemini CLI, and others) picks up the image and you can add a prompt. With several terminals open you choose one, and agent-looking terminals are listed first. The screenshot menu and the **Send Last Screenshot to Terminal Agent** command send the latest screenshot.
 
+### Drawing Screenshot menu keys
+
+- **S** opens the drawing toolbar's Screenshot menu, and every item has its own key, shown next to it: Enter (drawing area), Alt+G (each drawing separately), Alt+C (without drawings), Alt+V (visible area with drawings), Alt+F (full page with drawings). Remap them in the Shortcuts view like any other key.
+- The shortcuts are now shared with the Inkspect browser extension (the registry moved to `@inkspect/shared`): a key changed in either works in both.
+
+### Browser captures in Agent Context
+
+- Captures from the Inkspect browser extension appear in the **Agent Context** view by themselves (a new "context" send: listed, not sent, nothing copied or saved). Sending the same capture later reuses its item, so nothing is listed twice.
+
 ### Fixes
+
+- **The browser link's shared files are written reliably on Windows:** replacing one failed while another window was reading it, silently dropping a send or a window's heartbeat (and leaving temporary files behind). Writes retry, then fall back, and leftovers are cleaned up.
+- **A window serving the browser link with an older version** (not reloaded after an update) rejects newer messages, so browser captures didn't arrive. The other windows now notice it and ask you to reload your VS Code windows.
+
+- **Every VS Code window shows the browser link** in its status bar (`$(plug) N`), not just the one serving it; the tooltip names the window it runs through.
+
+- **Redact is coarser:** blocks are at least 10 px and a fifth of the box's short side, so text under a large box can't be read (small blocks left big headings legible).
+
+- **Sends from the browser extension go to the VS Code window you choose, or else the one you used last** (Save too). Only one window serves the browser link (the first to start), and every screenshot or element sent from the browser used to land in that one. Now every window announces itself, the browser can list them, and each send is handed to the chosen window, or the one that had focus last; if that window closed, the serving window takes it. Windows also check for sends every second, since a folder watcher can miss them.
+
+- **The bookmarks bar's » button no longer covers the last bookmark.** The bar measured what fits only when it resized, not when bookmarks grew as their icons loaded; it now re-measures then too, and the button hides anything under it.
+
+- **Dropdowns and menus stand out from the page** in every theme: they get a raised background, a visible border and a real shadow, even in themes (such as Tokyo Night) whose menus share the sidebar's color and whose shadow is transparent.
+
+- **Sharp pages on HiDPI displays.** Headless Chromium capped screencast frames at a scale factor of 1, whatever the page emulated, so on a display scaled to 125% or 150% every frame was stretched up and looked blurry. Frames now arrive at the display's full resolution.
 
 - **Bookmark import works for Chrome and every other browser.**
   - Signed-in Chrome keeps your bookmarks in `AccountBookmarks`, which wasn't read before, so Chrome imported nothing. Import now reads both bookmark files from **every profile**, listed by profile name with a bookmark count.

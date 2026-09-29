@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { listenOutside } from './popover';
 
 export type MenuItem =
   | {
@@ -33,9 +34,8 @@ export function Menu({ menu, onClose }: MenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node)) onClose();
-    };
+    // Also inside the browser extension's closed shadow root (see listenOutside).
+    const stopPointer = listenOutside(() => [ref.current], 'pointerdown', onClose);
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -43,12 +43,11 @@ export function Menu({ menu, onClose }: MenuProps) {
         onClose();
       }
     };
-    window.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('blur', onClose);
     window.addEventListener('resize', onClose);
     return () => {
-      window.removeEventListener('pointerdown', onPointerDown, true);
+      stopPointer();
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('blur', onClose);
       window.removeEventListener('resize', onClose);
@@ -157,6 +156,8 @@ function MenuList({ items, x, y, onClose, focusFirst, parent, onBack }: MenuList
             onPointerEnter={(event) => {
               clearTimeout(hoverTimer.current);
               const button = event.currentTarget;
+              // The pointer and the keyboard share one highlight: hovering moves the focus.
+              if (!item.disabled) button.focus({ preventScroll: true });
               hoverTimer.current = setTimeout(
                 () => (item.submenu ? openSubmenu(index, button, false) : setOpen(null)),
                 item.submenu ? 120 : 250,

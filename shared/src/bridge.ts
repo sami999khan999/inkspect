@@ -16,7 +16,12 @@ export interface ClientInfo {
   browser: string;
 }
 
-export type SendTarget = 'chat' | 'terminal' | 'save';
+/** Where a send goes: an agent (chat or terminal), a file in the workspace, or only the Agent
+ * Context list (every capture goes there as it is taken). */
+export type SendTarget = 'chat' | 'terminal' | 'save' | 'context';
+
+/** What a capture is, for the Agent Context list. */
+export type CaptureKind = 'screenshot' | 'element' | 'errors' | 'network' | 'page' | 'text';
 
 /**
  * The VS Code browser's shortcut changes, synced through the browser extension's
@@ -42,6 +47,15 @@ export function newerShortcuts(
   return a === b ? 'same' : a > b ? 'local' : 'remote';
 }
 
+/** An open VS Code window a send can go to (VS Code lists them for the browser). */
+export interface VsCodeWindow {
+  id: string;
+  /** Its workspace's name. */
+  name: string;
+  /** Sends that name no window go to this one: the window used last. */
+  lastUsed: boolean;
+}
+
 export type ClientMessage =
   | { type: 'pair'; code: string; client: ClientInfo }
   | { type: 'hello'; client: ClientInfo; token: string }
@@ -58,6 +72,14 @@ export type ClientMessage =
       image?: string;
       label?: string;
       pageUrl?: string;
+      /** The VS Code window to run it in (`VsCodeWindow.id`); the one used last if unset. */
+      window?: string;
+      /**
+       * The capture it comes from: sends of one capture share one Agent Context item (the
+       * automatic "context" send first, a send to an agent later).
+       */
+      capture?: string;
+      kind?: CaptureKind;
     }
   /** The shortcuts stored in the browser's sync storage (sent when they are newer). */
   | ({ type: 'settings.shortcuts' } & ShortcutSettings);
@@ -70,6 +92,8 @@ export type ServerMessage =
   | { type: 'bookmarks.ops'; ops: RemoteOp[] }
   | { type: 'bookmarks.requestSnapshot' }
   | { type: 'send.result'; id: string; ok: boolean; path?: string; error?: string }
+  /** The open VS Code windows, sent after `welcome` and whenever they change. */
+  | { type: 'windows'; windows: VsCodeWindow[] }
   /** VS Code's shortcuts, sent after `welcome` and whenever they change. */
   | ({ type: 'settings.shortcuts' } & ShortcutSettings);
 
@@ -137,14 +161,19 @@ const CLIENT_MESSAGES: Record<ClientMessage['type'], Record<string, Check>> = {
   'bookmarks.applied': { created: stringMap, failed: arrayOf(isString) },
   send: {
     id: isString,
-    target: oneOf('chat', 'terminal', 'save'),
+    target: oneOf('chat', 'terminal', 'save', 'context'),
     text: optional(isString),
     image: optional(isString),
     label: optional(isString),
     pageUrl: optional(isString),
+    window: optional(isString),
+    capture: optional(isString),
+    kind: optional(oneOf('screenshot', 'element', 'errors', 'network', 'page', 'text')),
   },
   'settings.shortcuts': { shortcuts: shortcutMap, updated: isNumber },
 };
+
+const vsCodeWindow = shape({ id: isString, name: isString, lastUsed: isBoolean });
 
 const SERVER_MESSAGES: Record<ServerMessage['type'], Record<string, Check>> = {
   paired: { token: isString, peer: isString },
@@ -159,6 +188,7 @@ const SERVER_MESSAGES: Record<ServerMessage['type'], Record<string, Check>> = {
     path: optional(isString),
     error: optional(isString),
   },
+  windows: { windows: arrayOf(vsCodeWindow, 50) },
   'settings.shortcuts': { shortcuts: shortcutMap, updated: isNumber },
 };
 

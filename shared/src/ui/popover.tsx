@@ -46,9 +46,40 @@ function placePopup(
 }
 
 /**
+ * Calls `onOutside` for `type` events (capture phase) that happen outside all of `elements`.
+ *
+ * Works inside shadow roots, open or closed. A window listener can't judge events inside a
+ * closed root: their `composedPath()` stops at the host, so every click in the root would look
+ * like one outside. Those events are judged by a listener on the root itself, which sees the
+ * whole path; the window listener only handles events outside the root.
+ */
+export function listenOutside<K extends keyof WindowEventMap>(
+  elements: () => (Element | null | undefined)[],
+  type: K,
+  onOutside: (event: WindowEventMap[K]) => void,
+): () => void {
+  const root = elements().find(Boolean)?.getRootNode();
+  const shadow = root instanceof ShadowRoot ? root : undefined;
+  const inside = (event: Event) => elements().some((el) => el && event.composedPath().includes(el));
+  const onWindow = (event: WindowEventMap[K]) => {
+    if (shadow && event.composedPath().includes(shadow.host)) return;
+    if (!inside(event)) onOutside(event);
+  };
+  const onRoot = (event: Event) => {
+    if (!inside(event)) onOutside(event as WindowEventMap[K]);
+  };
+  window.addEventListener(type, onWindow, true);
+  shadow?.addEventListener(type, onRoot, true);
+  return () => {
+    window.removeEventListener(type, onWindow, true);
+    shadow?.removeEventListener(type, onRoot, true);
+  };
+}
+
+/**
  * Closes a popup on a pointer press outside it and its anchor, on Escape (focus returns to the
- * anchor), when the window loses focus or resizes, and when something else scrolls.
- * Uses `composedPath()`, so it also works inside shadow roots.
+ * anchor), when the window loses focus or resizes, and when something else scrolls. Works
+ * inside shadow roots, open or closed (see `listenOutside`).
  */
 export function useDismiss(
   refs: RefObject<HTMLElement | null>[],
@@ -57,30 +88,23 @@ export function useDismiss(
 ): void {
   useEffect(() => {
     if (!open) return;
-    const inside = (event: Event) =>
-      refs.some((ref) => ref.current && event.composedPath().includes(ref.current));
-    const onPointerDown = (event: PointerEvent) => {
-      if (!inside(event)) onClose('outside');
-    };
+    const elements = () => refs.map((ref) => ref.current);
+    const stopPointer = listenOutside(elements, 'pointerdown', () => onClose('outside'));
+    const stopScroll = listenOutside(elements, 'scroll', () => onClose('window'));
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopPropagation();
       onClose('escape');
     };
-    const onScroll = (event: Event) => {
-      if (!inside(event)) onClose('window');
-    };
     const onWindow = () => onClose('window');
-    window.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('keydown', onKeyDown, true);
-    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('blur', onWindow);
     window.addEventListener('resize', onWindow);
     return () => {
-      window.removeEventListener('pointerdown', onPointerDown, true);
+      stopPointer();
+      stopScroll();
       window.removeEventListener('keydown', onKeyDown, true);
-      window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('blur', onWindow);
       window.removeEventListener('resize', onWindow);
     };

@@ -1,22 +1,16 @@
-// Background (service worker in Chrome, background scripts in Firefox): the link to VS Code
-// and live two-way bookmark sync. That is all the extension does for now.
-//
-// The toolbar features (element selector, screenshots, drawing, devices, console, sending to
-// VS Code) are switched off. Their code is kept: commented out at the end of this file, in
-// src/content/ and src/main-world/ (no longer built), in the build entries of scripts/build.mjs
-// and in manifest/toolbar.json (not merged). Restore those to bring the toolbar back.
-// import { deviceUserAgent, NETWORK_CONDITIONS } from '@inkspect/shared/devices';
+// Background (service worker in Chrome, background scripts in Firefox): the toolbar's helper
+// (captures, downloads, the responsive view's emulation), the link to VS Code and live two-way
+// bookmark sync.
 import type { RemoteOp } from '@inkspect/shared/bookmarkSync';
-import type { BridgeStatus } from '../messages';
-// import {
-//   type BackgroundReply,
-//   type BridgeStatus,
-//   type EmulationRequest,
-//   type ToBackground,
-//   type ToContent,
-// } from '../messages';
-import { applyOps, snapshot } from './bookmarks';
-// import { applyOps, snapshot, syncRoots } from './bookmarks';
+import { deviceUserAgent, NETWORK_CONDITIONS } from '@inkspect/shared/devices';
+import type {
+  BackgroundReply,
+  BridgeStatus,
+  EmulationRequest,
+  ToBackground,
+  ToContent,
+} from '../messages';
+import { applyOps, snapshot, syncRoots } from './bookmarks';
 import { BridgeClient } from './bridge';
 import { receiveShortcuts, SHORTCUTS_KEY, watchShortcuts } from './shortcutSync';
 
@@ -24,13 +18,7 @@ const bridge = new BridgeClient();
 void bridge.start();
 watchShortcuts(bridge);
 
-// The toolbar button opens the settings page: link status and pairing with VS Code.
-chrome.action.onClicked.addListener(() => {
-  bridge.ensureConnected();
-  void chrome.runtime.openOptionsPage();
-});
-
-/** The toolbar button shows whether the link works: "!" means "click to pair". */
+/** The toolbar button shows whether the link works: "!" means "not paired yet". */
 function showLinkState(status: BridgeStatus): void {
   const unpaired = status.state === 'unpaired';
   void chrome.action.setBadgeText({ text: unpaired ? '!' : '' });
@@ -40,8 +28,8 @@ function showLinkState(status: BridgeStatus): void {
       status.state === 'connected'
         ? `Inkspect: bookmarks sync with ${status.peer ?? 'VS Code'}`
         : unpaired
-          ? 'Inkspect: click to link with VS Code'
-          : 'Inkspect: VS Code is not running',
+          ? 'Inkspect toolbar (Alt+Shift+I). Not paired with VS Code yet'
+          : 'Inkspect toolbar (Alt+Shift+I)',
   });
 }
 bridge.onStatus(showLinkState);
@@ -64,6 +52,14 @@ chrome.runtime.onMessage.addListener(
     if (message.type === 'status') {
       sendResponse(bridge.status satisfies BridgeStatus);
       return false;
+    }
+    if (message.type === 'toggleToolbar') {
+      // From the popup: its opening granted activeTab for the tab it was opened on.
+      void chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(async ([tab]) => {
+        if (!tab) return sendResponse({ ok: false, error: 'No tab' });
+        sendResponse(await toggleToolbar(tab));
+      });
+      return true;
     }
     return false;
   },
@@ -130,16 +126,16 @@ bridge.onMessage((message) => {
     case 'settings.shortcuts':
       void receiveShortcuts(bridge, message);
       break;
-    //     case 'send.result': {
-    //       const resolve = pendingSends.get(message.id);
-    //       pendingSends.delete(message.id);
-    //       resolve?.(
-    //         message.ok
-    //           ? { ok: true, path: message.path }
-    //           : { ok: false, error: message.error ?? 'Failed' },
-    //       );
-    //       break;
-    //     }
+    case 'send.result': {
+      const resolve = pendingSends.get(message.id);
+      pendingSends.delete(message.id);
+      resolve?.(
+        message.ok
+          ? { ok: true, path: message.path }
+          : { ok: false, error: message.error ?? 'Failed' },
+      );
+      break;
+    }
   }
 });
 
@@ -165,7 +161,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // For the end-to-end tests: toggle the toolbar without a real key press.
 (globalThis as typeof globalThis & { __inkspectTest?: unknown }).__inkspectTest = {
-  //   toggleToolbar: async (tabId: number) => toggleToolbar(await chrome.tabs.get(tabId)),
+  toggleToolbar: async (tabId: number) => toggleToolbar(await chrome.tabs.get(tabId)),
   bridgeStatus: () => bridge.status,
   reconnect: () => bridge.reconnect(),
   syncState: () => ({ syncEnabled, applying, importing, connected: bridge.connected }),
@@ -173,285 +169,309 @@ chrome.runtime.onInstalled.addListener((details) => {
   syncedShortcuts: async () => (await chrome.storage.sync.get(SHORTCUTS_KEY))[SHORTCUTS_KEY],
 };
 
-// =============================================================================================
-// Disabled: toolbar features (kept for later; see the note at the top)
-// =============================================================================================
+// ---------------------------------------------------------------------------------------------
+// Toolbar
+// ---------------------------------------------------------------------------------------------
 
-// // ---------------------------------------------------------------------------------------------
-// // Toolbar
-// // ---------------------------------------------------------------------------------------------
-//
-// chrome.commands.onCommand.addListener((command, tab) => {
-//   if (command === 'toggle-toolbar' && tab) void toggleToolbar(tab);
-// });
-// chrome.action.onClicked.addListener((tab) => void toggleToolbar(tab));
-//
-// async function toggleToolbar(tab: chrome.tabs.Tab): Promise<void> {
-//   bridge.ensureConnected();
-//   if (!tab.id) return;
-//   try {
-//     const [probe] = await chrome.scripting.executeScript({
-//       target: { tabId: tab.id },
-//       func: () => !!(window as Window & { __inkspect?: boolean }).__inkspect,
-//     });
-//     if (!probe?.result) {
-//       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
-//       await chrome.scripting.executeScript({
-//         target: { tabId: tab.id },
-//         files: ['main-world.js'],
-//         world: 'MAIN',
-//       });
-//     }
-//     await chrome.tabs.sendMessage(tab.id, { type: 'toggle' } satisfies ToContent);
-//   } catch {
-//     // chrome://, the Web Store, the PDF viewer... extensions can't run there.
-//     await chrome.action.setBadgeText({ tabId: tab.id, text: '✕' });
-//     await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: '#b3261e' });
-//     await chrome.action.setTitle({ tabId: tab.id, title: 'Inkspect can’t run on this page' });
-//   }
-// }
-//
-// bridge.onStatus((status) => {
-//   void broadcast({ type: 'bridgeStatus', status });
-// });
-//
-// /** Tells every tab with the toolbar about a change (tabs without it ignore the error). */
-// async function broadcast(message: ToContent): Promise<void> {
-//   for (const tab of await chrome.tabs.query({})) {
-//     if (tab.id) chrome.tabs.sendMessage(tab.id, message).catch(() => {});
-//   }
-// }
-//
-// // ---------------------------------------------------------------------------------------------
-// // Requests from the toolbar
-// // ---------------------------------------------------------------------------------------------
-//
-// chrome.runtime.onMessage.addListener((message: ToBackground, sender, sendResponse) => {
-//   bridge.ensureConnected();
-//   handle(message, sender)
-//     .then(sendResponse)
-//     .catch((error: unknown) =>
-//       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
-//     );
-//   return true;
-// });
-//
-// async function handle(
-//   message: ToBackground,
-//   sender: chrome.runtime.MessageSender,
-// ): Promise<BackgroundReply> {
-//   const tab = sender.tab;
-//   switch (message.type) {
-//     case 'capture': {
-//       if (!tab?.windowId) return { ok: false, error: 'No tab' };
-//       return { ok: true, dataUrl: await capture(tab.windowId) };
-//     }
-//     case 'download':
-//       await chrome.downloads.download({
-//         url: message.dataUrl,
-//         filename: message.filename,
-//         saveAs: false,
-//       });
-//       return { ok: true };
-//     case 'bookmarkPage': {
-//       const existing = await chrome.bookmarks.search({ url: message.url });
-//       if (existing.length) return { ok: true, bookmarked: true };
-//       const { bar } = await syncRoots();
-//       await chrome.bookmarks.create({ parentId: bar, title: message.title, url: message.url });
-//       return { ok: true, bookmarked: true };
-//     }
-//     case 'emulate':
-//       if (!tab?.id) return { ok: false, error: 'No tab' };
-//       await emulate(tab.id, message.request);
-//       return { ok: true };
-//     case 'windowMode':
-//       if (!tab?.id) return { ok: false, error: 'No tab' };
-//       await windowMode(tab, message.width, message.height);
-//       return { ok: true };
-//     case 'restoreWindow':
-//       if (!tab?.id) return { ok: false, error: 'No tab' };
-//       await restoreWindow(tab.id);
-//       return { ok: true };
-//     case 'bridgeStatus':
-//       return { ok: true, status: bridge.status };
-//     case 'send':
-//       return sendToVsCode(message);
-//     case 'openOptions':
-//       await chrome.runtime.openOptionsPage();
-//       return { ok: true };
-//     case 'pair': {
-//       const status = await bridge.pair(message.code);
-//       return { ok: true, status };
-//     }
-//   }
-// }
-//
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === 'toggle-toolbar' && tab) void toggleToolbar(tab);
+});
+// The toolbar button opens the popup (src/popup/), which opens the toolbar with 'toggleToolbar'.
 
-// // ---------------------------------------------------------------------------------------------
-// // Screenshots: Chrome allows about two captures per second.
-// // ---------------------------------------------------------------------------------------------
-//
-// let lastCapture = 0;
-// let captureQueue: Promise<unknown> = Promise.resolve();
-//
-// function capture(windowId: number): Promise<string> {
-//   const next = captureQueue.then(async () => {
-//     const wait = lastCapture + 550 - Date.now();
-//     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-//     lastCapture = Date.now();
-//     return chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
-//   });
-//   captureQueue = next.catch(() => {});
-//   return next;
-// }
-//
-// // ---------------------------------------------------------------------------------------------
-// // Devices
-// // ---------------------------------------------------------------------------------------------
-//
-// const debugging = new Set<number>();
-//
-// async function command(
-//   tabId: number,
-//   method: string,
-//   params?: Record<string, unknown>,
-// ): Promise<void> {
-//   await chrome.debugger.sendCommand({ tabId }, method, params);
-// }
-//
-// /** Full emulation through the debugger (Chrome shows its "debugging this browser" bar). */
-// async function emulate(tabId: number, request: EmulationRequest): Promise<void> {
-//   if (__BROWSER__ !== 'chrome') throw new Error('Full emulation needs Chrome, Edge or Brave.');
-//   const idle =
-//     !request.device &&
-//     request.network === 'none' &&
-//     request.cpu === 1 &&
-//     request.colorScheme === 'default' &&
-//     !request.print;
-//   if (idle) {
-//     if (debugging.has(tabId)) {
-//       debugging.delete(tabId);
-//       await chrome.debugger.detach({ tabId }).catch(() => {});
-//     }
-//     return;
-//   }
-//   if (!debugging.has(tabId)) {
-//     await chrome.debugger.attach({ tabId }, '1.3');
-//     debugging.add(tabId);
-//   }
-//   const device = request.device;
-//   if (device) {
-//     await command(tabId, 'Emulation.setDeviceMetricsOverride', {
-//       width: device.width,
-//       height: device.height,
-//       deviceScaleFactor: device.dpr,
-//       mobile: device.mobile,
-//     });
-//     await command(tabId, 'Emulation.setTouchEmulationEnabled', {
-//       enabled: device.touch,
-//       ...(device.touch ? { maxTouchPoints: 5 } : {}),
-//     });
-//     const version = /Chrome\/([\d.]+)/.exec(navigator.userAgent)?.[1] ?? '130.0.0.0';
-//     const userAgent = deviceUserAgent(device.userAgent, version);
-//     if (userAgent) await command(tabId, 'Emulation.setUserAgentOverride', { userAgent });
-//   } else {
-//     await command(tabId, 'Emulation.clearDeviceMetricsOverride');
-//     await command(tabId, 'Emulation.setTouchEmulationEnabled', { enabled: false });
-//   }
-//   const network = NETWORK_CONDITIONS[request.network];
-//   await command(tabId, 'Network.emulateNetworkConditions', {
-//     offline: request.network === 'offline',
-//     latency: network?.latency ?? 0,
-//     downloadThroughput: network?.download ?? -1,
-//     uploadThroughput: network?.upload ?? -1,
-//   });
-//   await command(tabId, 'Emulation.setCPUThrottlingRate', { rate: request.cpu });
-//   await command(tabId, 'Emulation.setEmulatedMedia', {
-//     media: request.print ? 'print' : '',
-//     features:
-//       request.colorScheme === 'default'
-//         ? []
-//         : [{ name: 'prefers-color-scheme', value: request.colorScheme }],
-//   });
-// }
-//
-// if (__BROWSER__ === 'chrome') {
-//   chrome.debugger.onDetach.addListener(({ tabId }) => {
-//     // The user closed Chrome's debugging bar: emulation is over.
-//     if (tabId !== undefined) debugging.delete(tabId);
-//   });
-// }
-//
-// /** Where a tab lived before it was moved into a device-sized window. */
-// const homes = new Map<number, { windowId: number; index: number }>();
-//
-// /** Moves the tab into a popup window whose page area is `width` × `height`. */
-// async function windowMode(tab: chrome.tabs.Tab, width: number, height: number): Promise<void> {
-//   if (!homes.has(tab.id!)) homes.set(tab.id!, { windowId: tab.windowId, index: tab.index });
-//   const win = await chrome.windows.create({
-//     tabId: tab.id,
-//     type: 'popup',
-//     width,
-//     height,
-//     focused: true,
-//   });
-//   // Window sizes include the frame: grow the window by the difference once the page reports in.
-//   const [result] = await chrome.scripting.executeScript({
-//     target: { tabId: tab.id! },
-//     func: () => [window.innerWidth, window.innerHeight],
-//   });
-//   const [innerWidth, innerHeight] = (result?.result as number[] | undefined) ?? [width, height];
-//   if (win?.id && (innerWidth !== width || innerHeight !== height)) {
-//     await chrome.windows.update(win.id, {
-//       width: width + (width - innerWidth!),
-//       height: height + (height - innerHeight!),
-//     });
-//   }
-// }
-//
-// async function restoreWindow(tabId: number): Promise<void> {
-//   const home = homes.get(tabId);
-//   if (!home) return;
-//   homes.delete(tabId);
-//   const tab = await chrome.tabs.get(tabId);
-//   await chrome.tabs.move(tabId, { windowId: home.windowId, index: home.index }).catch(async () => {
-//     // The original window is gone: open a normal one.
-//     await chrome.windows.create({ tabId });
-//   });
-//   await chrome.tabs.update(tabId, { active: true });
-//   if (tab.windowId !== home.windowId)
-//     await chrome.windows.update(home.windowId, { focused: true }).catch(() => {});
-// }
-//
-// // ---------------------------------------------------------------------------------------------
-// // Sending to VS Code
-// // ---------------------------------------------------------------------------------------------
-//
-// const pendingSends = new Map<string, (reply: BackgroundReply) => void>();
-//
-// async function sendToVsCode(
-//   message: Extract<ToBackground, { type: 'send' }>,
-// ): Promise<BackgroundReply> {
-//   if (!bridge.connected) {
-//     return { ok: false, error: 'Not linked with VS Code. Click the VS Code button to pair.' };
-//   }
-//   const id = crypto.randomUUID();
-//   const reply = new Promise<BackgroundReply>((resolve) => {
-//     pendingSends.set(id, resolve);
-//     // Choosing a terminal happens in VS Code and can take a while.
-//     setTimeout(() => {
-//       if (pendingSends.delete(id)) resolve({ ok: false, error: 'VS Code did not answer.' });
-//     }, 120_000);
-//   });
-//   bridge.send({
-//     type: 'send',
-//     id,
-//     target: message.target,
-//     text: message.text,
-//     image: message.image?.replace(/^data:image\/\w+;base64,/, ''),
-//     label: message.label,
-//     pageUrl: message.pageUrl,
-//   });
-//   return reply;
-// }
-//
+async function toggleToolbar(tab: chrome.tabs.Tab): Promise<{ ok: boolean; error?: string }> {
+  bridge.ensureConnected();
+  if (!tab.id) return { ok: false, error: 'No tab' };
+  try {
+    const [probe] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => !!(window as Window & { __inkspect?: boolean }).__inkspect,
+    });
+    if (!probe?.result) {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['main-world.js'],
+        world: 'MAIN',
+      });
+    }
+    await chrome.tabs.sendMessage(tab.id, { type: 'toggle' } satisfies ToContent);
+    return { ok: true };
+  } catch {
+    // chrome://, the Web Store, the PDF viewer... extensions can't run there.
+    await chrome.action.setBadgeText({ tabId: tab.id, text: '✕' });
+    await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: '#b3261e' });
+    await chrome.action.setTitle({ tabId: tab.id, title: 'Inkspect can’t run on this page' });
+    return {
+      ok: false,
+      error: 'Inkspect can’t run on this page (browser pages, the Web Store...).',
+    };
+  }
+}
+
+bridge.onStatus((status) => {
+  void broadcast({ type: 'bridgeStatus', status });
+});
+
+/** Tells every tab with the toolbar about a change (tabs without it ignore the error). */
+async function broadcast(message: ToContent): Promise<void> {
+  for (const tab of await chrome.tabs.query({})) {
+    if (tab.id) chrome.tabs.sendMessage(tab.id, message).catch(() => {});
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Requests from the toolbar
+// ---------------------------------------------------------------------------------------------
+
+chrome.runtime.onMessage.addListener((message: ToBackground, sender, sendResponse) => {
+  // Only the toolbar in a page; the settings page has its own listener above.
+  if (!sender.tab || sender.url?.startsWith(chrome.runtime.getURL(''))) return false;
+  bridge.ensureConnected();
+  handle(message, sender)
+    .then(sendResponse)
+    .catch((error: unknown) =>
+      sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+    );
+  return true;
+});
+
+async function handle(
+  message: ToBackground,
+  sender: chrome.runtime.MessageSender,
+): Promise<BackgroundReply> {
+  const tab = sender.tab;
+  switch (message.type) {
+    case 'capture': {
+      if (!tab?.windowId) return { ok: false, error: 'No tab' };
+      return { ok: true, dataUrl: await capture(tab.windowId) };
+    }
+    case 'download':
+      await chrome.downloads.download({
+        url: message.dataUrl,
+        filename: message.filename,
+        saveAs: false,
+      });
+      return { ok: true };
+    case 'bookmarkPage': {
+      const existing = await chrome.bookmarks.search({ url: message.url });
+      if (existing.length) return { ok: true, bookmarked: true };
+      const { bar } = await syncRoots();
+      await chrome.bookmarks.create({ parentId: bar, title: message.title, url: message.url });
+      return { ok: true, bookmarked: true };
+    }
+    case 'unbookmarkPage': {
+      for (const node of await chrome.bookmarks.search({ url: message.url })) {
+        await chrome.bookmarks.remove(node.id);
+      }
+      return { ok: true, bookmarked: false };
+    }
+    case 'isBookmarked':
+      return {
+        ok: true,
+        bookmarked: (await chrome.bookmarks.search({ url: message.url })).length > 0,
+      };
+    case 'emulate':
+      if (!tab?.id) return { ok: false, error: 'No tab' };
+      await emulate(tab.id, message.request);
+      return { ok: true };
+    case 'allowFraming':
+      if (!tab?.id) return { ok: false, error: 'No tab' };
+      await allowFraming(tab.id, message.url);
+      return { ok: true };
+    case 'endFraming':
+      if (tab?.id) await endFraming(tab.id);
+      return { ok: true };
+    case 'bridgeStatus':
+      return { ok: true, status: bridge.status };
+    case 'send':
+      return sendToVsCode(message);
+    case 'openOptions':
+      await chrome.runtime.openOptionsPage();
+      return { ok: true };
+    case 'pair': {
+      const status = await bridge.pair(message.code);
+      return { ok: true, status };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Screenshots: Chrome allows about two captures per second.
+// ---------------------------------------------------------------------------------------------
+
+let lastCapture = 0;
+let captureQueue: Promise<unknown> = Promise.resolve();
+
+function capture(windowId: number): Promise<string> {
+  const next = captureQueue.then(async () => {
+    const wait = lastCapture + 550 - Date.now();
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    lastCapture = Date.now();
+    return chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+  });
+  captureQueue = next.catch(() => {});
+  return next;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Devices
+// ---------------------------------------------------------------------------------------------
+
+const debugging = new Set<number>();
+
+async function command(
+  tabId: number,
+  method: string,
+  params?: Record<string, unknown>,
+): Promise<void> {
+  await chrome.debugger.sendCommand({ tabId }, method, params);
+}
+
+/**
+ * The responsive view's emulation through the debugger (Chrome shows its "debugging this browser"
+ * bar): the device's user agent and touch, network, CPU and media. Not the size: the debugger's
+ * device metrics always draw the page at the tab's top-left, so the size comes from the
+ * responsive view's centered frame instead.
+ */
+async function emulate(tabId: number, request: EmulationRequest): Promise<void> {
+  if (__BROWSER__ !== 'chrome') throw new Error('Emulation needs Chrome, Edge or Brave.');
+  const device = request.agent;
+  const userAgent = device
+    ? deviceUserAgent(
+        device.userAgent,
+        /Chrome\/([\d.]+)/.exec(navigator.userAgent)?.[1] ?? '130.0.0.0',
+      )
+    : undefined;
+  const idle =
+    !userAgent &&
+    !device?.touch &&
+    request.network === 'none' &&
+    request.cpu === 1 &&
+    request.colorScheme === 'default' &&
+    !request.print;
+  if (idle) {
+    if (debugging.has(tabId)) {
+      debugging.delete(tabId);
+      await chrome.debugger.detach({ tabId }).catch(() => {});
+    }
+    return;
+  }
+  if (!debugging.has(tabId)) {
+    await chrome.debugger.attach({ tabId }, '1.3');
+    debugging.add(tabId);
+  }
+  await command(tabId, 'Emulation.setTouchEmulationEnabled', {
+    enabled: !!device?.touch,
+    ...(device?.touch ? { maxTouchPoints: 5 } : {}),
+  });
+  // An empty string restores the browser's own user agent.
+  await command(tabId, 'Emulation.setUserAgentOverride', { userAgent: userAgent ?? '' });
+  const network = NETWORK_CONDITIONS[request.network];
+  await command(tabId, 'Network.emulateNetworkConditions', {
+    offline: request.network === 'offline',
+    latency: network?.latency ?? 0,
+    downloadThroughput: network?.download ?? -1,
+    uploadThroughput: network?.upload ?? -1,
+  });
+  await command(tabId, 'Emulation.setCPUThrottlingRate', { rate: request.cpu });
+  await command(tabId, 'Emulation.setEmulatedMedia', {
+    media: request.print ? 'print' : '',
+    features:
+      request.colorScheme === 'default'
+        ? []
+        : [{ name: 'prefers-color-scheme', value: request.colorScheme }],
+  });
+}
+
+if (__BROWSER__ === 'chrome') {
+  chrome.debugger.onDetach.addListener(({ tabId }) => {
+    // The user closed Chrome's debugging bar: emulation is over.
+    if (tabId !== undefined) debugging.delete(tabId);
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// The responsive view's frame
+// ---------------------------------------------------------------------------------------------
+
+/** One session rule per tab; ids stay clear of any other rules. */
+const framingRuleId = (tabId: number) => 1_000_000 + (tabId % 1_000_000);
+
+/**
+ * The responsive view shows the page in a frame of its own tab. Many sites forbid being framed
+ * (X-Frame-Options, CSP frame-ancestors), so while the view is open their headers are dropped for
+ * frames of the page's own origin, in this tab only. activeTab gives the host access this needs.
+ */
+async function allowFraming(tabId: number, url: string): Promise<void> {
+  const origin = new URL(url).origin;
+  if (!/^https?:$/.test(new URL(url).protocol)) return;
+  const id = framingRuleId(tabId);
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [id],
+    addRules: [
+      {
+        id,
+        priority: 1,
+        action: {
+          type: 'modifyHeaders' as chrome.declarativeNetRequest.RuleActionType,
+          responseHeaders: [
+            {
+              header: 'x-frame-options',
+              operation: 'remove' as chrome.declarativeNetRequest.HeaderOperation,
+            },
+            {
+              header: 'content-security-policy',
+              operation: 'remove' as chrome.declarativeNetRequest.HeaderOperation,
+            },
+          ],
+        },
+        condition: {
+          tabIds: [tabId],
+          urlFilter: `|${origin}/`,
+          resourceTypes: ['sub_frame' as chrome.declarativeNetRequest.ResourceType],
+        },
+      },
+    ],
+  });
+}
+
+async function endFraming(tabId: number): Promise<void> {
+  await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [framingRuleId(tabId)] });
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => void endFraming(tabId).catch(() => {}));
+
+// ---------------------------------------------------------------------------------------------
+// Sending to VS Code
+// ---------------------------------------------------------------------------------------------
+
+const pendingSends = new Map<string, (reply: BackgroundReply) => void>();
+
+async function sendToVsCode(
+  message: Extract<ToBackground, { type: 'send' }>,
+): Promise<BackgroundReply> {
+  if (!bridge.connected) {
+    return { ok: false, error: 'Not linked with VS Code. Click the VS Code button to pair.' };
+  }
+  const id = crypto.randomUUID();
+  const reply = new Promise<BackgroundReply>((resolve) => {
+    pendingSends.set(id, resolve);
+    // Choosing a terminal happens in VS Code and can take a while.
+    setTimeout(() => {
+      if (pendingSends.delete(id)) resolve({ ok: false, error: 'VS Code did not answer.' });
+    }, 120_000);
+  });
+  bridge.send({
+    type: 'send',
+    id,
+    target: message.target,
+    text: message.text,
+    image: message.image?.replace(/^data:image\/\w+;base64,/, ''),
+    label: message.label,
+    pageUrl: message.pageUrl,
+    window: message.window,
+    capture: message.capture,
+    kind: message.kind,
+  });
+  return reply;
+}

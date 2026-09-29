@@ -44,6 +44,11 @@
   --vscode-errorForeground: #f85149;
   --vscode-testing-iconPassed: #73c991;
   --vscode-editorWarning-foreground: #cca700;
+  --vscode-terminal-ansiBlue: #4daafc;
+  --vscode-terminal-ansiGreen: #3fb950;
+  --vscode-terminal-ansiYellow: #d7ba7d;
+  --vscode-terminal-ansiRed: #f85149;
+  --vscode-terminal-ansiMagenta: #d670d6;
   --vscode-badge-background: #616161;
   --vscode-badge-foreground: #f8f8f8;
   --vscode-keybindingLabel-background: rgba(128, 128, 128, 0.17);
@@ -91,6 +96,11 @@
     --vscode-errorForeground: #b3261e;
     --vscode-testing-iconPassed: #2e7d32;
     --vscode-editorWarning-foreground: #895503;
+    --vscode-terminal-ansiBlue: #005fb8;
+    --vscode-terminal-ansiGreen: #1a7f37;
+    --vscode-terminal-ansiYellow: #895503;
+    --vscode-terminal-ansiRed: #c72e0f;
+    --vscode-terminal-ansiMagenta: #a626a4;
     --vscode-badge-background: #cccccc;
     --vscode-badge-foreground: #3b3b3b;
     --vscode-keybindingLabel-foreground: #3b3b3b;

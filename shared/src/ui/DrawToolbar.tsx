@@ -205,7 +205,7 @@ export function DrawToolbar(props: DrawToolbarProps) {
         iconEnd="chevron-down"
         className="draw-capture"
         disabled={!props.hasShapes}
-        title={titled('Screenshot of the area around the drawings', 'draw.capture')}
+        title={titled('Screenshot menu', 'draw.captureMenu')}
         onClick={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();
           props.onCapture(rect.left, rect.bottom + 2);
@@ -227,22 +227,36 @@ export function DrawToolbar(props: DrawToolbarProps) {
 }
 
 /** The drawing toolbar's screenshot menu. */
-export function captureMenu(capture: (mode: CaptureMode) => void): MenuItem[] {
+/** The shortcut action of each Screenshot menu item (see `SHORTCUT_ACTIONS`). */
+export const CAPTURE_ACTIONS: Record<CaptureMode, string> = {
+  area: 'draw.capture',
+  groups: 'draw.captureGroups',
+  clean: 'draw.captureClean',
+  viewport: 'draw.captureViewport',
+  fullPage: 'draw.captureFullPage',
+};
+
+/**
+ * The drawing toolbar's Screenshot menu. `keyOf` gives each item's shortcut label (remapped keys
+ * included), shown next to it.
+ */
+export function captureMenu(
+  capture: (mode: CaptureMode) => void,
+  keyOf?: (actionId: string) => string | undefined,
+): MenuItem[] {
+  const item = (mode: CaptureMode, label: string, icon: string): MenuItem => ({
+    label,
+    icon,
+    shortcut: keyOf?.(CAPTURE_ACTIONS[mode]),
+    onSelect: () => capture(mode),
+  });
   return [
-    { label: 'Drawing area', icon: 'device-camera', onSelect: () => capture('area') },
-    { label: 'Each drawing separately', icon: 'layers', onSelect: () => capture('groups') },
-    {
-      label: 'Drawing area without drawings',
-      icon: 'eye-closed',
-      onSelect: () => capture('clean'),
-    },
+    item('area', 'Drawing area', 'device-camera'),
+    item('groups', 'Each drawing separately', 'layers'),
+    item('clean', 'Drawing area without drawings', 'eye-closed'),
     { separator: true },
-    {
-      label: 'Visible area with drawings',
-      icon: 'screen-normal',
-      onSelect: () => capture('viewport'),
-    },
-    { label: 'Full page with drawings', icon: 'file-media', onSelect: () => capture('fullPage') },
+    item('viewport', 'Visible area with drawings', 'screen-normal'),
+    item('fullPage', 'Full page with drawings', 'file-media'),
   ];
 }
 

@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react';
 import { cx } from './popover';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+export type ButtonVariant = 'primary' | 'accent' | 'secondary' | 'ghost' | 'danger';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -16,7 +16,10 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children?: ReactNode;
 }
 
-/** The one text button used everywhere: primary, secondary, ghost (toolbar-like) or danger. */
+/**
+ * The one text button used everywhere: primary, accent (solid, in the theme's palette), secondary,
+ * ghost (toolbar-like) or danger.
+ */
 export function Button({
   variant = 'secondary',
   size = 'md',

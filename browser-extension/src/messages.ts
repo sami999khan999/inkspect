@@ -1,6 +1,7 @@
 // Messages between the extension's parts. Content ↔ background use `chrome.runtime` messaging;
 // content ↔ page (MAIN world) use DOM events with JSON strings, so nothing depends on how each
 // browser shares objects between worlds.
+import type { CaptureKind, SendTarget, VsCodeWindow } from '@inkspect/shared/bridge';
 import type { DeviceSettings, NetworkPreset } from '@inkspect/shared/devices';
 
 export type BridgeState = 'connected' | 'connecting' | 'unpaired' | 'offline';
@@ -10,26 +11,36 @@ export interface BridgeStatus {
   /** VS Code window / workspace name when connected. */
   peer?: string;
   error?: string;
+  /** The open VS Code windows a send can go to, when connected. */
+  windows?: VsCodeWindow[];
 }
 
-/** Full emulation through the debugger (Chrome). `device` undefined ends emulation. */
+/**
+ * What the debugger emulates for the responsive view (Chrome): the device's user agent and touch,
+ * network, CPU and media. The size comes from the centered frame, not from the debugger (its
+ * device metrics always draw the page at the tab's top-left). Nothing set ends emulation.
+ */
 export interface EmulationRequest {
-  device?: DeviceSettings;
+  /** The device's user agent and touch; undefined keeps the browser's own. */
+  agent?: Pick<DeviceSettings, 'userAgent' | 'touch'>;
   network: NetworkPreset;
   cpu: number;
   colorScheme: 'default' | 'light' | 'dark';
   print: boolean;
 }
 
-export type SendTarget = 'chat' | 'terminal' | 'save';
+export type { CaptureKind, SendTarget } from '@inkspect/shared/bridge';
 
 export type ToBackground =
   | { type: 'capture' }
   | { type: 'download'; dataUrl: string; filename: string }
   | { type: 'bookmarkPage'; url: string; title: string }
+  | { type: 'unbookmarkPage'; url: string }
+  | { type: 'isBookmarked'; url: string }
   | { type: 'emulate'; request: EmulationRequest }
-  | { type: 'windowMode'; width: number; height: number }
-  | { type: 'restoreWindow' }
+  /** Lets the page load in the responsive view's frame even if it forbids framing (this tab only). */
+  | { type: 'allowFraming'; url: string }
+  | { type: 'endFraming' }
   | { type: 'bridgeStatus' }
   | {
       type: 'send';
@@ -40,6 +51,11 @@ export type ToBackground =
       image?: string;
       label?: string;
       pageUrl?: string;
+      /** The VS Code window to send to; the one used last if unset. */
+      window?: string;
+      /** The capture it comes from (sends of one capture share one Agent Context item). */
+      capture?: string;
+      kind?: CaptureKind;
     }
   | { type: 'openOptions' }
   | { type: 'pair'; code: string };

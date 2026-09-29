@@ -1,0 +1,189 @@
+/* The toolbar button's popup. Components and tokens come from @inkspect/shared/ui; the link
+   graph from ../ui/link-graph.css. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  line-height: 1.45;
+}
+
+.muted {
+  color: var(--ink-muted);
+}
+
+.popup {
+  --tone: var(--ink-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 360px;
+  padding: 14px 14px 0;
+}
+
+.popup.tone-ok {
+  --tone: var(--ink-green);
+}
+
+.popup.tone-warn {
+  --tone: var(--ink-yellow);
+}
+
+.popup.tone-busy {
+  --tone: var(--ink-blue);
+}
+
+.popup-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.popup-head img {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+}
+
+.popup-name {
+  flex: 1;
+  font-size: var(--ink-font-lg);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.popup-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--tone) 35%, transparent);
+  border-radius: var(--ink-radius-pill);
+  background: color-mix(in srgb, var(--tone) 10%, transparent);
+  font-size: var(--ink-font-xs);
+  font-weight: 600;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+/* The link, on a dot-grid canvas: the popup's picture. */
+.popup-link {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--ink-border-subtle);
+  border-radius: 14px;
+  background:
+    radial-gradient(
+        circle at 1px 1px,
+        color-mix(in srgb, var(--vscode-foreground) 14%, transparent) 1px,
+        transparent 0
+      )
+      0 0 / 14px 14px,
+    var(--vscode-editorWidget-background);
+  box-shadow: var(--ink-shadow-sm);
+}
+
+.popup-unlinked {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.popup-unlinked p {
+  flex: 1;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-sm);
+}
+
+.popup-action {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.open-toolbar {
+  width: 100%;
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.open-toolbar .button-label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.open-toolbar .keycap {
+  border-color: color-mix(in srgb, var(--vscode-button-foreground) 35%, transparent);
+  background: color-mix(in srgb, var(--vscode-button-foreground) 16%, transparent);
+  color: var(--vscode-button-foreground);
+}
+
+.popup-error {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink-danger);
+  font-size: var(--ink-font-sm);
+}
+
+/* The main keys, two by two. */
+.popup-keys {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.key-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 11px;
+  border: 1px solid var(--ink-border-subtle);
+  border-radius: 12px;
+  background: var(--vscode-editorWidget-background);
+}
+
+.key-tile-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--vscode-foreground);
+  font-size: var(--ink-font-sm);
+  font-weight: 500;
+}
+
+.key-tile-label .codicon {
+  color: var(--ink-blue);
+  font-size: 14px !important;
+}
+
+.popup-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 2px -14px 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--ink-border-subtle);
+}

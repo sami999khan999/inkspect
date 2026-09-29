@@ -15,6 +15,13 @@ body {
 }
 
 .context {
+  /* Cards are a lighter tint of the sidebar, with no outline: in themes like Tokyo Night the
+     sidebar, editor and borders are all the same near-black. */
+  --card-bg: color-mix(
+    in srgb,
+    var(--vscode-foreground, #888) 5%,
+    var(--vscode-sideBar-background, transparent)
+  );
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -49,8 +56,8 @@ body {
 }
 
 .agent-dot.on {
-  background: var(--ink-success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink-success) 22%, transparent);
+  background: var(--ink-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink-green) 22%, transparent);
 }
 
 .agent-select {
@@ -74,15 +81,15 @@ body {
   display: flex;
   gap: var(--ink-space-2);
   padding: var(--ink-space-2) 10px;
-  border: 1px solid color-mix(in srgb, var(--ink-warning) 45%, transparent);
+  border-left: 2px solid var(--ink-yellow);
   border-radius: var(--ink-radius);
-  background: color-mix(in srgb, var(--ink-warning) 8%, transparent);
+  background: var(--card-bg);
 }
 
 .no-agent > .codicon {
   flex-shrink: 0;
   margin-top: 1px;
-  color: var(--ink-warning);
+  color: var(--ink-yellow);
 }
 
 .no-agent > div {
@@ -150,9 +157,9 @@ body {
   gap: 8px;
   min-width: 0;
   padding: 10px;
-  border: 1px solid var(--ink-border-subtle);
+  border: 1px solid transparent;
   border-radius: var(--ink-radius-lg);
-  background: var(--ink-surface-sunken);
+  background: var(--card-bg);
   outline: none;
   transition:
     border-color var(--ink-fast) var(--ink-ease),
@@ -160,33 +167,34 @@ body {
 }
 
 .context-card:hover {
-  border-color: var(--ink-border-strong);
+  background: color-mix(in srgb, var(--vscode-foreground, #888) 4%, var(--card-bg));
 }
 
 .context-card:focus-visible {
   border-color: var(--ink-focus);
-  box-shadow: 0 0 0 1px var(--ink-focus);
 }
 
-.context-card.latest {
-  border-color: color-mix(in srgb, var(--ink-accent) 60%, transparent);
-  background: color-mix(in srgb, var(--ink-accent) 6%, var(--ink-surface-sunken));
-}
-
-/* Screenshots and recordings: a preview across the card's width. */
+/* Screenshots, recordings and element captures: a preview across the card's width. The whole
+   image shows (a short element strip isn't cropped to nothing); only tall captures, such as full
+   pages, are cropped to their top. */
 .card-thumb {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
+  min-height: 44px;
   max-height: 150px;
-  aspect-ratio: 16 / 9;
-  padding: 0;
+  padding: 6px;
   overflow: hidden;
-  border: 1px solid var(--ink-border-subtle);
+  border: none;
   border-radius: var(--ink-radius);
-  background:
-    repeating-conic-gradient(var(--ink-surface-sunken) 0 25%, transparent 0 50%) 0 0 / 12px 12px,
-    var(--ink-surface);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
   cursor: zoom-in;
+  transition: opacity var(--ink-fast) var(--ink-ease);
+}
+
+.card-thumb:hover {
+  opacity: 0.88;
 }
 
 .card-thumb:focus-visible {
@@ -196,8 +204,22 @@ body {
 
 .card-thumb img {
   display: block;
+  max-width: 100%;
+  max-height: 136px;
+  border-radius: var(--ink-radius-sm);
+  object-fit: contain;
+}
+
+.card-thumb.tall {
+  height: 150px;
+  padding: 0;
+}
+
+.card-thumb.tall img {
   width: 100%;
   height: 100%;
+  max-height: none;
+  border-radius: 0;
   object-fit: cover;
   object-position: top center;
 }
@@ -217,20 +239,27 @@ body {
   width: 30px;
   height: 30px;
   border-radius: var(--ink-radius);
-  background: color-mix(in srgb, var(--ink-accent-fg) 14%, transparent);
-  color: var(--ink-accent-fg);
+  background: color-mix(in srgb, var(--kind-tone) 14%, transparent);
+  color: var(--kind-tone);
 }
 
-.kind-errors .card-icon,
-.kind-network .card-icon {
-  background: color-mix(in srgb, var(--ink-danger) 14%, transparent);
-  color: var(--ink-danger);
+.context-card {
+  --kind-tone: var(--ink-blue);
 }
 
-.kind-report .card-icon,
-.kind-measure .card-icon {
-  background: color-mix(in srgb, var(--ink-success) 14%, transparent);
-  color: var(--ink-success);
+.kind-errors,
+.kind-network {
+  --kind-tone: var(--ink-red);
+}
+
+.kind-report,
+.kind-measure {
+  --kind-tone: var(--ink-green);
+}
+
+.kind-css,
+.kind-color {
+  --kind-tone: var(--ink-magenta);
 }
 
 .card-heading {
@@ -252,17 +281,20 @@ body {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
+  /* The editor text color: some themes (Tokyo Night) keep the sidebar foreground quite dim. */
+  color: var(--vscode-editor-foreground, var(--vscode-foreground));
   font-weight: 600;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+/* A soft chip in the link color, readable on light, dark and high-contrast backgrounds alike. */
 .card-badge {
   flex-shrink: 0;
-  padding: 0 6px;
+  padding: 0 7px;
   border-radius: var(--ink-radius-pill);
-  background: var(--ink-accent);
-  color: var(--vscode-button-foreground, #fff);
+  background: color-mix(in srgb, var(--ink-blue) 16%, transparent);
+  color: var(--ink-blue);
   font-size: var(--ink-font-xs);
   font-weight: 600;
   line-height: 16px;
@@ -326,6 +358,7 @@ body {
 
 .send-split .send-more {
   min-width: 0;
+  /* A hairline of the card shows between the two halves. */
   margin-left: 1px;
   padding: 0 5px;
   border-top-left-radius: 0;
@@ -355,7 +388,7 @@ body {
   align-items: center;
   gap: 5px;
   min-width: 0;
-  color: var(--ink-success);
+  color: var(--ink-green);
   font-size: var(--ink-font-xs);
 }
 
@@ -433,7 +466,7 @@ body {
 
 .empty-icon {
   margin-bottom: var(--ink-space-2);
-  color: var(--ink-accent-fg);
+  color: var(--ink-blue);
   font-size: 28px !important;
 }
 
@@ -467,12 +500,12 @@ body {
   padding: 6px 8px;
   border: 1px solid var(--ink-border-subtle);
   border-radius: var(--ink-radius);
-  background: var(--ink-surface-sunken);
+  background: var(--card-bg);
   font-size: var(--ink-font-sm);
 }
 
 .empty-tips .codicon {
-  color: var(--ink-accent-fg);
+  color: var(--ink-blue);
 }
 
 .empty-keys {

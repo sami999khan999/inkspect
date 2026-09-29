@@ -1,5 +1,3 @@
-// DISABLED: the toolbar features are switched off for now and this entry is not built (see
-// src/background/index.ts and scripts/build.mjs). The code is kept to bring them back.
 // Injected into a tab when the toolbar is first opened there. Renders the toolbar into a closed
 // shadow root, so the page's CSS can't reach it and it can't reach the page.
 import codiconCss from '@vscode/codicons/dist/codicon.css';

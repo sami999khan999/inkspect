@@ -14,6 +14,7 @@ import {
 } from '@shared/devices';
 import type { TabState } from '@shared/protocol';
 import type { ShortcutScope } from '@shared/shortcuts';
+import { CAPTURE_ACTIONS, type CaptureMode } from './drawing/DrawToolbar';
 import type { ShortcutHandlers } from './shortcuts';
 import { postToHost } from './vscode';
 
@@ -57,6 +58,10 @@ export interface ActionContext {
   clearDrawing: () => void;
   toggleDrawingVisible: () => void;
   captureDrawing: (toAgent: boolean) => void;
+  /** One of the Screenshot menu's captures. */
+  captureDrawingAs: (mode: CaptureMode) => void;
+  /** Opens the drawing toolbar's Screenshot menu. */
+  openCaptureMenu: () => void;
   // Screenshot chooser.
   screenshotRegion: () => void;
   screenshotElement: () => void;
@@ -122,6 +127,10 @@ export function buildHandlers(ctx: ActionContext): ShortcutHandlers {
   handlers['draw.visible'] = ctx.toggleDrawingVisible;
   handlers['draw.capture'] = () => ctx.captureDrawing(false);
   handlers['draw.captureAgent'] = () => ctx.captureDrawing(true);
+  handlers['draw.captureMenu'] = ctx.openCaptureMenu;
+  for (const [mode, id] of Object.entries(CAPTURE_ACTIONS) as [CaptureMode, string][]) {
+    if (mode !== 'area') handlers[id] = () => ctx.captureDrawingAs(mode);
+  }
 
   // Screenshot chooser.
   const shot = (mode: 'viewport' | 'fullPage') => () => {

@@ -706,6 +706,17 @@ export function App() {
       clearDrawing: () => updateShapes([], true),
       toggleDrawingVisible: () => setDrawingVisible((v) => !v),
       captureDrawing: (toAgent) => void captureDrawing('area', toAgent),
+      captureDrawingAs: (mode) => void captureDrawing(mode),
+      openCaptureMenu: () => {
+        const button = document.querySelector('.draw-capture');
+        if (!button) return;
+        const rect = button.getBoundingClientRect();
+        openMenu(
+          rect.left,
+          rect.bottom + 2,
+          captureMenu((mode) => void captureDrawing(mode), shortcutLabel),
+        );
+      },
       screenshotRegion: () => {
         closeMenu();
         changeTool({ kind: 'region' });
@@ -815,7 +826,7 @@ export function App() {
                 openMenu(
                   x,
                   y,
-                  captureMenu((mode) => void captureDrawing(mode)),
+                  captureMenu((mode) => void captureDrawing(mode), shortcutLabel),
                 )
               }
               onClose={() => changeTool(null)}

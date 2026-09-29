@@ -20,6 +20,8 @@ export interface Transform {
 export interface RenderOptions {
   /** Pixels under redaction boxes are sampled from this image (in the same pixel space). */
   pixelSource?: CanvasImageSource;
+  /** Redactions are drawn by someone else (the browser extension's live backdrop blur). */
+  skipRedactions?: boolean;
   selectedId?: string;
 }
 
@@ -47,7 +49,9 @@ export function drawShapes(
   ];
   // Redactions first, so drawings on top of them stay visible.
   for (const shape of shapes) {
-    if (shape.kind === 'blur') pixelate(ctx, shape, map, options.pixelSource);
+    if (shape.kind === 'blur' && !options.skipRedactions) {
+      pixelate(ctx, shape, map, options.pixelSource);
+    }
   }
   for (const shape of shapes) {
     if (shape.kind === 'blur') continue;
@@ -260,7 +264,8 @@ function pixelate(
   if (w < 2 || h < 2) return;
   ctx.save();
   if (source) {
-    const block = Math.max(6, Math.round(Math.min(w, h) / 12));
+    // Coarse enough that text under it can't be read, even in a large box.
+    const block = Math.max(10, Math.round(Math.min(w, h) / 5));
     const small = new OffscreenCanvas(
       Math.max(1, Math.ceil(w / block)),
       Math.max(1, Math.ceil(h / block)),

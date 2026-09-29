@@ -664,6 +664,41 @@ export async function run(): Promise<void> {
           assert.equal(sent.ok, true, JSON.stringify(sent));
           await until('the text in the terminal', () => typed.join('').includes('Fix the header'));
           assert.ok(!typed.join('').includes('\r'), 'Enter was pressed');
+
+          // A capture reaches the Agent Context list by itself ("context"), and a later send of
+          // the same capture reuses that item instead of adding another.
+          const capture = `cap-${Date.now()}`;
+          sendPaired({
+            type: 'send',
+            id: 's3',
+            target: 'context',
+            text: 'The header overlaps the logo',
+            label: 'Element header.site',
+            kind: 'element',
+            capture,
+            pageUrl: 'https://x.dev/',
+          });
+          assert.equal((await next('send.result')).ok, true);
+          const shared = await waitFor('the capture in Agent Context', (st) =>
+            st.context.find((c) => c.title === 'Element header.site'),
+          );
+          assert.equal(shared.kind, 'element');
+          assert.deepEqual(shared.sentTo, []);
+          sendPaired({
+            type: 'send',
+            id: 's4',
+            target: 'terminal',
+            text: 'The header overlaps the logo',
+            label: 'Element header.site',
+            kind: 'element',
+            capture,
+          });
+          assert.equal((await next('send.result')).ok, true);
+          const after = await waitFor('the capture sent', (st) => {
+            const items = st.context.filter((c) => c.title === 'Element header.site');
+            return items.length === 1 && items[0]!.sentTo.length ? items : undefined;
+          });
+          assert.equal(after[0]!.id, shared.id);
         } finally {
           terminal.dispose();
           output.dispose();

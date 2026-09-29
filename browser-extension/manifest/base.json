@@ -1,12 +1,35 @@
 {
   "manifest_version": 3,
   "name": "Inkspect",
-  "description": "Syncs your bookmarks with VS Code (the VS Code Browser extension), live and both ways.",
-  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "description": "A toolbar for working with AI agents (element details, screenshots, drawing, responsive view), and live two-way bookmark sync with VS Code.",
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
   "action": {
-    "default_title": "Inkspect: bookmark sync with VS Code",
+    "default_title": "Inkspect",
+    "default_popup": "popup.html",
     "default_icon": { "16": "icons/16.png", "32": "icons/32.png" }
   },
-  "permissions": ["storage", "bookmarks"],
+  "commands": {
+    "toggle-toolbar": {
+      "suggested_key": { "default": "Alt+Shift+I" },
+      "description": "Show or hide the Inkspect toolbar"
+    }
+  },
+  "permissions": [
+    "storage",
+    "bookmarks",
+    "activeTab",
+    "scripting",
+    "downloads",
+    "clipboardWrite",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "web_accessible_resources": [
+    { "resources": ["codicon.ttf", "icons/32.png"], "matches": ["<all_urls>"] }
+  ],
   "options_ui": { "page": "options.html", "open_in_tab": true }
 }

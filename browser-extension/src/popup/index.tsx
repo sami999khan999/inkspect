@@ -1,0 +1,153 @@
+// The toolbar button's popup: the link at a glance (where sends go), the button that opens the
+// toolbar on this page, the main keys, and the way to the full page (options.html).
+import codiconCss from '@vscode/codicons/dist/codicon.css';
+import themeCss from '@inkspect/shared/ui/theme.css';
+import uiCss from '@inkspect/shared/ui/ui.css';
+import { effectiveShortcuts, type ShortcutMap } from '@inkspect/shared/shortcuts';
+import { Button } from '@inkspect/shared/ui/Button';
+import { IconButton } from '@inkspect/shared/ui/IconButton';
+import { KeyCaps } from '@inkspect/shared/ui/KeyCaps';
+import { useEffect, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import type { BridgeStatus } from '../messages';
+import { isMac, labelOf, TOOLBAR_ACTIONS, watchShortcuts } from '../shortcuts';
+import { LinkGraph } from '../ui/LinkGraph';
+import linkGraphCss from '../ui/link-graph.css';
+import popupCss from './popup.css';
+
+/** The keys the popup shows; the full page has all of them. */
+const MAIN_KEYS = ['mode.inspect', 'mode.draw', 'mode.screenshot', 'mode.device'];
+const KEY_ICONS: Record<string, string> = {
+  'mode.inspect': 'inspect',
+  'mode.draw': 'edit',
+  'mode.screenshot': 'device-camera',
+  'mode.device': 'device-mobile',
+};
+
+const STATE: Record<BridgeStatus['state'], { label: string; tone: string }> = {
+  connected: { label: 'Linked', tone: 'ok' },
+  connecting: { label: 'Connecting', tone: 'busy' },
+  unpaired: { label: 'Not paired', tone: 'warn' },
+  offline: { label: 'VS Code not running', tone: 'off' },
+};
+
+/** Opens the full page, on one of its sections. */
+function openPage(section?: string) {
+  void chrome.tabs.create({
+    url: chrome.runtime.getURL(`options.html${section ? `#${section}` : ''}`),
+  });
+  window.close();
+}
+
+function Popup() {
+  const [status, setStatus] = useState<BridgeStatus>({ state: 'connecting' });
+  const [map, setMap] = useState<ShortcutMap>(() => effectiveShortcuts({}, isMac));
+  const [toolbarKey, setToolbarKey] = useState<string>();
+  const [failed, setFailed] = useState('');
+
+  useEffect(() => {
+    const refresh = () =>
+      void chrome.runtime
+        .sendMessage({ type: 'status' })
+        .then((s: BridgeStatus | undefined) => s && setStatus(s));
+    refresh();
+    const timer = setInterval(refresh, 1500);
+    const stop = watchShortcuts((next) => setMap(next));
+    void chrome.commands
+      .getAll()
+      .then((all) => setToolbarKey(all.find((c) => c.name === 'toggle-toolbar')?.shortcut));
+    return () => {
+      clearInterval(timer);
+      stop();
+    };
+  }, []);
+
+  const openToolbar = async () => {
+    const reply = (await chrome.runtime
+      .sendMessage({ type: 'toggleToolbar' })
+      .catch(() => null)) as { ok: boolean; error?: string } | null;
+    if (reply?.ok) window.close();
+    else setFailed(reply?.error ?? 'The toolbar could not open on this page.');
+  };
+
+  const view = STATE[status.state];
+  const linked = status.state === 'connected';
+  return (
+    <main className={`popup tone-${view.tone}`}>
+      <header className="popup-head">
+        <img src="icons/32.png" alt="" />
+        <span className="popup-name">Inkspect</span>
+        <span className="popup-state" role="status">
+          <span className="status-dot" aria-hidden="true" />
+          {view.label}
+        </span>
+      </header>
+
+      <section className="popup-link" aria-label="VS Code">
+        <LinkGraph status={status} size="sm" limit={3} />
+        {!linked && (
+          <div className="popup-unlinked">
+            <p>
+              {status.state === 'unpaired'
+                ? 'VS Code is running. Pair once to send captures to it.'
+                : 'Start VS Code with VS Code Browser to link it.'}
+            </p>
+            {status.state === 'unpaired' && (
+              <Button size="sm" icon="link" onClick={() => openPage('vscode')}>
+                Pair
+              </Button>
+            )}
+          </div>
+        )}
+      </section>
+
+      <div className="popup-action">
+        <Button variant="primary" icon="inspect" className="open-toolbar" onClick={openToolbar}>
+          <span className="open-label">Open toolbar on this page</span>
+          {toolbarKey && <KeyCaps binding={toolbarKey.toLowerCase()} size="sm" />}
+        </Button>
+        {failed && (
+          <p className="popup-error" role="alert">
+            <span className="codicon codicon-error" aria-hidden="true" />
+            {failed}
+          </p>
+        )}
+      </div>
+
+      <section className="popup-keys" aria-label="Main shortcuts">
+        {MAIN_KEYS.map((id) => {
+          const action = TOOLBAR_ACTIONS.find((a) => a.id === id);
+          const key = map[id]?.[0];
+          if (!action) return null;
+          return (
+            <div key={id} className="key-tile">
+              <span className="key-tile-label">
+                <span className={`codicon codicon-${KEY_ICONS[id]}`} aria-hidden="true" />
+                {labelOf(action)}
+              </span>
+              {key ? <KeyCaps binding={key} size="sm" /> : <span className="muted">No key</span>}
+            </div>
+          );
+        })}
+      </section>
+
+      <footer className="popup-foot">
+        <Button size="sm" variant="ghost" icon="link-external" onClick={() => openPage()}>
+          Open Inkspect
+        </Button>
+        <IconButton
+          icon="keyboard"
+          label="Change shortcuts"
+          onClick={() => openPage('shortcuts')}
+        />
+      </footer>
+    </main>
+  );
+}
+
+const style = document.createElement('style');
+style.textContent = [codiconCss, themeCss, uiCss, linkGraphCss, popupCss].join('\n');
+document.head.append(style);
+document.documentElement.classList.add('ink-theme');
+
+createRoot(document.getElementById('root')!).render(<Popup />);
