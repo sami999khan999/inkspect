@@ -89,7 +89,7 @@ browser-extension/
 | Console errors + Copy for AI | ✅ | MAIN-world hooks (`console.*`, `error`, `unhandledrejection`) injected while the toolbar is on; or `debugger` (`Runtime`/`Log`) for full history |
 | Failed requests + Copy for AI | ✅ | `webRequest.onErrorOccurred` / `onCompleted` (status ≥ 400) with optional host permission; or `debugger` `Network.*` |
 | Copy page context | ✅ | URL, title, viewport, selection, errors, failed requests |
-| Send to chat / terminal agent | ✅ via bridge | VS Code opens chat with the text or image, or types the screenshot path into a terminal |
+| Send to chat / terminal agent | ✅ via bridge | VS Code opens chat with the text or image, or types the screenshot path into a terminal. Several screenshots taken together are shared as context with one `group`, then sent in one `send` naming their `captures` (only the ones checked in the popup). |
 | Save screenshots into the workspace | ✅ via bridge | Bytes sent to VS Code and saved in `.vscode-browser/screenshots/` |
 | Bookmarks | ✅ **two-way sync** | `chrome.bookmarks` ↔ VS Code bookmarks over the bridge |
 | Agent tools (navigate, screenshot, get element, console errors…) | ✅ via bridge | VS Code's LM tools/MCP can target "the real browser tab" as well as the built-in browser |
@@ -107,9 +107,15 @@ browser-extension/
 - **Port:** a fixed default (setting `vscodeBrowser.bridge.port`, default **47110**) so the extension can find it. The extension tries the configured port and the next 4.
 - **Several VS Code windows:** the first window that binds the port serves the bridge. The others keep working through the shared bookmark store on disk. **[vscode]** `BookmarksStore` watches its JSON file and reloads on external changes, which also fixes stale bookmarks across windows today.
 - **Pairing (one time per browser profile):**
-  1. **[vscode]** **Browser: Connect Browser Extension** shows a 6-digit code (valid for 2 minutes).
-  2. The extension's toolbar or options page asks for the code, sends it, and receives a long-lived token. The token is kept in `chrome.storage.local` on the browser side and in `context.secrets` in VS Code.
-  3. VS Code records the extension's origin (`chrome-extension://<id>` / `moz-extension://<uuid>`) and accepts only paired origins with a valid token. Host and Origin are checked, as the MCP server does.
+  1. An unpaired extension connects anyway, says `hello` without a token and waits. VS Code records an offer, shared by all windows.
+  2. **[vscode]** **Pair Browser Extension** writes an approval (`bridge-approve.json`, valid for 2 minutes). It runs from the Browser side panel, its title bar, the status bar, or the offer's notification.
+     - The serving window pairs the named waiting browser or, with no name, the only one waiting. It never picks one of several.
+     - No code is typed: the one click in VS Code is the trust gate.
+  3. The fallback: **Browser: Pair Browser Extension with a Code** shows a 6-digit code (valid for 2 minutes), typed on the extension's settings page or toolbar.
+  4. Either way, the extension receives a long-lived token and keeps it in `chrome.storage.local`.
+     - VS Code keeps only its hash, with the origin, in `globalState`.
+     - The upgrade accepts any extension origin. Host and path are checked, so web pages are refused.
+     - Reconnects must match the paired origin and token.
 - **Protocol** (`@inkspect/shared/bridge/protocol.ts`): versioned JSON `{ v, id?, type, ... }` with requests/responses (`id`) and events. The message groups are:
   - `hello`, `pair`, `ping`
   - `bookmarks.snapshot`, `bookmarks.ops`, `bookmarks.ack`
@@ -180,7 +186,7 @@ browser-extension/
 
 ## Phase 1: Toolbar shell
 
-- [x] **Opening it:** shortcut `toggle-toolbar` (Alt+Shift+I) and the toolbar button. The toolbar is injected on demand (`activeTab` + `scripting`) with its MAIN-world helper.
+- [x] **Opening it:** shortcut `toggle-toolbar` (Alt+Shift+K) and the toolbar button. The toolbar is injected on demand (`activeTab` + `scripting`) with its MAIN-world helper.
 - [x] **The toolbar:**
   - React in a **closed** shadow root on a custom element, so page CSS can't reach it.
   - A full-width bar that slides down from the top; the page moves down to make room, and fixed and sticky elements anchored at the top move with it (`pagePush.ts`). While drawing, the drawing tools are its second row.
@@ -261,7 +267,13 @@ browser-extension/
   - `ws` WebSocket on 127.0.0.1 (`vscodeBrowser.bridge.port`, default 47110); only one VS Code window serves it.
   - Host, Origin and path checks, so web pages are refused.
   - 6-digit pairing codes valid for 2 minutes; tokens stored only as hashes, with the paired origin.
-  - A status bar item, and **Connect Browser Extension** / **Unlink All Browser Extensions**.
+  - A status bar item, and **Pair Browser Extension** / **Unlink All Browser Extensions**.
+- [x] **One-click pairing:** **Pair Browser Extension** pairs the waiting browser without a code.
+  - It is the first item of the Browser side panel's actions view, and a title-bar button.
+  - The item shows the link state in every window.
+  - The code is the fallback (**Pair Browser Extension with a Code**).
+- [ ] Unlinking in the browser doesn't tell VS Code, so the stored token hash stays.
+- [ ] No pinned extension id: another installed extension could appear as a waiting browser. It is shown by name before pairing.
 - [x] **Extension client:**
   - tries the port and the next 4, with backoff
   - 20 s keep-alive (keeps Chrome's service worker alive while linked)
@@ -342,7 +354,7 @@ browser-extension/
 ## Decisions to confirm
 
 - **Product name:** the repository is *Inkspect*. Should both products use it, with the VS Code extension renamed from "VS Code Browser"?
-- **Default shortcut:** Alt+Shift+I, or another.
+- **Default shortcut:** Alt+Shift+K, or another.
 - **Default sync mapping** for signed-in Chrome: account roots (recommended) or local roots.
 - **Bridge port:** 47110 by default.
 - **Publishing:** Chrome Web Store / Edge Add-ons / Firefox AMO, or unpacked installs only for now.

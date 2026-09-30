@@ -6,26 +6,27 @@ import themeCss from '@inkspect/shared/ui/theme.css';
 import uiCss from '@inkspect/shared/ui/ui.css';
 import {
   effectiveShortcuts,
+  keyMatchesQuery,
+  SHORTCUT_ACTIONS,
   type ShortcutMap,
   type ShortcutOverrides,
 } from '@inkspect/shared/shortcuts';
 import { Button } from '@inkspect/shared/ui/Button';
-import { IconButton } from '@inkspect/shared/ui/IconButton';
+import { ConfirmButton } from '@inkspect/shared/ui/ConfirmButton';
 import { KeyCaps } from '@inkspect/shared/ui/KeyCaps';
 import { Segmented } from '@inkspect/shared/ui/Segmented';
 import { ShortcutList } from '@inkspect/shared/ui/ShortcutList';
-import { TextField } from '@inkspect/shared/ui/TextField';
+import { fillActiveSearch, ShortcutSearch } from '@inkspect/shared/ui/ShortcutSearch';
 import { useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { BridgeStatus } from '../messages';
+import type { BridgeStatus, ShortcutPressed } from '../messages';
 import {
+  ALL_SCOPES,
   isMac,
   labelOf,
-  resetToolbarShortcuts,
+  resetAllShortcuts,
   scopeLabelOf,
   setShortcutKeys,
-  TOOLBAR_ACTIONS,
-  TOOLBAR_SCOPES,
   watchShortcuts,
 } from '../shortcuts';
 import { LinkGraph } from '../ui/LinkGraph';
@@ -115,6 +116,7 @@ function Options() {
             map={shortcuts.map}
             overrides={shortcuts.overrides}
             linked={status.state === 'connected'}
+            toolbarKey={toolbarKey}
           />
         )}
         {tab === 'about' && (
@@ -136,6 +138,8 @@ function VsCodeSection({
   const [code, setCode] = useState('');
   const [message, setMessage] = useState('');
   const [pairing, setPairing] = useState(false);
+  // The popup's "Use a code" link opens this page at #vscode-code.
+  const [useCode, setUseCode] = useState(() => location.hash === '#vscode-code');
   const linked = status.state === 'connected';
   const count = status.windows?.length ?? 1;
 
@@ -189,24 +193,36 @@ function VsCodeSection({
             title="This browser"
             text="Unlinking stops sends and bookmark sync until you pair again."
           >
-            <Button
+            <ConfirmButton
               variant="danger"
-              size="sm"
               icon="debug-disconnect"
-              onClick={() =>
+              confirmLabel="Click again to unlink"
+              onConfirm={() =>
                 void chrome.runtime
                   .sendMessage({ type: 'unpair' })
                   .then((s: BridgeStatus | undefined) => s && setStatus(s))
               }
             >
               Unlink
-            </Button>
+            </ConfirmButton>
           </Card>
           <Card
             icon="lock"
             title="Private by design"
             text="The link only talks to VS Code on this computer (127.0.0.1), and only after pairing."
           />
+        </div>
+      ) : status.state !== 'unpaired' ? (
+        <div className="card pair-card">
+          <p className="pair-lead">
+            <span className="codicon codicon-loading codicon-modifier-spin" aria-hidden="true" />
+            Open VS Code with the VS Code Browser extension. Then click{' '}
+            <b>Pair Browser Extension</b> in its <b>Browser</b> side panel.
+          </p>
+          <p className="card-foot">
+            <span className="codicon codicon-lock" aria-hidden="true" />
+            The link only talks to VS Code on this computer (127.0.0.1), and only after pairing.
+          </p>
         </div>
       ) : (
         <form
@@ -216,35 +232,49 @@ function VsCodeSection({
             void pair();
           }}
         >
-          <ol className="steps">
-            <li>
-              <span>
-                In VS Code, run <kbd>Browser: Connect Browser Extension</kbd>, or click <b>Pair</b>{' '}
-                on its "wants to sync bookmarks" notification.
-              </span>
-            </li>
-            <li>
-              <span>Type the 6-digit code it shows.</span>
-            </li>
-          </ol>
-          <div className="pair-row">
-            <CodeInput
-              value={code}
-              onChange={setCode}
-              disabled={pairing}
-              onComplete={(value) => void pair(value)}
-            />
+          <p className="pair-lead">
+            <span className="codicon codicon-plug" aria-hidden="true" />
+            <span>
+              In VS Code, click <b>Pair Browser Extension</b> in the <b>Browser</b> side panel (or{' '}
+              <b>Pair</b> on its notification). No code needed: this page updates by itself.
+            </span>
+          </p>
+          {!useCode ? (
             <Button
-              type="submit"
-              variant="primary"
-              icon="link"
-              className="pair-button"
-              loading={pairing}
-              disabled={code.length !== 6}
+              size="sm"
+              variant="ghost"
+              icon="key"
+              className="use-code"
+              onClick={() => setUseCode(true)}
             >
-              Pair
+              Use a code instead
             </Button>
-          </div>
+          ) : (
+            <>
+              <p className="muted">
+                Run <kbd>Browser: Pair Browser Extension with a Code</kbd> in VS Code, then type the
+                code it shows.
+              </p>
+              <div className="pair-row">
+                <CodeInput
+                  value={code}
+                  onChange={setCode}
+                  disabled={pairing}
+                  onComplete={(value) => void pair(value)}
+                />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  icon="link"
+                  className="pair-button"
+                  loading={pairing}
+                  disabled={code.length !== 6}
+                >
+                  Pair
+                </Button>
+              </div>
+            </>
+          )}
           {message && (
             <p className="pair-message" role="alert">
               <span className="codicon codicon-error" aria-hidden="true" />
@@ -265,19 +295,27 @@ function ShortcutsSection({
   map,
   overrides,
   linked,
+  toolbarKey,
 }: {
   map: ShortcutMap;
   overrides: ShortcutOverrides;
   linked: boolean;
+  toolbarKey?: string;
 }) {
   const [query, setQuery] = useState('');
+  const needle = query.trim().toLowerCase();
+  const showBrowserKey =
+    !needle ||
+    needle.split(/\s+/).every((word) => 'open the toolbar browser'.includes(word)) ||
+    (!!toolbarKey &&
+      (toolbarKey.toLowerCase().includes(needle) || keyMatchesQuery(toolbarKey, needle)));
   return (
     <>
       <section className="hero compact">
         <div className="hero-text">
           <h1>Shortcuts</h1>
           <p>
-            The toolbar's keys, shared with VS Code Browser:{' '}
+            Every shortcut of the toolbar and VS Code Browser, one key map:{' '}
             {linked
               ? 'a change here applies in VS Code too, and the other way round.'
               : 'they sync with VS Code once it is linked, and follow your browser account.'}{' '}
@@ -287,24 +325,48 @@ function ShortcutsSection({
       </section>
       <div className="card shortcuts-card">
         <div className="shortcuts-bar">
-          <TextField
-            icon="search"
-            placeholder="Search actions or keys"
-            aria-label="Search shortcuts"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onClear={() => setQuery('')}
-          />
-          <IconButton
+          <ShortcutSearch value={query} onChange={setQuery} />
+          {/* Shared with VS Code: a reset there too, so it takes a second click. */}
+          <ConfirmButton
             icon="discard"
-            label="Reset all shortcuts"
-            disabled={!TOOLBAR_ACTIONS.some((a) => a.id in overrides)}
-            onClick={() => void resetToolbarShortcuts(overrides)}
-          />
+            confirmLabel="Click again to reset"
+            title="Reset all shortcuts (here and in VS Code)"
+            disabled={!Object.keys(overrides).length}
+            onConfirm={() => void resetAllShortcuts()}
+          >
+            Reset all
+          </ConfirmButton>
         </div>
+        {/* The one key the browser keeps (chrome://extensions/shortcuts), not the synced map. */}
+        {showBrowserKey && (
+          <div className="browser-key">
+            <span className="codicon codicon-inspect" aria-hidden="true" />
+            <span className="browser-key-label">Open the toolbar</span>
+            <span
+              className="shortcut-tag br"
+              title="Works in your browser. Set by the browser itself, so it does not sync with VS Code"
+            >
+              BR
+            </span>
+            {toolbarKey ? (
+              <KeyCaps binding={toolbarKey.toLowerCase()} size="sm" />
+            ) : (
+              <span className="muted">No key</span>
+            )}
+            {__BROWSER__ === 'chrome' && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' })}
+              >
+                Change
+              </Button>
+            )}
+          </div>
+        )}
         <ShortcutList
-          actions={TOOLBAR_ACTIONS}
-          scopes={TOOLBAR_SCOPES}
+          actions={SHORTCUT_ACTIONS}
+          scopes={ALL_SCOPES}
           map={map}
           overrides={overrides}
           query={query}
@@ -315,7 +377,8 @@ function ShortcutsSection({
         />
         <p className="card-foot">
           <span className="codicon codicon-info" aria-hidden="true" />
-          VS Code Browser has more (tabs, the address bar...): change those in its Shortcuts view.
+          VS: works in VS Code Browser. BR: works in this browser&apos;s toolbar. It is one key map:
+          changing a key here changes it in VS Code too.
         </p>
       </div>
     </>
@@ -413,6 +476,14 @@ function Card({
     </section>
   );
 }
+
+// The toolbar's browser key, pressed on this page: the browser gives it to the extension, not
+// the page, so the background passes it on for the shortcut search box.
+chrome.runtime.onMessage.addListener((message: Partial<ShortcutPressed>) => {
+  if (message?.type === 'shortcutPressed' && typeof message.key === 'string') {
+    fillActiveSearch(message.key);
+  }
+});
 
 const style = document.createElement('style');
 style.textContent = [codiconCss, themeCss, uiCss, linkGraphCss, optionsCss].join('\n');

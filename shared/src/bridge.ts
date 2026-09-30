@@ -80,6 +80,13 @@ export type ClientMessage =
        */
       capture?: string;
       kind?: CaptureKind;
+      /** Captures made together (several screenshots): one group in Agent Context. */
+      group?: string;
+      /**
+       * Sends these captures, already in Agent Context (sent as "context" first), together in one
+       * send (a group, or the checked part of one); no text or image then.
+       */
+      captures?: string[];
     }
   /** The shortcuts stored in the browser's sync storage (sent when they are newer). */
   | ({ type: 'settings.shortcuts' } & ShortcutSettings);
@@ -169,6 +176,8 @@ const CLIENT_MESSAGES: Record<ClientMessage['type'], Record<string, Check>> = {
     window: optional(isString),
     capture: optional(isString),
     kind: optional(oneOf('screenshot', 'element', 'errors', 'network', 'page', 'text')),
+    group: optional(isString),
+    captures: optional(arrayOf(isString, 60)),
   },
   'settings.shortcuts': { shortcuts: shortcutMap, updated: isNumber },
 };

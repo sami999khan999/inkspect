@@ -55,7 +55,7 @@ export function activate(context: vscode.ExtensionContext): void {
   void bridge.sync();
   const shortcutsView = new ShortcutsViewProvider(
     context.extensionUri,
-    () => bridge.connected.length > 0,
+    () => bridge.linkState().browsers.length > 0,
     bridge.onDidChange,
   );
 
@@ -87,13 +87,26 @@ export function activate(context: vscode.ExtensionContext): void {
     mcp,
     ...registerMcpCommands(mcp),
     bridge,
-    vscode.commands.registerCommand('vscodeBrowser.bridge.pair', () => bridge.startPairing()),
-    vscode.commands.registerCommand('vscodeBrowser.bridge.forget', () => bridge.forgetAll()),
-    // For the integration tests.
+    vscode.commands.registerCommand('vscodeBrowser.bridge.pair', () => bridge.pair()),
+    vscode.commands.registerCommand('vscodeBrowser.bridge.pairWithCode', () =>
+      bridge.pairWithCode(),
+    ),
+    vscode.commands.registerCommand('vscodeBrowser.bridge.manage', () => bridge.manage()),
+    // Asks first; `{ confirm: false }` (scripts, tests) doesn't.
+    vscode.commands.registerCommand('vscodeBrowser.bridge.forget', (options?: unknown) =>
+      bridge.forgetAll({
+        confirm: (options as { confirm?: unknown } | undefined)?.confirm !== false,
+      }),
+    ),
+    // For the integration tests. `approve` is a Pair click: a client id, or true for "any".
     vscode.commands.registerCommand('vscodeBrowser.debug.bridge', async (options?: unknown) => {
-      const mode = (options as { firstSyncMode?: 'merge' } | undefined)?.firstSyncMode;
+      const { firstSyncMode: mode, approve } = (options ?? {}) as {
+        firstSyncMode?: 'merge';
+        approve?: string | true;
+      };
       if (mode) bridge.firstSyncModeForTests = mode;
       await bridge.sync();
+      if (approve) bridge.approve(approve === true ? undefined : approve);
       return {
         port: bridge.port,
         code: bridge.createPairingCode(),
@@ -107,7 +120,7 @@ export function activate(context: vscode.ExtensionContext): void {
         BrowserPanel.restore(services, panel, typeof windowId === 'string' ? windowId : undefined);
       },
     }),
-    registerSidebar(services),
+    registerSidebar(services, bridge),
     tray,
     agentTerminals,
     contextView,

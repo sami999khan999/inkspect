@@ -241,5 +241,6 @@ describe('random edits on both sides', () => {
         expectConverged(s.state, s.local, s.remote);
       }
     }
-  });
+    // 200 seeds x 20 rounds: about 2 s alone, over the 5 s default on a busy machine.
+  }, 30_000);
 });

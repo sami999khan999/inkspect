@@ -110,6 +110,16 @@ const fake = {
     { id: 'w2', name: 'api', lastUsed: false },
   ],
   socket: undefined,
+  /** A Pair click in VS Code: pairs the browser waiting on the open connection, without a code. */
+  approve() {
+    for (const message of [
+      { type: 'paired', token: 'test-token', peer: 'Fake VS Code' },
+      { type: 'welcome', peer: 'Fake VS Code', syncBookmarks: true },
+      { type: 'windows', windows: fake.windows },
+    ]) {
+      fake.socket.send(shared.encode(message));
+    }
+  },
 };
 // Like VS Code's server, answers plain requests (the extension probes the port first).
 const linkServer = createServer((_request, response) => response.writeHead(404).end());
@@ -488,6 +498,51 @@ await test('pairs with VS Code and syncs bookmarks both ways', async () => {
       document.querySelector('.status-chip')?.textContent?.includes('Not paired'),
     ),
   );
+  // One click in VS Code: it approves the waiting browser and sends a token, no code typed.
+  fake.approve();
+  await until('the settings page to show the one-click link', () =>
+    options.evaluate(() =>
+      document.querySelector('.status-chip')?.textContent?.startsWith('Linked'),
+    ),
+  );
+  // The windows keep a stable order (by name); the lit path runs down the bus to the one used last.
+  const graph = await options.evaluate(() =>
+    [...document.querySelectorAll('.graph-target')].map((row) => ({
+      name: row.querySelector('.graph-name')?.textContent,
+      lit: row.classList.contains('lit'),
+      onPath: row.classList.contains('on-path'),
+    })),
+  );
+  assert(
+    JSON.stringify(graph) ===
+      JSON.stringify([
+        { name: 'api', lit: false, onPath: true },
+        { name: 'shop', lit: true, onPath: false },
+      ]),
+    JSON.stringify(graph),
+  );
+  // Unlink (it takes a second click: the first only arms it), then pair the fallback way: a
+  // code typed on the settings page.
+  await options.evaluate(() =>
+    [...document.querySelectorAll('button')]
+      .find((b) => b.textContent?.trim() === 'Unlink')
+      .click(),
+  );
+  const stillLinked = await options.evaluate(() =>
+    document.querySelector('.status-chip')?.textContent?.startsWith('Linked'),
+  );
+  assert(stillLinked, 'one click unlinked');
+  await options.evaluate(() =>
+    [...document.querySelectorAll('button')]
+      .find((b) => b.textContent?.includes('Click again to unlink'))
+      .click(),
+  );
+  await until('the settings page to offer a code', () =>
+    options.evaluate(() => {
+      document.querySelector('.use-code')?.click();
+      return !!document.querySelector('.code-box');
+    }),
+  );
   // One box per digit: typing moves through them, and the last digit pairs.
   await options.type('.code-box', fake.code);
   await until('the settings page to show the link', () =>
@@ -495,6 +550,48 @@ await test('pairs with VS Code and syncs bookmarks both ways', async () => {
       document.querySelector('.status-chip')?.textContent?.startsWith('Linked'),
     ),
   );
+  // The Shortcuts tab lists every shortcut, VS Code Browser's own included (tagged), in every group.
+  await options.goto(`chrome-extension://${extensionId}/options.html#shortcuts`);
+  const list = await until('the full shortcut list', () =>
+    options.evaluate(() => {
+      const groups = [...document.querySelectorAll('.group-title')].map((g) => g.textContent);
+      const rows = [...document.querySelectorAll('.shortcut-item')];
+      const tagsOf = (row) =>
+        [...row.querySelectorAll('.shortcut-tag')].map((t) => t.textContent).join(' ');
+      // Toolbar keys work in both (VS BR); VS Code Browser's own only there (VS).
+      const tagged =
+        rows.some((r) => tagsOf(r) === 'VS BR') && rows.some((r) => tagsOf(r) === 'VS');
+      return groups.includes('Measure') && tagged ? { groups, tagged } : undefined;
+    }),
+  );
+  assert(list.groups.includes('Drawing') && list.groups.includes('Record'), JSON.stringify(list));
+  // Pressing a shortcut in the search box searches for it; typing it as words works too.
+  await options.focus('.shortcuts-bar input');
+  await options.keyboard.down('Control');
+  await options.keyboard.down('Shift');
+  await options.keyboard.press('KeyC');
+  await options.keyboard.up('Shift');
+  await options.keyboard.up('Control');
+  const searched = () =>
+    options.evaluate(() => ({
+      query: document.querySelector('.shortcuts-bar input').value,
+      rows: [...document.querySelectorAll('.shortcut-item .shortcut-label')].map(
+        (label) => label.textContent,
+      ),
+    }));
+  const pressed = await until('the pressed shortcut as the search', async () => {
+    const result = await searched();
+    return result.query === 'Ctrl+Shift+C' ? result : undefined;
+  });
+  assert(pressed.rows.length > 0 && pressed.rows.length < 5, JSON.stringify(pressed));
+  await options.evaluate(() => {
+    const input = document.querySelector('.shortcuts-bar input');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await options.type('.shortcuts-bar input', 'ctrl shift c');
+  const typed = await searched();
+  assert(JSON.stringify(typed.rows) === JSON.stringify(pressed.rows), JSON.stringify(typed));
   await options.close();
   const status = await worker.evaluate(() => globalThis.__inkspectTest.bridgeStatus());
   assert(status.state === 'connected', JSON.stringify(status));
@@ -610,6 +707,27 @@ await test('shortcuts: changed in the toolbar, they reach VS Code and work; VS C
     fake.shortcutsFromBrowser?.shortcuts?.['mode.draw'] ? fake.shortcutsFromBrowser : undefined,
   );
   assert(JSON.stringify(sent.shortcuts['mode.draw']) === '["ctrl+alt+x"]', JSON.stringify(sent));
+  // The search box traps shortcuts: one pressed there is searched for, not run...
+  await inToolbar((shadow) => shadow.querySelector('.shortcuts-bar input')?.focus());
+  await tab.keyboard.down('Control');
+  await tab.keyboard.down('Alt');
+  await tab.keyboard.press('KeyX');
+  await tab.keyboard.up('Alt');
+  await tab.keyboard.up('Control');
+  await until('the pressed key searched for', () =>
+    inToolbar((shadow) => shadow.querySelector('.shortcuts-bar input')?.value === 'Ctrl+Alt+X'),
+  );
+  assert(!(await inToolbar((shadow) => !!shadow.querySelector('.draw-toolbar'))), 'draw ran');
+  // ...and so is the browser's own toolbar key, which the page never sees (the background passes
+  // it on instead of closing the toolbar).
+  await worker.evaluate(
+    (id) => chrome.tabs.sendMessage(id, { type: 'toggle', key: 'alt+shift+k' }),
+    tabId,
+  );
+  await until('the toolbar key searched for', () =>
+    inToolbar((shadow) => shadow.querySelector('.shortcuts-bar input')?.value === 'Alt+Shift+K'),
+  );
+  assert(await inToolbar((shadow) => !!shadow.querySelector('.bar')), 'the toolbar closed');
   // And works on the page, as does the drawing toolbar's Screenshot menu key (with its keys shown).
   await inToolbar((shadow) => shadow.querySelector('.panel-head button')?.click());
   await tab.keyboard.down('Control');
@@ -618,6 +736,14 @@ await test('shortcuts: changed in the toolbar, they reach VS Code and work; VS C
   await tab.keyboard.up('Alt');
   await tab.keyboard.up('Control');
   await until('drawing on', () => inToolbar((shadow) => !!shadow.querySelector('.draw-toolbar')));
+  // Every drawing tool has its key, pencil (I) included.
+  await tab.keyboard.press('KeyI');
+  await until('the pencil picked by its key', () =>
+    inToolbar(
+      (shadow) =>
+        shadow.querySelector('.draw-toolbar button[aria-label="Pencil"]')?.ariaPressed === 'true',
+    ),
+  );
   await tab.keyboard.press('KeyS');
   const menu = await until('capture menu', () =>
     inToolbar((shadow) =>
@@ -627,6 +753,39 @@ await test('shortcuts: changed in the toolbar, they reach VS Code and work; VS C
   assert(menu.includes('Each drawing separately') && menu.includes('Alt'), menu);
   await tab.keyboard.press('Escape');
   await tab.keyboard.press('Escape');
+
+  // Popups close when the toolbar is pressed elsewhere, and their own button toggles them
+  // (real mouse presses: the closing happens on pointerdown).
+  const pressOn = async (selector) => {
+    const box = await inToolbar((shadow, selector) => {
+      const r = shadow.querySelector(selector)?.getBoundingClientRect();
+      return r && { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }, selector);
+    assert(box, `nothing at ${selector}`);
+    await tab.mouse.click(box.x, box.y);
+  };
+  const has = (selector) => inToolbar((shadow, s) => !!shadow.querySelector(s), selector);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
+  const consoleButton = '.bar button[aria-label^="Console and network"]';
+  await pressOn(consoleButton);
+  await until('the console panel', () => has('.panel-dock'));
+  await pressOn('.bar-spacer');
+  await until('the panel closed by a toolbar press', async () => !(await has('.panel-dock')));
+  await pressOn(consoleButton);
+  await until('the console panel again', () => has('.panel-dock'));
+  await pressOn(consoleButton);
+  await settle();
+  assert(!(await has('.panel-dock')), 'its button reopened the panel instead of closing it');
+  await pressOn('.shot-button');
+  await until('the screenshot menu', () => has('.menu-item'));
+  await pressOn('.shot-button');
+  await settle();
+  assert(!(await has('.menu-item')), 'its button reopened the menu instead of closing it');
+  await pressOn('.shot-button');
+  await until('the screenshot menu again', () => has('.menu-item'));
+  await pressOn('.bar-spacer');
+  await until('the menu closed by a toolbar press', async () => !(await has('.menu-item')));
+
   // A change made in VS Code (newer) arrives in the toolbar.
   fake.socket.send(
     shared.encode({
@@ -691,6 +850,109 @@ await test('sends go to the VS Code window picked in the popup, else the one use
   assert(picked.capture && shared?.image && shared.kind === 'screenshot', 'not shared as context');
   const unpicked = await screenshotThenSave();
   assert(unpicked.window === undefined, `unpicked went to ${unpicked.window}`);
+  // The popup's buttons have keys (shown on them): Alt+Shift+C sends to chat.
+  await clickAt('button', 'Screenshot');
+  await clickAt('.menu-item', 'Visible area');
+  await until('popup', () => pointOf('.toast button', 'Send to chat'), 20_000);
+  const shown = await inToolbar((shadow) => ({
+    prefix: shadow.querySelector('.toast-keys')?.textContent,
+    chat: [...shadow.querySelectorAll('.toast button')].find((b) =>
+      b.textContent.startsWith('Send to chat'),
+    )?.textContent,
+  }));
+  assert(
+    /Shift/.test(shown.prefix ?? '') && /Alt/.test(shown.prefix ?? '') && shown.chat?.endsWith('C'),
+    JSON.stringify(shown),
+  );
+  const beforeKey = fake.sends.length;
+  await tab.keyboard.down('Alt');
+  await tab.keyboard.down('Shift');
+  await tab.keyboard.press('KeyC');
+  await tab.keyboard.up('Shift');
+  await tab.keyboard.up('Alt');
+  const byKey = await until('send by key', () =>
+    fake.sends.slice(beforeKey).find((m) => m.target === 'chat'),
+  );
+  assert(byKey.kind === 'screenshot', JSON.stringify(byKey.kind));
+  // The capture popup closed (a "sent" toast may follow it).
+  await until(
+    'the capture popup closed',
+    async () => !(await inToolbar((shadow) => !!shadow.querySelector('.toast-keys'))),
+  );
+  // The element picker: Shift+click selects several; the bar over them acts on all of them.
+  await clickAt('button', 'Select an element');
+  await until('picker on', () => inToolbar((shadow) => !!shadow.querySelector('.inspect-hint')));
+  const centerOf = async (selector) => {
+    const b = await (await tab.$(selector)).boundingBox();
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+  const modClick = async (selector, ...mods) => {
+    const p = await centerOf(selector);
+    await tab.mouse.move(p.x, p.y);
+    for (const mod of mods) await tab.keyboard.down(mod);
+    await tab.mouse.click(p.x, p.y);
+    for (const mod of [...mods].reverse()) await tab.keyboard.up(mod);
+  };
+  await modClick('#login h2', 'Shift');
+  await modClick('button.primary', 'Shift');
+  const bar = await until('the selection bar', () =>
+    inToolbar((shadow) => shadow.querySelector('.selection-bar')?.textContent),
+  );
+  assert(/2\s*selected/.test(bar) && bar.includes('Terminal agent'), bar);
+  let before2 = fake.sends.length;
+  await clickAt('.selection-bar button', 'Terminal agent');
+  const both = await until('selection sent', () =>
+    fake.sends.slice(before2).find((m) => m.target === 'terminal'),
+  );
+  assert(both.kind === 'element' && /2 elements/.test(both.label), JSON.stringify(both.label));
+  assert(!(await inToolbar((shadow) => !!shadow.querySelector('.selection-bar'))), 'bar stayed');
+  // Ctrl+click: the chat agent; Ctrl+Shift+click: a terminal agent.
+  before2 = fake.sends.length;
+  await modClick('button.primary', 'Control');
+  const toChat = await until('Ctrl+click send', () =>
+    fake.sends.slice(before2).find((m) => m.kind === 'element'),
+  );
+  assert(toChat.target === 'chat', toChat.target);
+  before2 = fake.sends.length;
+  await modClick('button.primary', 'Control', 'Shift');
+  const toTerminal = await until('Ctrl+Shift+click send', () =>
+    fake.sends.slice(before2).find((m) => m.kind === 'element'),
+  );
+  assert(toTerminal.target === 'terminal', toTerminal.target);
+  // Screenshots of several: one group; the popup's checkboxes pick which go, in one send.
+  await modClick('#login h2', 'Shift');
+  await modClick('button.primary', 'Shift');
+  await until('the selection bar again', () =>
+    inToolbar((shadow) => !!shadow.querySelector('.selection-bar')),
+  );
+  before2 = fake.sends.length;
+  await clickAt('.selection-bar button', 'Screenshot');
+  await until('the picker in the popup', async () =>
+    (await inToolbar(
+      (shadow) => shadow.querySelectorAll('.toast .thumb-picker-item.on').length,
+    )) === 2
+      ? true
+      : undefined,
+  );
+  const shared2 = fake.sends.slice(before2).filter((m) => m.target === 'context' && m.group);
+  assert(shared2.length === 2 && shared2[0].group === shared2[1].group, 'not shared as a group');
+  await clickAt('.toast .thumb-picker-check', 'Include Screenshot 2 of 2');
+  await until('the partial label', () => pointOf('.toast button', 'Send 1 to terminal'));
+  before2 = fake.sends.length;
+  await clickAt('.toast button', 'Send 1 to terminal');
+  const one = await until('the group send', () =>
+    fake.sends.slice(before2).find((m) => m.target === 'terminal'),
+  );
+  assert(
+    !one.image && one.captures?.length === 1 && one.captures[0] === shared2[0].capture,
+    JSON.stringify({ image: !!one.image, captures: one.captures }),
+  );
+  await tab.keyboard.press('Escape');
+  await until(
+    'picker off',
+    async () => !(await inToolbar((s) => !!s.querySelector('.inspect-hint'))),
+  );
+
   // The console panel has its own picker for sending the page context.
   await clickAt('button', 'Console and network');
   await clickAt('.panel-group .select', 'VS Code window');
@@ -840,9 +1102,12 @@ await test('real build: opens from its button, and its menus and lists take real
   // Esc leaves the element picker even though focus stays on its button.
   await clickNode(byLabel('Close the responsive view'), 'close view');
   await clickNode(byLabel('Select an element'), 'picker button');
-  await until('picker on', () => findNode((a) => a.class === 'inspect-hint'));
+  await until('picker on', () => findNode((a) => a.class?.split(' ').includes('inspect-hint')));
   await real.keyboard.press('Escape');
-  await until('picker off', async () => !(await findNode((a) => a.class === 'inspect-hint')));
+  await until(
+    'picker off',
+    async () => !(await findNode((a) => a.class?.split(' ').includes('inspect-hint'))),
+  );
 });
 
 await realBrowser.close();

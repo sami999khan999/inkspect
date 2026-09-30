@@ -16,8 +16,9 @@ The extension reaches a page only when you open the toolbar on it (`activeTab`);
 
 ## Link with VS Code
 
-1. In VS Code (with the VS Code Browser extension), run **Browser: Connect Browser Extension**. It shows a 6-digit code.
-2. In the browser, open the extension's settings page (it opens by itself after installing, or from the toolbar's VS Code button) and enter the code there.
+1. Keep the browser open with the extension installed. It finds VS Code by itself.
+2. In VS Code (with the VS Code Browser extension), click **Pair Browser Extension** at the top of the **Browser** side panel. No code is needed, and the extension's popup shows **Linked**.
+   - Fallback: run **Browser: Pair Browser Extension with a Code** in VS Code, then type the code on the extension's settings page, under **Use a code instead**.
 3. **First sync:** VS Code asks how to combine bookmarks:
    - **Merge** (duplicates are combined)
    - **Use the browser's**
@@ -40,7 +41,7 @@ The extension reaches a page only when you open the toolbar on it (`activeTab`);
 
 ## The toolbar
 
-Press **Alt+Shift+I** or click the extension's button. A bar slides down across the top of the page, and the page moves down to make room (its fixed and sticky headers too). It has:
+Press **Alt+Shift+K** or click the extension's button. A bar slides down across the top of the page, and the page moves down to make room (its fixed and sticky headers too). It has:
 
 - **Select an element** to copy its details for an AI agent (Shift+click for several, Alt+click adds a screenshot)
 - **Draw** on the page, then screenshot just the drawing

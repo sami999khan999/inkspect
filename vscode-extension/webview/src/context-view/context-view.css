@@ -543,3 +543,167 @@ body.vscode-high-contrast .context-card.latest,
 body.vscode-high-contrast .context-card:focus-visible {
   border-color: var(--vscode-contrastActiveBorder, var(--ink-focus));
 }
+
+/* Selecting cards (to send, remove or group several): a checkbox in the head, shown on hover,
+   on focus, and on every card while anything is selected. */
+.card-select {
+  display: none;
+  margin-top: 6px;
+}
+
+.context-card:hover .card-select,
+.context-card:focus-within .card-select,
+.context.selecting .card-select,
+.context-card.selected .card-select {
+  display: inline-flex;
+}
+
+.context-card.selected {
+  border-color: var(--ink-accent);
+  background: color-mix(in srgb, var(--ink-accent) 8%, var(--card-bg));
+}
+
+body.vscode-high-contrast .context-card.selected {
+  border-color: var(--vscode-contrastActiveBorder);
+}
+
+/* A group: screenshots taken (or grouped) together, one thumbnail each. */
+.group-card .card-icon {
+  --kind-tone: var(--ink-blue);
+}
+
+.card-count {
+  flex-shrink: 0;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--ink-radius-pill);
+  background: color-mix(in srgb, var(--vscode-foreground, #888) 12%, transparent);
+  color: var(--vscode-foreground);
+  font-size: var(--ink-font-xs);
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+.group-thumbs {
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+}
+
+/* The footer while cards are selected: what to do with all of them. */
+.context-selection {
+  justify-content: flex-start;
+  gap: 4px;
+}
+
+.selection-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  font-weight: 600;
+}
+
+.selection-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--ink-radius-pill);
+  background: var(--ink-accent);
+  color: var(--vscode-button-foreground);
+  font-size: var(--ink-font-xs);
+}
+
+.empty-group-tip {
+  max-width: 34em;
+  margin: var(--ink-space-3) auto 0;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-xs);
+}
+
+/* A group of elements (or other text): a checklist, one row each. */
+.group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 4px;
+  border-radius: var(--ink-radius);
+  background: var(--ink-surface-sunken);
+  list-style: none;
+}
+
+.group-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 4px 3px 6px;
+  border-radius: var(--ink-radius-sm);
+}
+
+.group-row:hover {
+  background: var(--vscode-list-hoverBackground, var(--ink-hover));
+}
+
+.group-row:not(.on) .group-row-text,
+.group-row:not(.on) .group-row-icon {
+  opacity: 0.5;
+}
+
+.group-row-icon {
+  flex-shrink: 0;
+  color: var(--ink-blue);
+}
+
+.group-row-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.group-row-title {
+  overflow: hidden;
+  color: var(--vscode-editor-foreground, var(--vscode-foreground));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--ink-font-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.group-row-detail {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.group-row-open {
+  opacity: 0;
+}
+
+.group-row:hover .group-row-open,
+.group-row:focus-within .group-row-open {
+  opacity: 1;
+}
+
+/* After a removal: what went, and Undo (for a few seconds). */
+.context-undo-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vscode-foreground);
+  font-size: var(--ink-font-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.context-undo-text .codicon {
+  color: var(--ink-muted);
+}

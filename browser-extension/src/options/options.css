@@ -240,46 +240,29 @@ body {
   margin-top: 2px;
 }
 
-/* Pairing: a real sequence, so numbered. */
+/* Pairing: one click in VS Code; the code is the fallback. */
 .pair-card {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  align-items: flex-start;
+  gap: 16px;
   padding: 24px;
 }
 
-.steps {
+.pair-lead {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 10px;
   margin: 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: step;
+  font-size: var(--ink-font-lg);
 }
 
-.steps li {
-  display: flex;
-  gap: 12px;
-  counter-increment: step;
-}
-
-.steps li::before {
-  content: counter(step);
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--ink-blue) 16%, transparent);
+.pair-lead .codicon {
+  margin-top: 3px;
   color: var(--ink-blue);
-  font-size: var(--ink-font-xs);
-  font-weight: 700;
 }
 
-.steps kbd {
+.pair-card kbd {
   padding: 1px 6px;
   border: 1px solid var(--vscode-keybindingLabel-border, var(--ink-border));
   border-radius: var(--ink-radius-sm);
@@ -290,12 +273,15 @@ body {
   white-space: nowrap;
 }
 
+.pair-card > .muted {
+  margin: 0;
+}
+
 .pair-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 16px;
-  padding-left: 36px;
 }
 
 .code-input {
@@ -354,7 +340,7 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin: 0 0 0 36px;
+  margin: 0;
   color: var(--ink-danger);
 }
 
@@ -387,6 +373,24 @@ body {
 }
 
 .shortcuts-bar .text-field {
+  flex: 1;
+}
+
+/* The browser's own key (opens the toolbar), above the synced list. */
+.browser-key {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--ink-border-subtle);
+  border-radius: var(--ink-radius);
+}
+
+.browser-key > .codicon {
+  color: var(--ink-blue);
+}
+
+.browser-key-label {
   flex: 1;
 }
 

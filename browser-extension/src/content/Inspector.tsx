@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ShortcutMap } from '@inkspect/shared/shortcuts';
+import { PickerHint } from '@inkspect/shared/ui/PickerHint';
 import { accessibleInfo, firstChildElementOf, parentElementOf } from '@inkspect/shared/collect';
 import { contrastRatio, parseColor, passesAA, toHex, type Rgba } from '@inkspect/shared/color';
 
 export interface PickModifiers {
+  /** Shift+click: add to the multi-selection. */
   add: boolean;
+  /** Alt+click: a screenshot of the element. */
   screenshot: boolean;
-  chat: boolean;
+  /** Ctrl+click: the chat agent; Ctrl+Shift+click: a terminal agent (Cmd on macOS). */
+  send?: 'chat' | 'terminal';
 }
 
 interface InspectorProps {
@@ -22,6 +27,8 @@ interface InspectorProps {
    * Without it the default keys apply.
    */
   actionOf?: (event: KeyboardEvent) => string | undefined;
+  /** The current keys, for the hint (remapped keys show). */
+  map: ShortcutMap;
 }
 
 const DEFAULT_KEYS: Record<string, string> = {
@@ -147,6 +154,7 @@ export function Inspector({
   onCommit,
   onExit,
   actionOf,
+  map,
 }: InspectorProps) {
   const [target, setTarget] = useState<Element | null>(null);
   const [, setTick] = useState(0);
@@ -180,10 +188,11 @@ export function Inspector({
       block(event);
       const el = at(event.clientX, event.clientY) ?? targetRef.current;
       if (el) {
+        const send = event.ctrlKey || event.metaKey;
         handlers.current.onPick(el, {
-          add: event.shiftKey,
+          add: event.shiftKey && !send,
           screenshot: event.altKey,
-          chat: event.ctrlKey || event.metaKey,
+          send: send ? (event.shiftKey ? 'terminal' : 'chat') : undefined,
         });
       }
     };
@@ -251,11 +260,7 @@ export function Inspector({
 
   return (
     <div className="inspector">
-      <div className="inspect-hint">
-        {purpose === 'screenshot'
-          ? 'Click an element to capture it · Esc to cancel'
-          : 'Click: copy · Ctrl+click: send to VS Code chat · Shift+click: add · Alt+click: screenshot · ↑↓ parent/child · Enter: copy · Esc: exit'}
-      </div>
+      <PickerHint className="inspect-hint" purpose={purpose} map={map} altLabel="screenshot" />
       {boxes && (
         <>
           <div className="hl hl-margin" style={style(boxes.margin)} />

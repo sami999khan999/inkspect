@@ -414,14 +414,20 @@ export type WebviewToHost =
       add: boolean;
       /** Alt+click: also save a screenshot of the element. */
       screenshot: boolean;
-      /** Ctrl/Cmd+click: send the details to the chat instead of the clipboard. */
-      chat?: boolean;
+      /** Ctrl+click: send the details to the chat agent; Ctrl+Shift+click: a terminal agent. */
+      send?: 'chat' | 'terminal';
     }
   | {
       type: 'inspect';
       tabId: string;
       /** `screenshot` and `agent` act on the element reached with the pointer or arrow keys. */
       action: 'start' | 'parent' | 'child' | 'copySelection' | 'screenshot' | 'agent' | 'stop';
+    }
+  /** The bar over a Shift+click selection: act on every selected element. */
+  | {
+      type: 'selectionAction';
+      tabId: string;
+      action: 'copy' | 'chat' | 'terminal' | 'screenshot' | 'save' | 'clear';
     }
   | { type: 'annotations'; tabId: string; shapes: Shape[] }
   /** Screenshot for compositing drawings; `rect` in document CSS pixels for `region`. */
@@ -455,7 +461,15 @@ export type WebviewToHost =
   /** Opens a script location from the console in the editor (when it is a workspace file). */
   | { type: 'openSource'; url: string; line?: number; column?: number }
   /** A finished (composited) PNG to save and copy like other screenshots. */
-  | { type: 'saveImage'; tabId: string; base64: string; label: string; toAgent?: boolean }
+  | {
+      type: 'saveImage';
+      tabId: string;
+      base64: string;
+      label: string;
+      toAgent?: boolean;
+      /** Screenshots taken together (each drawing separately): one group in Agent Context. */
+      group?: { id: string; index: number; count: number };
+    }
   /** Types the last screenshot's path into a terminal (for an agent running there). */
   | { type: 'screenshotToTerminal' }
   /** Reply to `convertImage`; no `base64` if the image could not be decoded. */
@@ -665,7 +679,13 @@ const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
     area: oneOf('region', 'viewport', 'fullPage'),
     rect: optional(shape({ x: isNumber, y: isNumber, width: isNumber, height: isNumber })),
   },
-  saveImage: { tabId: isString, base64: isString, label: isString, toAgent: optional(isBoolean) },
+  saveImage: {
+    tabId: isString,
+    base64: isString,
+    label: isString,
+    toAgent: optional(isBoolean),
+    group: optional(shape({ id: isString, index: isNumber, count: isNumber })),
+  },
   screenshotToTerminal: {},
   convertedImage: { requestId: isString, base64: optional(isString) },
   extension: {
@@ -710,7 +730,11 @@ const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
     purpose: optional(oneOf('copy', 'screenshot')),
     add: optional(isBoolean),
     screenshot: optional(isBoolean),
-    chat: optional(isBoolean),
+    send: optional(oneOf('chat', 'terminal')),
+  },
+  selectionAction: {
+    tabId: isString,
+    action: oneOf('copy', 'chat', 'terminal', 'screenshot', 'save', 'clear'),
   },
   screenshot: {
     tabId: isString,

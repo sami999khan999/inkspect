@@ -19,7 +19,9 @@ export type ShortcutScope =
   | 'overlay'
   | 'tweak'
   | 'record'
-  | 'a11y';
+  | 'a11y'
+  /** While the browser toolbar's popup after a capture is showing (its buttons). */
+  | 'capture';
 
 export interface ShortcutAction {
   id: string;
@@ -51,6 +53,7 @@ export const SCOPE_LABELS: Record<ShortcutScope, string> = {
   tweak: 'CSS tweak',
   record: 'Record',
   a11y: 'Accessibility check',
+  capture: 'After a capture',
 };
 
 const cmd = (name: string) => `vscodeBrowser.${name}`;
@@ -208,7 +211,8 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     id: 'page.pdf',
     label: 'Save page as PDF',
     scope: 'global',
-    keys: ['ctrl+p'],
+    // Ctrl+P is VS Code's Quick Open: from the menu (or a key of your own).
+    keys: [],
     command: cmd('savePdf'),
   },
   {
@@ -269,8 +273,8 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     id: 'open.downloads',
     label: 'Downloads',
     scope: 'global',
-    keys: ['ctrl+j'],
-    mac: ['cmd+shift+j'],
+    // Ctrl+J is VS Code's panel.
+    keys: ['shift+alt+l'],
     command: cmd('showDownloads'),
   },
   {
@@ -286,7 +290,8 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     scope: 'global',
     keys: ['ctrl+shift+b'],
   },
-  { id: 'open.quickActions', label: 'Quick actions', scope: 'global', keys: ['ctrl+k'] },
+  // Ctrl+K starts VS Code's key chords, and web apps use it (GitHub, Slack...).
+  { id: 'open.quickActions', label: 'Quick actions', scope: 'global', keys: ['ctrl+shift+k'] },
   {
     id: 'open.shortcuts',
     label: 'Change keyboard shortcuts',
@@ -298,26 +303,30 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     id: 'open.cheatSheet',
     label: 'Keyboard shortcuts of this mode',
     scope: 'global',
-    keys: ['ctrl+/'],
+    // Ctrl+/ comments code in web editors. On macOS, Cmd+Shift+/ is the system Help search.
+    keys: ['ctrl+shift+/'],
+    mac: ['cmd+alt+/'],
   },
   // Modes.
-  { id: 'mode.inspect', label: 'Element picker', scope: 'global', keys: ['ctrl+shift+c'] },
-  { id: 'mode.draw', label: 'Draw on the page', scope: 'global', keys: ['ctrl+shift+d'] },
-  { id: 'mode.screenshot', label: 'Screenshot', scope: 'global', keys: ['ctrl+shift+s'] },
+  // Modes are Alt+Shift+letter: VS Code keeps its view keys (Ctrl+Shift+E/D/M/U/O/S...) while
+  // the browser has focus, and Chrome keeps its DevTools keys (Ctrl+Shift+C/J/I/M). Chrome
+  // itself uses Alt+Shift+T/B/A/I; the capture popup uses C/X/S/D, the toolbar K.
+  { id: 'mode.inspect', label: 'Element picker', scope: 'global', keys: ['shift+alt+e'] },
+  { id: 'mode.draw', label: 'Draw on the page', scope: 'global', keys: ['shift+alt+w'] },
+  { id: 'mode.screenshot', label: 'Screenshot', scope: 'global', keys: ['shift+alt+g'] },
   {
     id: 'mode.devtools',
     label: 'Console and network',
     scope: 'global',
-    keys: ['ctrl+shift+j'],
-    mac: ['cmd+alt+j'],
+    keys: ['shift+alt+j'],
   },
-  { id: 'mode.device', label: 'Device toolbar', scope: 'global', keys: ['ctrl+shift+m'] },
-  { id: 'mode.measure', label: 'Measure', scope: 'global', keys: ['ctrl+shift+u'] },
-  { id: 'mode.eyedropper', label: 'Eyedropper', scope: 'global', keys: ['ctrl+shift+i'] },
-  { id: 'mode.overlay', label: 'Design overlay', scope: 'global', keys: ['ctrl+shift+o'] },
-  { id: 'mode.tweak', label: 'CSS tweak', scope: 'global', keys: ['ctrl+shift+e'] },
+  { id: 'mode.device', label: 'Device toolbar', scope: 'global', keys: ['shift+alt+m'] },
+  { id: 'mode.measure', label: 'Measure', scope: 'global', keys: ['shift+alt+u'] },
+  { id: 'mode.eyedropper', label: 'Eyedropper', scope: 'global', keys: ['shift+alt+y'] },
+  { id: 'mode.overlay', label: 'Design overlay', scope: 'global', keys: ['shift+alt+o'] },
+  { id: 'mode.tweak', label: 'CSS tweak', scope: 'global', keys: ['shift+alt+v'] },
   { id: 'mode.record', label: 'Record the page', scope: 'global', keys: ['ctrl+alt+r'] },
-  { id: 'mode.a11y', label: 'Accessibility check', scope: 'global', keys: ['ctrl+shift+a'] },
+  { id: 'mode.a11y', label: 'Accessibility check', scope: 'global', keys: ['shift+alt+h'] },
 
   // Element picker.
   { id: 'inspect.parent', label: 'Select the parent element', scope: 'inspect', keys: ['up'] },
@@ -418,6 +427,13 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     command: cmd('screenshot.sendToTerminal'),
   },
 
+  // The browser toolbar's popup after a capture (its buttons). Alt+Shift: the page stays
+  // usable, and Chrome keeps Alt+Shift+T, B, A and I for itself.
+  { id: 'capture.chat', label: 'Send to chat', scope: 'capture', keys: ['alt+shift+c'] },
+  { id: 'capture.terminal', label: 'Send to terminal', scope: 'capture', keys: ['alt+shift+x'] },
+  { id: 'capture.save', label: 'Save in VS Code', scope: 'capture', keys: ['alt+shift+s'] },
+  { id: 'capture.download', label: 'Download', scope: 'capture', keys: ['alt+shift+d'] },
+
   // Console and network (while the drawer is open).
   { id: 'dev.console', label: 'Console', scope: 'devtools', keys: ['alt+1'] },
   { id: 'dev.network', label: 'Network', scope: 'devtools', keys: ['alt+2'] },
@@ -432,7 +448,7 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     keys: ['alt+shift+p'],
   },
   { id: 'dev.clear', label: 'Clear', scope: 'devtools', keys: ['alt+k'] },
-  { id: 'dev.close', label: 'Close', scope: 'devtools', keys: ['alt+escape'] },
+  { id: 'dev.close', label: 'Close', scope: 'devtools', keys: ['alt+w'] },
 
   // Device (while the device toolbar is on).
   { id: 'device.previous', label: 'Previous device', scope: 'device', keys: ['alt+['] },
@@ -475,7 +491,7 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     keys: ['alt+x'],
   },
   { id: 'overlay.hide', label: 'Hide or show the overlay', scope: 'overlay', keys: ['alt+h'] },
-  { id: 'overlay.exit', label: 'Close the overlay', scope: 'overlay', keys: ['alt+shift+escape'] },
+  { id: 'overlay.exit', label: 'Close the overlay', scope: 'overlay', keys: ['alt+z'] },
 
   // CSS tweak.
   {
@@ -490,7 +506,7 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
 
   // Record (the page stays usable).
   { id: 'record.stop', label: 'Stop and save', scope: 'record', keys: ['alt+s'] },
-  { id: 'record.pause', label: 'Pause or resume', scope: 'record', keys: ['alt+space'] },
+  { id: 'record.pause', label: 'Pause or resume', scope: 'record', keys: ['alt+y'] },
   { id: 'record.cancel', label: 'Cancel', scope: 'record', keys: ['alt+backspace'] },
 
   // Accessibility check.
@@ -535,10 +551,15 @@ export function effectiveShortcuts(overrides: ShortcutOverrides, mac: boolean): 
   const map: ShortcutMap = {};
   for (const action of SHORTCUT_ACTIONS) {
     const override = overrides[action.id];
-    const keys =
+    // Defaults too: a key press reads "shift+alt+p", so a default written "alt+shift+p" must be
+    // put in the same order or it never matches.
+    const keys = (
       override === undefined
         ? defaultKeys(action, mac)
-        : (typeof override === 'string' ? [override] : [...override]).map(normalizeKey);
+        : typeof override === 'string'
+          ? [override]
+          : [...override]
+    ).map(normalizeKey);
     map[action.id] = [...new Set(keys.filter(Boolean))];
   }
   return map;
@@ -562,7 +583,13 @@ export function sanitizeOverrides(value: unknown): ShortcutOverrides {
  * clash with each other). Other modes take over the page; their keys win over browser-wide keys
  * while they are on, which is intended.
  */
-const CONCURRENT: ReadonlySet<ShortcutScope> = new Set(['devtools', 'device', 'overlay', 'record']);
+const CONCURRENT: ReadonlySet<ShortcutScope> = new Set([
+  'devtools',
+  'device',
+  'overlay',
+  'record',
+  'capture',
+]);
 
 export interface ShortcutConflict {
   key: string;
@@ -622,6 +649,164 @@ export function chordKey(chord: KeyChord): string {
     .join('+');
 }
 
+/**
+ * The actions the Inkspect browser extension's toolbar runs. Every action works in VS Code
+ * Browser; these work in the browser too. (browser-extension/src/shortcuts.ts dispatches them.)
+ */
+export const TOOLBAR_ACTION_IDS: ReadonlySet<string> = new Set([
+  'mode.inspect',
+  'mode.draw',
+  'mode.screenshot',
+  'mode.device',
+  'mode.devtools',
+  'page.bookmark',
+  'open.shortcuts',
+  'inspect.parent',
+  'inspect.child',
+  'inspect.copy',
+  'inspect.exit',
+  ...[
+    'select',
+    'pen',
+    'pencil',
+    'marker',
+    'brush',
+    'highlighter',
+    'neon',
+    'line',
+    'arrow',
+    'doubleArrow',
+    'rect',
+    'ellipse',
+    'text',
+    'callout',
+    'blur',
+    'eraser',
+  ].map((tool) => `draw.${tool}`),
+  ...Array.from({ length: 9 }, (_, i) => `draw.color${i + 1}`),
+  'draw.thinner',
+  'draw.thicker',
+  'draw.fill',
+  'draw.undo',
+  'draw.redo',
+  'draw.clear',
+  'draw.visible',
+  'draw.capture',
+  'draw.captureMenu',
+  'draw.captureGroups',
+  'draw.captureClean',
+  'draw.captureViewport',
+  'draw.captureFullPage',
+  'draw.exit',
+  'shot.viewport',
+  'shot.fullPage',
+  'shot.region',
+  'shot.element',
+  'shot.drawing',
+  'capture.chat',
+  'capture.terminal',
+  'capture.save',
+  'capture.download',
+]);
+
+/** Actions only the browser toolbar has (VS Code Browser has no popup after a capture). */
+const BROWSER_ONLY_SCOPES: ReadonlySet<ShortcutScope> = new Set(['capture']);
+
+/** A short tag for where a shortcut works: VS for VS Code Browser, BR for the browser toolbar. */
+export interface ShortcutPlace {
+  id: 'vs' | 'br';
+  label: string;
+  title: string;
+}
+
+export const PLACE_VS: ShortcutPlace = {
+  id: 'vs',
+  label: 'VS',
+  title: 'Works in VS Code Browser',
+};
+export const PLACE_BR: ShortcutPlace = {
+  id: 'br',
+  label: 'BR',
+  title: 'Works in the Inkspect toolbar in your browser (Chrome, Edge, Firefox...)',
+};
+
+/** Where an action's shortcut works: VS Code Browser (nearly all), the browser toolbar (some). */
+export function shortcutPlaces(action: Pick<ShortcutAction, 'id' | 'scope'>): ShortcutPlace[] {
+  if (BROWSER_ONLY_SCOPES.has(action.scope)) return [PLACE_BR];
+  return TOOLBAR_ACTION_IDS.has(action.id) ? [PLACE_VS, PLACE_BR] : [PLACE_VS];
+}
+
+/** How people write modifiers and keys when searching, mapped to the names keys are stored with. */
+const QUERY_ALIASES: Record<string, string> = {
+  control: 'ctrl',
+  ctl: 'ctrl',
+  '⌃': 'ctrl',
+  option: 'alt',
+  opt: 'alt',
+  '⌥': 'alt',
+  command: 'cmd',
+  meta: 'cmd',
+  win: 'cmd',
+  super: 'cmd',
+  '⌘': 'cmd',
+  '⇧': 'shift',
+  esc: 'escape',
+  return: 'enter',
+  '↩': 'enter',
+  del: 'delete',
+  '↑': 'up',
+  '↓': 'down',
+  '←': 'left',
+  '→': 'right',
+  pgup: 'pageup',
+  pgdn: 'pagedown',
+  // Zoom in is stored as '=' (the key '+' shares).
+  '+': '=',
+};
+const QUERY_MODIFIERS = new Set(['ctrl', 'shift', 'alt', 'cmd']);
+
+/**
+ * Whether a key matches a search typed as a shortcut: "alt shift k", "Alt+Shift+K", "shift-alt-k"
+ * or "⌥⇧K" all find `alt+shift+k`. Modifiers may come in any order; every one typed must be in the
+ * key; the key itself, if typed, must start the key's name ("page" finds PgUp and PgDn). A search
+ * with no modifier and no key (plain words) matches nothing here.
+ */
+export function keyMatchesQuery(binding: string, query: string): boolean {
+  const tokens = query
+    .toLowerCase()
+    // Mac symbols can be typed without separators ("⌥⇧K").
+    .replace(/([⌃⌥⇧⌘↩↑↓←→])/g, ' $1 ')
+    // "+" and "-" separate parts, unless they are the key itself: "Ctrl+-", "ctrl +", "Alt+=".
+    .split(/\s+|[+-](?=.)/)
+    .filter(Boolean)
+    .map((token) => QUERY_ALIASES[token] ?? token);
+  if (!tokens.length) return false;
+  const modifiers = tokens.filter((t) => QUERY_MODIFIERS.has(t));
+  const keys = tokens.filter((t) => !QUERY_MODIFIERS.has(t));
+  if (keys.length > 1) return false;
+  const chord = parseChord(normalizeKey(binding));
+  const has: Record<string, boolean> = {
+    ctrl: chord.ctrl,
+    shift: chord.shift,
+    alt: chord.alt,
+    cmd: chord.meta,
+  };
+  if (!modifiers.every((m) => has[m])) return false;
+  const [key] = keys;
+  return key === undefined || chord.key.startsWith(key);
+}
+
+/**
+ * The shortcut a key press in a search box stands for, if it isn't typing. While the box has
+ * focus it traps every shortcut: anything with Ctrl, Alt or Cmd (Ctrl+C and Ctrl+V included), and
+ * F1–F24. Plain keys, Shift+key and the box's plain editing keys (Backspace, arrows) type as usual.
+ */
+export function searchKeyFromChord(chord: KeyChord): string | undefined {
+  if (!chord.key) return undefined;
+  const functionKey = /^f([1-9]|1\d|2[0-4])$/.test(chord.key);
+  return chord.ctrl || chord.alt || chord.meta || functionKey ? chordKey(chord) : undefined;
+}
+
 /** A key as separate caps for display: `['Ctrl', 'Shift', 'T']`, `['⇧', '⌘', 'T']`. */
 export function keyParts(binding: string, mac: boolean): string[] {
   const text = formatKey(binding, mac);
@@ -647,6 +832,7 @@ export const SCOPE_ICONS: Record<ShortcutScope, string> = {
   tweak: 'symbol-property',
   record: 'record',
   a11y: 'accessibility',
+  capture: 'check-all',
 };
 
 /** A key for people: `Ctrl+Shift+T`, `⇧⌘T`, `Esc`, `↑`. */
@@ -715,7 +901,7 @@ const KEY_NAMES: Record<string, string> = {
   '+': '=',
 };
 
-/** Punctuation matched by physical key, so Shift and the layout don't change the key name. */
+/** Punctuation by its place on a US keyboard, when the typed character is no help. */
 const CODE_NAMES: Record<string, string> = {
   Equal: '=',
   Minus: '-',
@@ -735,7 +921,40 @@ const CODE_NAMES: Record<string, string> = {
 /** Keys that are only modifiers: never a shortcut on their own. */
 export const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'Meta', 'AltGraph', 'OS']);
 
-/** Converts the parts of a keyboard event into a chord comparable with `parseChord` output. */
+/** What Shift types on a US layout, back to its key: "?" is Shift+/ whatever the layout. */
+const SHIFTED: Record<string, string> = {
+  '?': '/',
+  '<': ',',
+  '>': '.',
+  ':': ';',
+  '"': "'",
+  '{': '[',
+  '}': ']',
+  '|': '\\',
+  '~': '`',
+  _: '-',
+  '+': '=',
+  '!': '1',
+  '@': '2',
+  '#': '3',
+  $: '4',
+  '%': '5',
+  '^': '6',
+  '&': '7',
+  '*': '8',
+  '(': '9',
+  ')': '0',
+};
+
+/**
+ * Converts the parts of a keyboard event into a chord comparable with `parseChord` output.
+ *
+ * Keys are what the user sees on them: the letter, digit or punctuation mark typed (so Ctrl+Z is
+ * Ctrl+Z on AZERTY and QWERTZ too, and "-" is "-" on a German keyboard), and "?" is Shift+/ on
+ * every layout. Where the typed character is no help (Cyrillic and Greek layouts, macOS Option
+ * characters, dead keys), the key's place on a US keyboard is used instead. AltGr (Ctrl+Alt on
+ * Windows) types characters, so it never makes a shortcut.
+ */
 export function chordFromEvent(event: {
   key: string;
   code: string;
@@ -743,20 +962,25 @@ export function chordFromEvent(event: {
   shiftKey: boolean;
   altKey: boolean;
   metaKey: boolean;
+  getModifierState?: (key: string) => boolean;
 }): KeyChord {
-  let key = event.key.toLowerCase();
-  // Letters and digits are matched by physical key so shortcuts work on any layout.
-  if (/^Key[A-Z]$/.test(event.code)) key = event.code.slice(3).toLowerCase();
-  else if (/^Digit\d$/.test(event.code)) key = event.code.slice(5);
-  else if (CODE_NAMES[event.code]) key = CODE_NAMES[event.code]!;
-  key = KEY_NAMES[key] ?? key;
-  return {
+  const chord = {
     ctrl: event.ctrlKey,
     shift: event.shiftKey,
     alt: event.altKey,
     meta: event.metaKey,
-    key,
   };
+  if (event.getModifierState?.('AltGraph')) return { ...chord, key: '' };
+  const typed = event.key;
+  let key: string;
+  if (/^[a-z0-9]$/i.test(typed)) key = typed.toLowerCase();
+  else if (event.shiftKey && SHIFTED[typed] !== undefined) key = SHIFTED[typed]!;
+  else if (/^[-=[\]\\/,.;'`+]$/.test(typed)) key = typed;
+  else if (/^Key[A-Z]$/.test(event.code)) key = event.code.slice(3).toLowerCase();
+  else if (/^Digit\d$/.test(event.code)) key = event.code.slice(5);
+  else if (CODE_NAMES[event.code]) key = CODE_NAMES[event.code]!;
+  else key = typed.toLowerCase();
+  return { ...chord, key: KEY_NAMES[key] ?? key };
 }
 
 export function chordsEqual(a: KeyChord, b: KeyChord): boolean {

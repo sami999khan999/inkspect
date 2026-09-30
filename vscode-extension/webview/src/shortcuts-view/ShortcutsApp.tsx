@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { IconButton } from '@inkspect/shared/ui/IconButton';
 import { ShortcutList } from '@inkspect/shared/ui/ShortcutList';
-import { TextField } from '@inkspect/shared/ui/TextField';
+import { ShortcutSearch } from '@inkspect/shared/ui/ShortcutSearch';
 import {
   effectiveShortcuts,
   SCOPE_LABELS,
@@ -43,15 +43,7 @@ export function ShortcutsApp() {
   return (
     <div className="shortcuts">
       <header className="shortcuts-header">
-        <TextField
-          size="sm"
-          icon="search"
-          placeholder="Search actions or keys"
-          aria-label="Search shortcuts"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onClear={() => setQuery('')}
-        />
+        <ShortcutSearch size="sm" value={query} onChange={setQuery} />
         <IconButton
           icon="cloud-upload"
           label="Export shortcuts…"

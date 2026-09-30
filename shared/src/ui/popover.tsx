@@ -76,6 +76,79 @@ export function listenOutside<K extends keyof WindowEventMap>(
   };
 }
 
+// The last pointer press, so a popup can tell which button opened it (its "opener"): pressing
+// that button again must close the popup, not close it and reopen it on the click that follows.
+let lastPress: { element: Element; at: number } | undefined;
+const trackPress = (event: Event) => {
+  const target = event.composedPath()[0];
+  // Only a primary press opens a popup from a button (a right press opens a context menu, and
+  // a later click on the same element must still work).
+  if ((event as PointerEvent).button !== 0) {
+    lastPress = undefined;
+    return;
+  }
+  if (target instanceof Element) {
+    lastPress = {
+      element: target.closest('button, [role="button"], a') ?? target,
+      at: performance.now(),
+    };
+  }
+};
+if (typeof window !== 'undefined') window.addEventListener('pointerdown', trackPress, true);
+
+/**
+ * Tracks presses inside a closed shadow root too (from the window, they only show the host).
+ * The browser extension's toolbar calls this for its root.
+ */
+export function trackPressesIn(root: ShadowRoot): void {
+  root.addEventListener('pointerdown', trackPress, true);
+}
+
+/**
+ * The button that opened a popup being opened now: the one pressed just before, if any
+ * (undefined when a key opened it). Read it once, when the popup opens.
+ */
+export function pressedOpener(): Element | undefined {
+  return lastPress && performance.now() - lastPress.at < 1000 ? lastPress.element : undefined;
+}
+
+/** Cancels the click that follows a press on `element` (its onClick would reopen the popup). */
+function swallowClickOn(element: Element): void {
+  const root = element.getRootNode();
+  const targets: (Window | ShadowRoot)[] = [window];
+  if (root instanceof ShadowRoot) targets.push(root);
+  const onClick = (event: Event) => {
+    if (!event.composedPath().includes(element)) return;
+    event.stopPropagation();
+    event.preventDefault();
+    stop();
+  };
+  const stop = () => {
+    clearTimeout(timer);
+    for (const target of targets) target.removeEventListener('click', onClick, true);
+  };
+  const timer = setTimeout(stop, 1000);
+  for (const target of targets) target.addEventListener('click', onClick, true);
+}
+
+/**
+ * Calls `onClose` for a pointer press outside `elements`. A press on the popup's opener (see
+ * `pressedOpener`) closes it for good: the click that follows is cancelled, so the opener
+ * toggles the popup instead of reopening it. `ignore` skips presses that shouldn't close it.
+ */
+export function listenOutsidePress(
+  elements: () => (Element | null | undefined)[],
+  opener: Element | undefined,
+  onClose: (event: PointerEvent) => void,
+  ignore?: (event: PointerEvent) => boolean,
+): () => void {
+  return listenOutside(elements, 'pointerdown', (event) => {
+    if (ignore?.(event)) return;
+    if (opener && event.composedPath().includes(opener)) swallowClickOn(opener);
+    onClose(event);
+  });
+}
+
 /**
  * Closes a popup on a pointer press outside it and its anchor, on Escape (focus returns to the
  * anchor), when the window loses focus or resizes, and when something else scrolls. Works

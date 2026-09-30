@@ -311,7 +311,7 @@ plans/                this plan
 ## Phase 5: Element selector cursor (context for AI agents)
 
 **Picker mode**
-- [x] Turn on with the toolbar button, Ctrl+Shift+C (**Browser: Select an Element**) or the context menu's **Copy element details (for AI)**. The cursor becomes a crosshair and clicks no longer reach the page (the wheel still scrolls).
+- [x] Turn on with the toolbar button, Alt+Shift+E (**Browser: Select an Element**) or the context menu's **Copy element details (for AI)**. The cursor becomes a crosshair and clicks no longer reach the page (the wheel still scrolls).
 - [x] Hover (one request in flight, latest point wins): `DOM.getNodeForLocation` (text nodes resolve to their element), then `Overlay.highlightNode` draws margin, border, padding and content boxes in the page.
 - [x] Details card next to the element (flips above near the bottom, stays inside the page area): tag#id.classes, size, role and accessible name, component, key computed styles and a breadcrumb.
 - [x] Traversal: Arrow Up moves to the parent, Arrow Down to the first child (through shadow roots). A hint bar lists the keys.
@@ -594,11 +594,12 @@ plans/                this plan
 - [x] Every mode has a toggle key; while a mode is on, its features have their own keys. Takeover modes use plain keys; the console, device, overlay and record modes use Alt+ keys.
 - [x] The **Shortcuts** view in the Browser sidebar: search, record new keys, add a second key, remove, reset, conflicts with a fix, export and import (JSON).
 - [x] Synced across devices: the `vscodeBrowser.shortcuts` setting (VS Code Settings Sync) and, through the paired browser extension, `chrome.storage.sync` (the newer copy wins).
-- [x] Quick actions (Ctrl+K) and a cheat sheet of the current mode (Ctrl+/ or ?). Tooltips, menus and hint bars show the user's keys.
+- [x] Quick actions (Ctrl+Shift+K) and a cheat sheet of the current mode (Ctrl+Shift+/ or ?). Tooltips, menus and hint bars show the user's keys.
 
 **Screenshots and the agent**
 - [x] Every screenshot is copied to the clipboard (Alt+click and screenshots from the browser extension too). `screenshots.saveFile` replaces `screenshots.defaultAction`, whose "copy" value still means "don't save".
 - [x] **Send to Agent** everywhere: the agent CLI in a terminal by default (the only agent terminal, or the last one chosen), VS Code chat with `agent.sendTarget`. Long text goes in a file under `.vscode-browser/context/`.
+- [x] **Groups in Agent Context:** screenshots taken together (each drawing separately, a Shift+click selection's screenshots, several from the browser extension) share a `group` and show as one card, with a thumbnail and checkbox each; the checked ones go in one send (`sendContextItems`: all files attached to the chat, or all paths in one terminal paste). Any items can be selected (checkbox, Ctrl/Shift+click, Space) to send, remove or group them by hand; groups can be ungrouped. A group is trimmed from the list whole.
 
 **New modes**
 - [x] Measure: box model and size on hover, click to pin, distances to other elements, grid, copy.

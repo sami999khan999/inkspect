@@ -4,16 +4,17 @@
 // a key changed on either side works on both.
 import {
   defaultKeys,
+  normalizeKey,
   effectiveShortcuts,
   sanitizeOverrides,
   SCOPE_LABELS,
   SHORTCUT_ACTIONS,
+  TOOLBAR_ACTION_IDS,
   type ShortcutAction,
   type ShortcutMap,
   type ShortcutOverrides,
   type ShortcutScope,
 } from '@inkspect/shared/shortcuts';
-import { TOOL_KEYS } from '@inkspect/shared/ui/DrawToolbar';
 
 export const SHORTCUTS_KEY = 'inkspectShortcuts';
 
@@ -25,46 +26,9 @@ export interface StoredShortcuts {
   updated: number;
 }
 
-const DRAW_TOOLS = new Set(Object.values(TOOL_KEYS));
-
-/** The actions the toolbar handles. The others (tabs, the address bar...) are VS Code's own. */
-const TOOLBAR_IDS = new Set([
-  'mode.inspect',
-  'mode.draw',
-  'mode.screenshot',
-  'mode.device',
-  'mode.devtools',
-  'page.bookmark',
-  'open.shortcuts',
-  'inspect.parent',
-  'inspect.child',
-  'inspect.copy',
-  'inspect.exit',
-  ...[...DRAW_TOOLS].map((tool) => `draw.${tool}`),
-  ...Array.from({ length: 9 }, (_, i) => `draw.color${i + 1}`),
-  'draw.thinner',
-  'draw.thicker',
-  'draw.fill',
-  'draw.undo',
-  'draw.redo',
-  'draw.clear',
-  'draw.visible',
-  'draw.capture',
-  'draw.captureMenu',
-  'draw.captureGroups',
-  'draw.captureClean',
-  'draw.captureViewport',
-  'draw.captureFullPage',
-  'draw.exit',
-  'shot.viewport',
-  'shot.fullPage',
-  'shot.region',
-  'shot.element',
-  'shot.drawing',
-]);
-
+/** The actions the toolbar handles (the shared list). The others are VS Code Browser's own. */
 export const TOOLBAR_ACTIONS: readonly ShortcutAction[] = SHORTCUT_ACTIONS.filter((a) =>
-  TOOLBAR_IDS.has(a.id),
+  TOOLBAR_ACTION_IDS.has(a.id),
 );
 
 /** What the toolbar calls some modes (the registry's labels are VS Code Browser's). */
@@ -78,10 +42,19 @@ export const labelOf = (action: ShortcutAction) => TOOLBAR_LABELS[action.id] ?? 
 
 /** Group names in the extension (VS Code Browser calls its general keys "Browser"). */
 export const scopeLabelOf = (scope: ShortcutScope) =>
-  scope === 'global' ? 'Toolbar' : SCOPE_LABELS[scope];
+  scope === 'global' ? 'General' : SCOPE_LABELS[scope];
 
 /** The scopes the toolbar has, in the order they are listed. */
 export const TOOLBAR_SCOPES: readonly ShortcutScope[] = ['global', 'inspect', 'draw', 'screenshot'];
+
+/**
+ * Every group, the toolbar's first. The lists show every shortcut, not only the toolbar's: they
+ * are one key map, synced with VS Code, so any of them can be changed from either side.
+ */
+export const ALL_SCOPES: readonly ShortcutScope[] = [
+  ...TOOLBAR_SCOPES,
+  ...(Object.keys(SCOPE_LABELS) as ShortcutScope[]).filter((s) => !TOOLBAR_SCOPES.includes(s)),
+];
 
 export async function readShortcuts(): Promise<StoredShortcuts> {
   const value = (await chrome.storage.sync.get(SHORTCUTS_KEY))[SHORTCUTS_KEY] as
@@ -130,7 +103,7 @@ export async function setShortcutKeys(
 ): Promise<void> {
   const next = { ...overrides };
   const action = SHORTCUT_ACTIONS.find((a) => a.id === id);
-  const defaults = action ? defaultKeys(action, isMac) : [];
+  const defaults = action ? defaultKeys(action, isMac).map(normalizeKey) : [];
   const same =
     keys !== undefined &&
     keys.length === defaults.length &&
@@ -140,9 +113,7 @@ export async function setShortcutKeys(
   await writeShortcuts(next);
 }
 
-/** Resets the toolbar's actions (VS Code's own changes are kept). */
-export async function resetToolbarShortcuts(overrides: ShortcutOverrides): Promise<void> {
-  const next = { ...overrides };
-  for (const action of TOOLBAR_ACTIONS) delete next[action.id];
-  await writeShortcuts(next);
+/** Resets every shortcut to its default, here and (through the link) in VS Code. */
+export async function resetAllShortcuts(): Promise<void> {
+  await writeShortcuts({});
 }

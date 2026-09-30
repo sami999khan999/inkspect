@@ -7,6 +7,7 @@ import type {
   BackgroundReply,
   BridgeStatus,
   EmulationRequest,
+  ShortcutPressed,
   ToBackground,
   ToContent,
 } from '../messages';
@@ -18,21 +19,38 @@ const bridge = new BridgeClient();
 void bridge.start();
 watchShortcuts(bridge);
 
-/** The toolbar button shows whether the link works: "!" means "not paired yet". */
-function showLinkState(status: BridgeStatus): void {
-  const unpaired = status.state === 'unpaired';
-  void chrome.action.setBadgeText({ text: unpaired ? '!' : '' });
-  void chrome.action.setBadgeBackgroundColor({ color: '#d97706' });
-  void chrome.action.setTitle({
-    title:
-      status.state === 'connected'
-        ? `Inkspect: bookmarks sync with ${status.peer ?? 'VS Code'}`
-        : unpaired
-          ? 'Inkspect toolbar (Alt+Shift+I). Not paired with VS Code yet'
-          : 'Inkspect toolbar (Alt+Shift+I)',
-  });
+/** The key the browser assigned to open the toolbar (the user may have changed or cleared it). */
+async function toolbarKey(): Promise<string | undefined> {
+  // Chrome rejects extension calls made while the service worker is still starting ("No SW");
+  // the title then goes without the key until the next status change.
+  const commands = await chrome.commands.getAll().catch(() => []);
+  return commands.find((c) => c.name === 'toggle-toolbar')?.shortcut || undefined;
 }
-bridge.onStatus(showLinkState);
+
+/** The toolbar button shows whether the link works: "!" means "not paired yet". */
+async function showLinkState(status: BridgeStatus): Promise<void> {
+  const unpaired = status.state === 'unpaired';
+  const key = await toolbarKey();
+  const toolbar = key ? `Inkspect toolbar (${key})` : 'Inkspect toolbar';
+  await Promise.all([
+    chrome.action.setBadgeText({ text: unpaired ? '!' : '' }),
+    chrome.action.setBadgeBackgroundColor({ color: '#d97706' }),
+    chrome.action.setTitle({
+      title:
+        status.state === 'connected'
+          ? `Inkspect: bookmarks sync with ${status.peer ?? 'VS Code'}`
+          : unpaired
+            ? `${toolbar}. Not paired with VS Code yet`
+            : toolbar,
+    }),
+  ]);
+}
+bridge.onStatus((status) =>
+  // Same "No SW" case at startup: try again once the service worker is up.
+  showLinkState(status).catch(() =>
+    setTimeout(() => void showLinkState(bridge.status).catch(() => undefined), 1000),
+  ),
+);
 
 // Messages from the options page (pairing).
 chrome.runtime.onMessage.addListener(
@@ -174,11 +192,39 @@ chrome.runtime.onInstalled.addListener((details) => {
 // ---------------------------------------------------------------------------------------------
 
 chrome.commands.onCommand.addListener((command, tab) => {
-  if (command === 'toggle-toolbar' && tab) void toggleToolbar(tab);
+  if (command !== 'toggle-toolbar' || !tab) return;
+  void toolbarKey().then((shown) => {
+    const key = shown && commandBinding(shown);
+    // On the extension's own pages (the settings page) the toolbar can't open: the key goes to
+    // the page, whose shortcut search box may want it.
+    if (tab.url?.startsWith(chrome.runtime.getURL(''))) {
+      if (key) {
+        void chrome.runtime
+          .sendMessage({ type: 'shortcutPressed', key } satisfies ShortcutPressed)
+          .catch(() => undefined);
+      }
+      return;
+    }
+    void toggleToolbar(tab, key);
+  });
 });
+
+/** A key as Chrome shows it ("Alt+Shift+K", "⌥⇧K" on macOS) in the shortcut map's form. */
+function commandBinding(shown: string): string {
+  const mac: Record<string, string> = { '⌃': 'ctrl+', '⌥': 'alt+', '⇧': 'shift+', '⌘': 'cmd+' };
+  return shown
+    .replace(/[⌃⌥⇧⌘]/g, (symbol) => mac[symbol]!)
+    .replace(/^MacCtrl\+/i, 'ctrl+')
+    .replace(/Command\+/i, 'cmd+')
+    .toLowerCase();
+}
+
 // The toolbar button opens the popup (src/popup/), which opens the toolbar with 'toggleToolbar'.
 
-async function toggleToolbar(tab: chrome.tabs.Tab): Promise<{ ok: boolean; error?: string }> {
+async function toggleToolbar(
+  tab: chrome.tabs.Tab,
+  key?: string,
+): Promise<{ ok: boolean; error?: string }> {
   bridge.ensureConnected();
   if (!tab.id) return { ok: false, error: 'No tab' };
   try {
@@ -194,7 +240,7 @@ async function toggleToolbar(tab: chrome.tabs.Tab): Promise<{ ok: boolean; error
         world: 'MAIN',
       });
     }
-    await chrome.tabs.sendMessage(tab.id, { type: 'toggle' } satisfies ToContent);
+    await chrome.tabs.sendMessage(tab.id, { type: 'toggle', key } satisfies ToContent);
     return { ok: true };
   } catch {
     // chrome://, the Web Store, the PDF viewer... extensions can't run there.
@@ -472,6 +518,8 @@ async function sendToVsCode(
     window: message.window,
     capture: message.capture,
     kind: message.kind,
+    group: message.group,
+    captures: message.captures,
   });
   return reply;
 }

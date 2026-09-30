@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { listenOutside } from './popover';
+import { listenOutsidePress, pressedOpener } from './popover';
 
 export type MenuItem =
   | {
@@ -32,10 +32,16 @@ interface MenuProps {
  */
 export function Menu({ menu, onClose }: MenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // The button that opened the menu: pressing it again closes the menu (see listenOutsidePress).
+  const [opener] = useState(pressedOpener);
 
   useEffect(() => {
     // Also inside the browser extension's closed shadow root (see listenOutside).
-    const stopPointer = listenOutside(() => [ref.current], 'pointerdown', onClose);
+    const stopPointer = listenOutsidePress(
+      () => [ref.current],
+      opener,
+      () => onClose(),
+    );
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -52,7 +58,7 @@ export function Menu({ menu, onClose }: MenuProps) {
       window.removeEventListener('blur', onClose);
       window.removeEventListener('resize', onClose);
     };
-  }, [onClose]);
+  }, [onClose, opener]);
 
   return (
     <div ref={ref} className="menu-root" onContextMenu={(event) => event.preventDefault()}>

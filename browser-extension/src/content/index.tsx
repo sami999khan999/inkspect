@@ -3,6 +3,8 @@
 import codiconCss from '@vscode/codicons/dist/codicon.css';
 import sharedCss from '@inkspect/shared/ui/ui.css';
 import { createRoot } from 'react-dom/client';
+import { trackPressesIn } from '@inkspect/shared/ui/popover';
+import { fillActiveSearch } from '@inkspect/shared/ui/ShortcutSearch';
 import type { ToContent } from '../messages';
 import { App } from './App';
 import toolbarCss from './toolbar.css';
@@ -30,6 +32,8 @@ function mount(): (signal: number) => void {
     'all: initial; position: fixed; inset: 0; z-index: 2147483647; pointer-events: none; display: block;';
   // Closed, so pages can't reach in; open only in the test build.
   const shadow = host.attachShadow({ mode: __TEST__ ? 'open' : 'closed' });
+  // Popups tell which button opened them from presses inside the (closed) root too.
+  trackPressesIn(shadow);
   const style = document.createElement('style');
   // `@font-face` inside the shadow root would be ignored; the font is added to the document.
   style.textContent = [codiconCss.replace(/@font-face\s*{[^}]*}/g, ''), sharedCss, toolbarCss].join(
@@ -58,6 +62,8 @@ if (!w.__inkspect) {
   let signal = 0;
   chrome.runtime.onMessage.addListener((message: ToContent) => {
     if (message.type !== 'toggle') return;
+    // The toolbar's own key, pressed in its shortcut search box: search for it instead.
+    if (message.key && fillActiveSearch(message.key)) return;
     render ??= mount();
     render(++signal);
   });

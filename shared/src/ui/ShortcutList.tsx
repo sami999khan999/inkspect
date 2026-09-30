@@ -5,9 +5,11 @@ import {
   defaultKeys,
   findConflicts,
   formatKey,
+  keyMatchesQuery,
   MODIFIER_KEYS,
   SCOPE_ICONS,
   SCOPE_LABELS,
+  shortcutPlaces,
   type ShortcutAction,
   type ShortcutMap,
   type ShortcutOverrides,
@@ -26,13 +28,13 @@ interface Recording {
 }
 
 interface ShortcutListProps {
-  /** The actions to list (VS Code Browser lists all; the browser extension its toolbar's). */
+  /** The actions to list, in their groups. */
   actions: readonly ShortcutAction[];
   /** Groups, in order. */
   scopes: readonly ShortcutScope[];
   map: ShortcutMap;
   overrides: ShortcutOverrides;
-  /** Filters actions by label, id, group or key. */
+  /** Filters actions by label, id, group or key ("alt shift k" finds Alt+Shift+K). */
   query?: string;
   /** Names an action (defaults to its label). */
   labelOf?: (action: ShortcutAction) => string;
@@ -79,6 +81,8 @@ export function ShortcutList({
       event.stopImmediatePropagation();
       if (MODIFIER_KEYS.has(event.key)) return;
       const chord = chordFromEvent(event);
+      // AltGr typing is no key (see chordFromEvent).
+      if (!chord.key) return;
       const plain = !chord.ctrl && !chord.alt && !chord.meta && !chord.shift;
       const keys = [...(map[recording.id] ?? [])];
       if (plain && chord.key === 'escape') {
@@ -95,8 +99,22 @@ export function ShortcutList({
       onSetKeys(recording.id, [...new Set(keys)]);
       setRecording(null);
     };
+    // A press anywhere else ends the recording: the next key, much later, must not become a
+    // shortcut by accident.
+    const onPointerDown = (event: PointerEvent) => {
+      const onChip = event
+        .composedPath()
+        .some(
+          (target) => target instanceof HTMLElement && target.classList.contains('key-recording'),
+        );
+      if (!onChip) setRecording(null);
+    };
     window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
+    window.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('pointerdown', onPointerDown, true);
+    };
   }, [recording, map, onSetKeys]);
 
   const needle = query.trim().toLowerCase();
@@ -105,7 +123,9 @@ export function ShortcutList({
     labelOf(action).toLowerCase().includes(needle) ||
     action.id.toLowerCase().includes(needle) ||
     scopeLabel(action.scope).toLowerCase().includes(needle) ||
-    (map[action.id] ?? []).some((k) => formatKey(k, isMac).toLowerCase().includes(needle));
+    (map[action.id] ?? []).some(
+      (k) => formatKey(k, isMac).toLowerCase().includes(needle) || keyMatchesQuery(k, needle),
+    );
   const nameOf = (id: string) => {
     const action = actions.find((a) => a.id === id);
     return action ? labelOf(action) : id;
@@ -223,6 +243,14 @@ function ShortcutRow({
       <div className="shortcut-main">
         <span className="shortcut-label" title={action.id}>
           {label}
+        </span>
+        {/* Where the key works: VS (VS Code Browser), BR (the browser toolbar). */}
+        <span className="shortcut-places">
+          {shortcutPlaces(action).map((place) => (
+            <span key={place.id} className={`shortcut-tag ${place.id}`} title={place.title}>
+              {place.label}
+            </span>
+          ))}
         </span>
         <span className="shortcut-actions">
           {changed && (

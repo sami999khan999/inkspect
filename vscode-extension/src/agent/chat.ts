@@ -84,13 +84,32 @@ export async function sendContextItem(
   item: ContextItem,
   target?: string,
 ): Promise<string | undefined> {
+  return sendContextItems([item], target);
+}
+
+/**
+ * Sends several items of the Agent Context list together, in one send: the chat gets every
+ * image attached at once, an agent in a terminal every path in one paste. For a group, or the
+ * checked part of one.
+ */
+export async function sendContextItems(
+  items: readonly ContextItem[],
+  target?: string,
+): Promise<string | undefined> {
+  if (!items.length) return undefined;
   const tray = contextTray();
-  const file = tray ? await tray.fileOf(item) : item.file;
-  // Images are sent as their file; the text of an element with a screenshot already names it.
-  const text = item.text ?? '';
-  const files = file && !text.includes(displayPath(file)) ? [file] : [];
-  const sent = await sendToAgent(text, { files, label: item.title, target });
-  if (sent) tray?.markSent(item, sent);
+  const texts: string[] = [];
+  const files: string[] = [];
+  for (const item of items) {
+    const file = tray ? await tray.fileOf(item) : item.file;
+    // Images are sent as their file; the text of an element with a screenshot already names it.
+    const text = item.text ?? '';
+    if (text) texts.push(text);
+    if (file && !text.includes(displayPath(file))) files.push(file);
+  }
+  const label = items.length === 1 ? items[0]!.title : `${items.length} items`;
+  const sent = await sendToAgent(texts.join('\n\n'), { files, label, target });
+  if (sent) for (const item of items) tray?.markSent(item, sent);
   return sent;
 }
 

@@ -1,4 +1,5 @@
 import { COLORS, type DrawTool, type ShapeStyle } from '../annotations';
+import { formatKey, SHORTCUT_ACTIONS } from '../shortcuts';
 import { Button } from './Button';
 import { ColorPicker } from './ColorPicker';
 import type { MenuItem } from './Menu';
@@ -6,28 +7,29 @@ import { Select, type SelectOption } from './Select';
 import { Slider } from './Slider';
 import { ToolIcon } from './icons';
 
-const TOOL_GROUPS: { tool: DrawTool; label: string; key?: string }[][] = [
-  [{ tool: 'select', label: 'Select and move', key: 'V' }],
+// Their keys come from the shortcut map (`draw.<tool>`), like every other shortcut.
+const TOOL_GROUPS: { tool: DrawTool; label: string }[][] = [
+  [{ tool: 'select', label: 'Select and move' }],
   [
-    { tool: 'pen', label: 'Pen', key: 'P' },
+    { tool: 'pen', label: 'Pen' },
     { tool: 'pencil', label: 'Pencil' },
-    { tool: 'marker', label: 'Marker', key: 'M' },
+    { tool: 'marker', label: 'Marker' },
     { tool: 'brush', label: 'Brush' },
-    { tool: 'highlighter', label: 'Highlighter', key: 'H' },
+    { tool: 'highlighter', label: 'Highlighter' },
     { tool: 'neon', label: 'Neon' },
   ],
   [
-    { tool: 'line', label: 'Line', key: 'L' },
-    { tool: 'arrow', label: 'Arrow', key: 'A' },
+    { tool: 'line', label: 'Line' },
+    { tool: 'arrow', label: 'Arrow' },
     { tool: 'doubleArrow', label: 'Double arrow' },
-    { tool: 'rect', label: 'Rectangle', key: 'R' },
-    { tool: 'ellipse', label: 'Ellipse', key: 'O' },
+    { tool: 'rect', label: 'Rectangle' },
+    { tool: 'ellipse', label: 'Ellipse' },
   ],
   [
-    { tool: 'text', label: 'Text', key: 'T' },
-    { tool: 'callout', label: 'Numbered callout', key: 'N' },
-    { tool: 'blur', label: 'Redact (pixelate)', key: 'B' },
-    { tool: 'eraser', label: 'Eraser', key: 'E' },
+    { tool: 'text', label: 'Text' },
+    { tool: 'callout', label: 'Numbered callout' },
+    { tool: 'blur', label: 'Redact (pixelate)' },
+    { tool: 'eraser', label: 'Eraser' },
   ],
 ];
 
@@ -37,12 +39,8 @@ const DASH_OPTIONS: SelectOption<ShapeStyle['dash']>[] = [
   { value: 'dotted', label: 'Dotted' },
 ];
 
-/** Single-key shortcuts for the tools (while drawing and not typing). */
-export const TOOL_KEYS: Record<string, DrawTool> = Object.fromEntries(
-  TOOL_GROUPS.flat()
-    .filter((t) => t.key)
-    .map((t) => [t.key!.toLowerCase(), t.tool]),
-);
+/** Every drawing tool, in toolbar order. Each has a shortcut action, `draw.<tool>`. */
+export const DRAW_TOOLS: readonly DrawTool[] = TOOL_GROUPS.flat().map((t) => t.tool);
 
 interface DrawToolbarProps {
   tool: DrawTool;
@@ -68,7 +66,13 @@ interface DrawToolbarProps {
 export function DrawToolbar(props: DrawToolbarProps) {
   const { tool, style } = props;
   const titled = (label: string, id: string, fallback?: string) => {
-    const key = props.keyOf ? props.keyOf(id) : fallback;
+    // Without a key map, the default key from the registry (or the given one).
+    const action = SHORTCUT_ACTIONS.find((a) => a.id === id);
+    const key = props.keyOf
+      ? props.keyOf(id)
+      : action?.keys[0]
+        ? formatKey(action.keys[0], false)
+        : fallback;
     return key ? `${label} (${key})` : label;
   };
   const colors = [
@@ -79,12 +83,12 @@ export function DrawToolbar(props: DrawToolbarProps) {
     <div className="draw-toolbar" role="toolbar" aria-label="Drawing tools">
       {TOOL_GROUPS.map((group, index) => (
         <div key={index} className="draw-group">
-          {group.map(({ tool: t, label, key }) => (
+          {group.map(({ tool: t, label }) => (
             <button
               key={t}
               type="button"
               className={`icon-button${tool === t ? ' active' : ''}`}
-              title={titled(label, `draw.${t}`, key)}
+              title={titled(label, `draw.${t}`)}
               aria-label={label}
               aria-pressed={tool === t}
               onClick={() => props.onTool(t)}

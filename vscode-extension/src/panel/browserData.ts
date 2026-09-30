@@ -57,6 +57,33 @@ export function suggestions(services: Services, query: string, tabs: Suggestion[
   });
 }
 
+/**
+ * Asks before removing a folder that holds bookmarks: they all go, in linked browsers too.
+ * A single bookmark or an empty folder goes without asking.
+ */
+export async function confirmRemoveBookmark(
+  store: Services['bookmarks'],
+  id: string,
+): Promise<boolean> {
+  const node = findNode(store.roots, id)?.node;
+  if (node?.type !== 'folder' || !node.children?.length) return true;
+  const count = (folder: typeof node): number =>
+    (folder.children ?? []).reduce(
+      (n, child) => n + (child.type === 'folder' ? count(child) : 1),
+      0,
+    );
+  const inside = count(node);
+  const choice = await vscode.window.showWarningMessage(
+    `Delete the folder "${node.title}" and the ${inside} bookmark${inside === 1 ? '' : 's'} in it?`,
+    {
+      modal: true,
+      detail: 'They are removed from browsers linked with VS Code too.',
+    },
+    'Delete',
+  );
+  return choice === 'Delete';
+}
+
 export async function runBookmarkAction(
   services: Services,
   action: BookmarkAction,
@@ -74,7 +101,7 @@ export async function runBookmarkAction(
       store.move(action.id, action.parentId, action.index);
       return;
     case 'remove':
-      store.remove(action.id);
+      if (await confirmRemoveBookmark(store, action.id)) store.remove(action.id);
       return;
     case 'addFolder':
       store.addFolder(action.parentId, action.title);

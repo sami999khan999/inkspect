@@ -42,20 +42,21 @@ Pages are rendered by a real Chromium (Chrome for Testing, downloaded once on fi
 
 ### For AI agents
 
-- **Element selector** (Ctrl+Shift+C): hover to see an element's details. The details include:
+- **Element selector** (Alt+Shift+E): hover to see an element's details. The details include:
   - a unique selector and XPath
   - role and accessible name
   - size, position and key styles
   - the React, Vue, Svelte or Angular component and its source file
   - trimmed HTML
 
-  | Action | Result |
-  |---|---|
-  | Click | Copies the details as Markdown (or JSON, selector only or HTML only). |
-  | Ctrl+click | Sends the details to the chat. |
-  | Shift+click | Builds a multi-selection. |
-  | Alt+click | Also saves an element screenshot. |
-  | ↑ / ↓ | Moves to the parent or child element. |
+  | Action      | Result                                                                |
+  | ----------- | --------------------------------------------------------------------- |
+  | Click       | Copies the details as Markdown (or JSON, selector only or HTML only). |
+  | Ctrl+click  | Sends the details to the chat.                                        |
+  | Shift+click | Builds a multi-selection.                                             |
+  | Alt+click   | Also saves an element screenshot.                                     |
+  | ↑ / ↓       | Moves to the parent or child element.                                 |
+
 - **Drawing** (D):
   - Pens, pencil, marker, brush, highlighter and neon.
   - Arrows, lines, rectangles and ellipses.
@@ -71,21 +72,22 @@ Pages are rendered by a real Chromium (Chrome for Testing, downloaded once on fi
 - **Chrome DevTools** (F12) opens beside the browser.
 - **Agent tools in VS Code chat:**
 
-  | Tool | What it does |
-  |---|---|
-  | `#browserNavigate` | Opens a page. |
-  | `#browserScreenshot` | Takes a screenshot. |
-  | `#browserGetElement` | Reads an element by CSS selector. |
-  | `#browserGetSelection` | Reads your last picked element. |
-  | `#browserConsoleErrors` | Reads console errors. |
-  | `#browserFailedRequests` | Lists failed requests. |
-  | `#browserPageContext` | Summarizes the page. |
-  | `#browserGetPageText` | Reads the page's visible text. |
+  | Tool                     | What it does                      |
+  | ------------------------ | --------------------------------- |
+  | `#browserNavigate`       | Opens a page.                     |
+  | `#browserScreenshot`     | Takes a screenshot.               |
+  | `#browserGetElement`     | Reads an element by CSS selector. |
+  | `#browserGetSelection`   | Reads your last picked element.   |
+  | `#browserConsoleErrors`  | Reads console errors.             |
+  | `#browserFailedRequests` | Lists failed requests.            |
+  | `#browserPageContext`    | Summarizes the page.              |
+  | `#browserGetPageText`    | Reads the page's visible text.    |
 
   Navigation asks first. There are no tools that click, type, run scripts or read cookies.
+
 - **MCP server for other agents:** the same tools, served over HTTP on 127.0.0.1 with a token. It is off by default. Turn it on with **Browser: Copy MCP Server Configuration**, which copies a ready `mcpServers` entry or a `claude mcp add` command.
 
-### Resolutions and devices (Ctrl+Shift+M)
+### Resolutions and devices (Alt+Shift+M)
 
 - Presets for phones, tablets and desktops up to 4K, custom sizes and your own presets.
 - Pixel ratio, rotation, and touch and mobile emulation.
@@ -106,21 +108,22 @@ Pages are rendered by a real Chromium (Chrome for Testing, downloaded once on fi
 - **Help → Welcome → Get started with VS Code Browser** walks through the main features.
 - Shortcuts while the browser is focused (⌘ on macOS):
 
-  | Keys | Action |
-  |---|---|
+  | Keys                                   | Action                                  |
+  | -------------------------------------- | --------------------------------------- |
   | Ctrl+T, Ctrl+W, Ctrl+Shift+T, Ctrl+Tab | New, close and reopen tabs; switch tabs |
-  | Ctrl+L | Focus the address bar |
-  | Ctrl+R, Ctrl+Shift+R | Reload, hard reload |
-  | Alt+Left / Alt+Right | Back / forward |
-  | Ctrl+F | Find in page |
-  | Ctrl+= / Ctrl+- / Ctrl+0 | Zoom in, out and reset |
-  | Ctrl+D | Bookmark the page |
-  | Ctrl+Shift+B | Show or hide the bookmarks bar |
-  | Ctrl+Shift+C | Element selector |
-  | Ctrl+Shift+M | Device toolbar |
-  | F12 | DevTools |
+  | Ctrl+L                                 | Focus the address bar                   |
+  | Ctrl+R, Ctrl+Shift+R                   | Reload, hard reload                     |
+  | Alt+Left / Alt+Right                   | Back / forward                          |
+  | Ctrl+F                                 | Find in page                            |
+  | Ctrl+= / Ctrl+- / Ctrl+0               | Zoom in, out and reset                  |
+  | Ctrl+D                                 | Bookmark the page                       |
+  | Ctrl+Shift+B                           | Show or hide the bookmarks bar          |
+  | Alt+Shift+E                            | Element selector                        |
+  | Alt+Shift+W                            | Draw on the page                        |
+  | Alt+Shift+M                            | Device toolbar                          |
+  | F12                                    | DevTools                                |
 
-  They are ordinary VS Code keybindings, so you can change them.
+  Every key can be changed in the **Shortcuts** view of the Browser sidebar. The modes use Alt+Shift, so VS Code's own keys (Quick Open, the panel, Explorer, Problems...) keep working while the browser has focus.
 
 ## Known limitations
 
@@ -157,16 +160,16 @@ npm run build      # extension host (esbuild) + webview (Vite)
 
 Press **F5** in VS Code to start an Extension Development Host, then run **Browser: Open**.
 
-| Script               | What it does                                                                                 |
-| -------------------- | -------------------------------------------------------------------------------------------- |
-| `npm run build`      | Build `dist/extension.js` and `dist/webview/`                                                |
-| `npm run watch`      | Rebuild both on change                                                                       |
-| `npm run typecheck`  | Type-check the host and the webview                                                          |
-| `npm run lint`       | ESLint                                                                                       |
-| `npm test`           | Unit tests (Vitest)                                                                          |
+| Script               | What it does                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| `npm run build`      | Build `dist/extension.js` and `dist/webview/`                                               |
+| `npm run watch`      | Rebuild both on change                                                                      |
+| `npm run typecheck`  | Type-check the host and the webview                                                         |
+| `npm run lint`       | ESLint                                                                                      |
+| `npm test`           | Unit tests (Vitest)                                                                         |
 | `npm run test:e2e`   | Integration tests in a real VS Code (set `VSCODE_EXECUTABLE` to reuse an installed VS Code) |
-| `npm run sync:tools` | Update `contributes.languageModelTools` after changing `src/agent/tools.ts`                  |
-| `npm run package`    | Build a `.vsix`                                                                              |
+| `npm run sync:tools` | Update `contributes.languageModelTools` after changing `src/agent/tools.ts`                 |
+| `npm run package`    | Build a `.vsix`                                                                             |
 
 The roadmap, with what is done and what is left in each phase, is in `plans/vscode-browser-plan.md` in the repository.
 

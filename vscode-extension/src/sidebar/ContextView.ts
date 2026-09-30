@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { sendContextItem } from '../agent/chat';
+import { sendContextItem, sendContextItems } from '../agent/chat';
 import type { ContextItem, ContextTray } from '../agent/contextTray';
 import { errorMessage } from '../browser/logger';
 import { getConfig } from '../config';
@@ -100,8 +100,26 @@ export class ContextViewProvider implements vscode.WebviewViewProvider, vscode.D
       case 'remove':
         if (item) this.tray.remove(item.id);
         return;
+      case 'sendMany': {
+        const items = message.ids.flatMap((id) => this.tray.get(id) ?? []);
+        await sendContextItems(items, message.target);
+        return;
+      }
+      case 'removeMany':
+        this.tray.removeMany(message.ids);
+        return;
+      case 'group':
+        this.tray.group(message.ids);
+        return;
+      case 'ungroup':
+        this.tray.ungroup(message.group);
+        return;
       case 'clear':
         this.tray.clear();
+        return;
+      case 'undo':
+        // Their thumbnails went with them.
+        for (const i of this.tray.undo()) this.postThumbnail(i);
         return;
       case 'setTarget':
         this.agents.setDefault(message.target);
@@ -135,6 +153,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider, vscode.D
       targets: this.agents.targets(),
       target: this.agents.defaultTarget(getConfig().agentSendTarget),
       keys: { show: key('agent.showContext'), sendLatest: key('agent.sendLatest') },
+      undo: this.tray.undoLabel(),
     };
     void this.view.webview.postMessage(message);
   }

@@ -1,12 +1,15 @@
 import * as vscode from 'vscode';
+import type { BridgeServer } from '../bridge/bridgeServer';
+import { getConfig } from '../config';
 import type { BookmarksStore } from '../features/bookmarks';
 import { BrowserPanel, type Services, type TabSummary } from '../panel/BrowserPanel';
 import { findNode, type BookmarkNode } from '../shared/bookmarks';
 
 /** Views in the Browser container of the Activity Bar. Pages themselves open in editor tabs. */
-export function registerSidebar(services: Services): vscode.Disposable {
+export function registerSidebar(services: Services, bridge: BridgeServer): vscode.Disposable {
+  const actionsTree = new ActionsTree(bridge);
   const actions = vscode.window.createTreeView('vscodeBrowser.actions', {
-    treeDataProvider: new ActionsTree(),
+    treeDataProvider: actionsTree,
   });
   const tabs = new TabsTree();
   const bookmarks = new BookmarksTree(services.bookmarks);
@@ -20,6 +23,10 @@ export function registerSidebar(services: Services): vscode.Disposable {
     vscode.window.createTreeView('vscodeBrowser.bookmarks', { treeDataProvider: bookmarks }),
     BrowserPanel.onDidChangeTabs(() => tabs.refresh()),
     services.bookmarks.onDidChange(() => bookmarks.refresh()),
+    bridge.onDidChange(() => actionsTree.refresh()),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('vscodeBrowser.bridge.enabled')) actionsTree.refresh();
+    }),
   );
 }
 
@@ -28,6 +35,45 @@ interface Action {
   icon: string;
   command: string;
   args?: unknown[];
+  /** The browser link item's extras. */
+  color?: string;
+  description?: string;
+  tooltip?: string;
+}
+
+const LINK_TOOLTIP =
+  'Link the Inkspect browser extension with VS Code: send captures from any page to your agent, and sync bookmarks and shortcuts.';
+
+/** The first item: the browser link's state, and the one click that pairs it. */
+function linkAction(bridge: BridgeServer): Action | undefined {
+  if (!getConfig().bridgeEnabled) return undefined;
+  const { browsers, waiting } = bridge.linkState();
+  if (browsers.length) {
+    return {
+      label: `Linked: ${browsers[0]}`,
+      description: browsers.length > 1 ? `+${browsers.length - 1}` : undefined,
+      icon: 'pass-filled',
+      color: 'testing.iconPassed',
+      command: 'vscodeBrowser.bridge.manage',
+      tooltip: `Linked with ${browsers.join(', ')}. Click to pair another browser or unlink.`,
+    };
+  }
+  if (waiting.length) {
+    return {
+      label: waiting.length === 1 ? `Pair ${waiting[0]!.browser}` : 'Pair Browser Extension',
+      description: waiting.length === 1 ? 'waiting to link' : `${waiting.length} browsers waiting`,
+      icon: 'plug',
+      color: 'charts.yellow',
+      command: 'vscodeBrowser.bridge.pair',
+      tooltip: `${LINK_TOOLTIP}\n\nClick to link it. No code needed.`,
+    };
+  }
+  return {
+    label: 'Pair Browser Extension',
+    icon: 'plug',
+    command: 'vscodeBrowser.bridge.pair',
+    tooltip: LINK_TOOLTIP,
+  };
 }
 
 const ACTIONS: Action[] = [
@@ -50,13 +96,34 @@ const ACTIONS: Action[] = [
 ];
 
 class ActionsTree implements vscode.TreeDataProvider<Action> {
+  private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
+  readonly onDidChangeTreeData = this.onDidChangeEmitter.event;
+  private lastLink = '';
+
+  constructor(private readonly bridge: BridgeServer) {}
+
+  /** Redraws only when the link item changed (the bridge reports often). */
+  refresh(): void {
+    const key = JSON.stringify(linkAction(this.bridge) ?? null);
+    if (key === this.lastLink) return;
+    this.lastLink = key;
+    this.onDidChangeEmitter.fire();
+  }
+
   getChildren(): Action[] {
-    return ACTIONS;
+    const link = linkAction(this.bridge);
+    this.lastLink = JSON.stringify(link ?? null);
+    return link ? [link, ...ACTIONS] : ACTIONS;
   }
 
   getTreeItem(action: Action): vscode.TreeItem {
     const item = new vscode.TreeItem(action.label);
-    item.iconPath = new vscode.ThemeIcon(action.icon);
+    item.iconPath = new vscode.ThemeIcon(
+      action.icon,
+      action.color ? new vscode.ThemeColor(action.color) : undefined,
+    );
+    item.description = action.description;
+    item.tooltip = action.tooltip;
     item.command = { command: action.command, title: action.label, arguments: action.args };
     return item;
   }

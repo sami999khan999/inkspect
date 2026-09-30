@@ -66,7 +66,8 @@ package.json            npm workspaces root: scripts that run in every workspace
 vscode-extension/       the VS Code extension (below)
 browser-extension/      the browser extension (see "Browser extension" below)
 shared/                 @inkspect/shared, used by both
-plans/                  roadmaps with phase checklists, one per product
+plans/                  roadmaps with phase checklists, one per product; open-issues.md for known open work
+brand/                  the logo's SVG source; `npm run logo` renders every product's PNGs
 .github/workflows/      CI (runs from the root)
 .vscode/                launch config ("Run VS Code Extension") and tasks for the workspace
 AGENTS.md, CLAUDE.md    this guidance
@@ -145,14 +146,14 @@ npm run package      # production build + .vsix
 
 - Register commands in `src/commands.ts`.
 - Declare them in `package.json` (`contributes.commands`, `menus.commandPalette` with a `when`).
-- **Every browser shortcut is an action in `SHORTCUT_ACTIONS` (`@inkspect/shared/shortcuts`, re-exported as `src/shared/shortcuts.ts`)**, with an id, a label, a scope (`global` or a mode) and default keys. The browser extension's toolbar uses the same actions and the same key map (it lists the ones it handles in `browser-extension/src/shortcuts.ts`):
+- **Every browser shortcut is an action in `SHORTCUT_ACTIONS` (`@inkspect/shared/shortcuts`, re-exported as `src/shared/shortcuts.ts`)**, with an id, a label, a scope (`global` or a mode) and default keys. The browser extension's toolbar uses the same actions and the same key map (the ones it handles are `TOOLBAR_ACTION_IDS` in `@inkspect/shared/shortcuts`; the shortcut lists tag each action VS and/or BR from it):
   - The webview dispatches them (`webview/src/shortcuts.ts`, one capture-phase listener), so users can remap any of them in the **Shortcuts** sidebar view (`src/sidebar/ShortcutsView.ts`). The map is the `vscodeBrowser.shortcuts` setting, synced by VS Code Settings Sync and, through the bridge, the browser extension's `chrome.storage.sync`.
   - Don't add browser keys to `contributes.keybindings`. The only exceptions are actions marked `everywhere` (they must also work outside the browser); inside it, the webview consumes the key first, so they run once. A unit test checks that the keybindings match the `everywhere` actions, that ids are unique, that host commands exist, and that the defaults don't conflict.
   - Actions with a `command` run it through the host (the `command` message, allowed only for registry commands). Other actions are handled in the webview (`webview/src/actions.ts`, or a mode component registering its handlers).
   - Modes that take over the page use plain keys; modes that leave the page usable (console, device, overlay, record) use Alt+ keys.
   - Show keys with `shortcutLabel()` / `withShortcut()`, never hard-coded, so remapped keys show everywhere.
 - Commands that tests call return useful values: `screenshot()` returns the saved path, and `runDevAction()` returns the copied text.
-- Hidden test hooks live under `vscodeBrowser.debug.*`: `state`, `copyElementAt`, `setAnnotations`, `crashEngine`, `mcp`. They are not declared in `package.json`.
+- Hidden test hooks live under `vscodeBrowser.debug.*`: `state`, `copyElementAt`, `setAnnotations`, `crashEngine`, `mcp`, `bridge` (its `approve` option stands in for a Pair click). They are not declared in `package.json`.
 
 ### Settings
 
@@ -254,9 +255,9 @@ npm run package      # production build + .vsix
 
 ## Browser extension (`browser-extension/`)
 
-**What it does:** a toolbar on any page (opened with Alt+Shift+I, or from the popup of the toolbar button), the link to VS Code, bookmark sync, and the full page (`options.html`: VS Code and its windows, shortcuts, about).
+**What it does:** a toolbar on any page (opened with Alt+Shift+K, or from the popup of the toolbar button), the link to VS Code, bookmark sync, and the full page (`options.html`: VS Code and its windows, shortcuts, about).
 
-**Shortcuts:** the toolbar dispatches VS Code Browser's shortcut actions (`browser-extension/src/shortcuts.ts` lists the ones it handles), with the same key map: sync storage (`inkspectShortcuts`), synced both ways through the link. Edit them with the shared `ShortcutList` (`@inkspect/shared/ui/ShortcutList`), in the toolbar's panel or on the full page. Save with `setShortcutKeys()`, which stamps a newer time so the change wins over VS Code's copy.
+**Shortcuts:** the toolbar dispatches VS Code Browser's shortcut actions (the ones it handles are `TOOLBAR_ACTION_IDS` in `@inkspect/shared/shortcuts`), with the same key map: sync storage (`inkspectShortcuts`), synced both ways through the link. Edit them with the shared `ShortcutList` (`@inkspect/shared/ui/ShortcutList`), in the toolbar's panel or on the full page. Save with `setShortcutKeys()`, which stamps a newer time so the change wins over VS Code's copy.
 
 **Architecture:**
 
@@ -289,7 +290,7 @@ npm run package      # production build + .vsix
 
 ## Housekeeping
 
-- Update the product's `CHANGELOG.md` (Unreleased) and the relevant phase in its plan under `plans/` when you add or finish a feature. Mark deferred items `[ ]` with a short reason.
+- Update the product's `CHANGELOG.md` (Unreleased) and the relevant phase in its plan under `plans/` when you add or finish a feature. Mark deferred items `[ ]` with a short reason. Known problems not fixed yet go in `plans/open-issues.md` (tick them when done).
 - **Shared code goes in `shared/`**, not copied between products (see **Shared package**).
 - **Never add yourself (the AI agent) as an author, co-author or contributor.** This applies to commits, pull requests, docs and `package.json`:
   - no `Co-Authored-By:` trailers

@@ -437,9 +437,10 @@ export function Viewport({
         x,
         y,
         purpose: modeRef.current.purpose,
-        add: event.shiftKey,
+        // Ctrl+click: the chat agent; Ctrl+Shift+click: a terminal agent; Shift+click: select.
+        add: event.shiftKey && !(event.ctrlKey || event.metaKey),
         screenshot: event.altKey,
-        chat: event.ctrlKey || event.metaKey,
+        send: event.ctrlKey || event.metaKey ? (event.shiftKey ? 'terminal' : 'chat') : undefined,
       });
       return;
     }
