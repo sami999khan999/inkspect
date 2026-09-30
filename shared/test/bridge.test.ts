@@ -24,6 +24,24 @@ describe('bridge protocol', () => {
     expect(parseServerMessage(encode(ops))).toEqual(ops);
   });
 
+  it('sends captures made together as a group, and several of them in one send', () => {
+    const grouped = { type: 'send' as const, id: '1', target: 'context' as const, group: 'g' };
+    expect(parseClientMessage(encode(grouped))).toEqual(grouped);
+    const together = {
+      type: 'send' as const,
+      id: '2',
+      target: 'chat' as const,
+      captures: ['a', 'b'],
+    };
+    expect(parseClientMessage(encode(together))).toEqual(together);
+    const bad = (extra: object) =>
+      parseClientMessage(JSON.stringify({ v: 1, type: 'send', id: '3', target: 'chat', ...extra }));
+    expect(bad({ captures: 'a' })).toBeUndefined();
+    expect(bad({ captures: [1] })).toBeUndefined();
+    expect(bad({ captures: Array(61).fill('a') })).toBeUndefined();
+    expect(bad({ group: 5 })).toBeUndefined();
+  });
+
   it('rejects malformed, unknown and other-version messages', () => {
     expect(parseClientMessage('not json')).toBeUndefined();
     expect(parseClientMessage(JSON.stringify({ v: 1, type: 'nope' }))).toBeUndefined();

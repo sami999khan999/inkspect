@@ -1,4 +1,7 @@
 import type { InspectPurpose, Rect } from '@shared/protocol';
+import { PickerHint } from '@inkspect/shared/ui/PickerHint';
+import { SelectionBar, type SelectionAction } from '@inkspect/shared/ui/SelectionBar';
+import { useShortcutMap } from '../shortcuts';
 import type { ViewportMapper } from './Viewport';
 
 interface InspectOverlayProps {
@@ -6,23 +9,46 @@ interface InspectOverlayProps {
   purpose: InspectPurpose;
   /** Multi-selection (Shift+click), in document CSS pixels. */
   selection: Rect[];
+  /** A choice on the bar over the multi-selection. */
+  onSelectionAction: (action: SelectionAction) => void;
 }
 
 /**
  * Element picker overlay: a hint and the numbered multi-selection boxes. The highlight and the
  * tooltip under the pointer are drawn by Chrome itself (its inspect mode), like in DevTools.
  */
-export function InspectOverlay({ mapper, purpose, selection }: InspectOverlayProps) {
+export function InspectOverlay({
+  mapper,
+  purpose,
+  selection,
+  onSelectionAction,
+}: InspectOverlayProps) {
+  const map = useShortcutMap();
   return (
     <>
-      <div
+      <PickerHint
         className="inspect-hint"
-        style={{ left: mapper.bounds.left + 8, top: mapper.bounds.top + 8 }}
-      >
-        {purpose === 'screenshot'
-          ? 'Click an element to capture it · Esc to cancel'
-          : 'Click: copy details · Ctrl+click: send to agent · Shift+click: add to selection · Alt+click: with screenshot · ↑↓ parent/child · Enter copy · S screenshot · A send to agent · Esc exit'}
-      </div>
+        style={{
+          left: mapper.bounds.left + mapper.bounds.width / 2,
+          top: mapper.bounds.top + mapper.bounds.height - 12,
+        }}
+        purpose={purpose}
+        map={map}
+        altLabel="with screenshot"
+        helpKey
+      />
+      {selection.length > 0 && (
+        <SelectionBar
+          className="inspect-selection-bar"
+          style={{
+            left: mapper.bounds.left + mapper.bounds.width / 2,
+            top: mapper.bounds.top + mapper.bounds.height - 90,
+          }}
+          count={selection.length}
+          map={map}
+          onAction={onSelectionAction}
+        />
+      )}
       {selection.map((rect, index) => {
         const point = mapper.toLocal(rect.x - mapper.scroll.x, rect.y - mapper.scroll.y);
         return (

@@ -18,8 +18,9 @@ import {
   type ServerMessage,
   type ShortcutSettings,
 } from '@inkspect/shared/bridge';
-import { captureAndSend } from '../agent/chat';
-import { addContext } from '../agent/contextTray';
+import { captureAndSend, sendContextItems } from '../agent/chat';
+import { CHAT_TARGET } from '../features/terminalSend';
+import { addContext, contextTray } from '../agent/contextTray';
 import { errorMessage } from '../browser/logger';
 import { getConfig } from '../config';
 import type { BookmarksStore } from '../features/bookmarks';
@@ -35,10 +36,19 @@ import {
   writeShortcuts,
 } from '../features/shortcutSettings';
 import { sanitizeOverrides } from '../shared/shortcuts';
+import { choosePending, parseApproval, type PairingApproval } from './pairing';
 import { WindowRelay, type RelayResult } from './windowRelay';
 
 const CLIENTS_KEY = 'vscodeBrowser.bridge.clients';
+/** When each unpaired browser's "wants to link" notification was shown (see recentlyOffered). */
+const OFFERS_SHOWN_KEY = 'vscodeBrowser.bridge.offersShown';
+/** How long a shown "wants to link" notification stays quiet for that browser. */
+const OFFER_REMIND_MS = 7 * 24 * 60 * 60_000;
+/** How long a browser just unlinked comes back without a notification. */
+const QUIET_MS = 60_000;
 const PAIRING_MS = 2 * 60_000;
+/** How long a Pair click waits for a browser that is already connected and waiting. */
+const LINKING_MS = 10_000;
 const MAX_MESSAGE = 32 * 1024 * 1024;
 /** How long an unpaired browser's offer stays up for VS Code windows to show. */
 const OFFER_MS = 10 * 60_000;
@@ -48,6 +58,10 @@ const RETRY_MS = 15_000;
 // pairing can start from any of them.
 const PAIRING_FILE = 'bridge-pairing.json';
 const OFFERS_FILE = 'bridge-offers.json';
+/** A Pair click in some window, for the serving window to act on (see pairing.ts). */
+const APPROVE_FILE = 'bridge-approve.json';
+/** An Unlink click in some window, for the serving window (which holds the connections). */
+const UNLINK_FILE = 'bridge-unlink.json';
 /** The serving window's linked browsers, so every window's status bar can show them. */
 const LINK_FILE = 'bridge-link.json';
 /** A link file this old means its window closed without saying so. */
@@ -58,7 +72,14 @@ interface SharedLink {
   /** The serving window's name. */
   servedBy: string;
   at: number;
+  /** What the serving window's version handles (see LINK_FEATURES); missing in older ones. */
+  features?: number;
 }
+/**
+ * Raised when the windows must agree on something new. 2: Pair clicks (APPROVE_FILE) and Unlink
+ * (UNLINK_FILE) from any window. A window serving an older level can't act on them.
+ */
+const LINK_FEATURES = 2;
 /** Sends relayed from the serving window to the window the user used last. */
 const SENDS_FOLDER = 'bridge-sends';
 
@@ -86,15 +107,26 @@ interface Connection {
   socket: WebSocket;
   origin: string;
   client?: ClientInfo;
+  /** An unpaired browser that said hello and waits to be paired. */
+  pending?: ClientInfo;
   /** Resolves when the browser reports the ids of nodes it created. */
   pendingApply?: (created: Record<string, string>) => void;
 }
 
 const hash = (token: string) => createHash('sha256').update(token).digest('hex');
 
+/** What the side panel and status bar show about the link, in any window. */
+export interface LinkState {
+  /** Linked browsers' names. */
+  browsers: string[];
+  /** Unpaired browsers that are connected and waiting to be paired. */
+  waiting: { id: string; browser: string }[];
+}
+
 /**
- * The link to the Inkspect browser extension: a WebSocket server on 127.0.0.1. Browsers pair
- * once with a short code; afterwards they connect with a token (only its hash is stored).
+ * The link to the Inkspect browser extension: a WebSocket server on 127.0.0.1. An unpaired
+ * browser connects and waits; a Pair click in VS Code (or a short code typed in the browser)
+ * pairs it. Afterwards it connects with a token (only its hash is stored).
  * Linked browsers sync bookmarks with VS Code both ways and can send screenshots and element
  * details to the chat, a terminal agent or the workspace.
  */
@@ -107,6 +139,8 @@ export class BridgeServer implements vscode.Disposable {
   private readonly queues = new Map<string, Promise<void>>();
   /** Browsers that were asked for a first sync this session and declined. */
   private readonly declined = new Set<string>();
+  /** Browsers just unlinked: when they come back unpaired, no "wants to link" notification. */
+  private readonly quiet = new Map<string, number>();
   private applyingLocal = false;
   /** Integration tests answer the first-sync question in advance. */
   firstSyncModeForTests?: FirstSyncMode;
@@ -158,10 +192,18 @@ export class BridgeServer implements vscode.Disposable {
           this.logger.warn(`Browser link: could not announce this window: ${errorMessage(error)}`);
         }
         // The serving window's heartbeat for the others' status bar.
-        if (this.server) this.shareLink();
+        if (this.server) {
+          this.shareLink();
+          this.pruneOffers();
+        }
       }
       this.sendWindowsIfChanged();
       if (!this.server) this.updateStatus();
+      // The approval file's watcher can miss events too; so could one for unlinking.
+      else {
+        void this.approvePending();
+        void this.unlinkIfAsked();
+      }
     }, 1_000);
     this.statusItem = vscode.window.createStatusBarItem(
       'vscodeBrowser.bridge',
@@ -169,7 +211,7 @@ export class BridgeServer implements vscode.Disposable {
       99,
     );
     this.statusItem.name = 'Inkspect browser link';
-    this.statusItem.command = 'vscodeBrowser.bridge.pair';
+    this.statusItem.command = 'vscodeBrowser.bridge.manage';
     this.disposables.push(
       this.statusItem,
       this.onDidChangeEmitter,
@@ -217,8 +259,17 @@ export class BridgeServer implements vscode.Disposable {
     );
     this.disposables.push(
       offers,
-      offers.onDidCreate(() => this.showOffers()),
-      offers.onDidChange(() => this.showOffers()),
+      offers.onDidCreate(() => this.onOffersChanged()),
+      offers.onDidChange(() => this.onOffersChanged()),
+      offers.onDidDelete(() => this.onDidChangeEmitter.fire()),
+    );
+    const approvals = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(context.globalStorageUri, APPROVE_FILE),
+    );
+    this.disposables.push(
+      approvals,
+      approvals.onDidCreate(() => void this.approvePending()),
+      approvals.onDidChange(() => void this.approvePending()),
     );
   }
 
@@ -278,46 +329,227 @@ export class BridgeServer implements vscode.Disposable {
     this.updateStatus();
   }
 
-  /** Shows a pairing code for the browser extension. */
-  async startPairing(): Promise<void> {
-    if (!getConfig().bridgeEnabled) {
-      void vscode.window.showWarningMessage(
-        'The browser link is turned off (setting "vscodeBrowser.bridge.enabled").',
-      );
+  private checkEnabled(): boolean {
+    if (getConfig().bridgeEnabled) return true;
+    void vscode.window.showWarningMessage(
+      'The browser link is turned off (setting "vscodeBrowser.bridge.enabled").',
+    );
+    return false;
+  }
+
+  /**
+   * Pairs the browser extension in one click, from any window: the browser is already connected
+   * and waiting, so VS Code approves it and sends it a token. With several waiting, the user picks
+   * one; with none yet, the next browser to connect in the next 2 minutes is paired.
+   */
+  async pair(): Promise<void> {
+    if (!this.checkEnabled()) return;
+    await this.sync();
+    // A window that wasn't reloaded after an update holds the link: it would never act on the
+    // click. It still takes codes.
+    const older = this.olderServingWindow();
+    if (older) {
+      if (await this.warnOlderServingWindow(older, 'pair in one click')) await this.pairWithCode();
       return;
     }
+    const waiting = this.linkState().waiting;
+    let clientId: string | undefined;
+    if (waiting.length > 1) {
+      const picked = await vscode.window.showQuickPick(
+        waiting.map((w) => ({ label: w.browser, id: w.id })),
+        { title: 'Pair a browser', placeHolder: 'Which browser should link with VS Code?' },
+      );
+      if (!picked) return;
+      clientId = picked.id;
+    } else {
+      clientId = waiting[0]?.id;
+    }
+    const before = this.linkState().browsers.length;
+    this.approve(clientId);
+    // Wait for the link: at once for a connected browser, or until one shows up (an unpaired
+    // browser retries every few seconds).
+    const name = waiting.find((w) => w.id === clientId)?.browser;
+    type Outcome = 'linked' | 'timeout' | 'cancelled' | 'choose';
+    // The serving window removes the approval when it pairs with it.
+    const approvalLeft = () => this.readShared(APPROVE_FILE) !== undefined;
+    const outcome = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: name
+          ? `Linking ${name}…`
+          : 'Waiting for your browser… Open Chrome, Edge, Brave or Firefox with the Inkspect extension.',
+        cancellable: true,
+      },
+      (_progress, token) =>
+        new Promise<Outcome>((resolve) => {
+          const finish = (result: Outcome) => {
+            clearTimeout(timer);
+            listener.dispose();
+            cancel.dispose();
+            resolve(result);
+          };
+          // A connected browser links within a second; waiting for one to start takes longer.
+          const timer = setTimeout(() => finish('timeout'), name ? LINKING_MS : PAIRING_MS);
+          const listener = this.onDidChange(() => {
+            const state = this.linkState();
+            if (state.browsers.length > before && !approvalLeft()) finish('linked');
+            // Several browsers showed up: an approval without a name can't choose, so let the user.
+            else if (!clientId && state.waiting.length > 1) finish('choose');
+          });
+          const cancel = token.onCancellationRequested(() => finish('cancelled'));
+          // It may have linked before the listener was added.
+          if (this.linkState().browsers.length > before && !approvalLeft()) finish('linked');
+        }),
+    );
+    // Never left behind: it would pair the next unpaired browser without asking.
+    this.writeShared(APPROVE_FILE, undefined);
+    if (outcome === 'linked') return;
+    if (outcome === 'cancelled') return;
+    if (outcome === 'choose') {
+      await this.pair();
+      return;
+    }
+    const choice = await vscode.window.showWarningMessage(
+      name
+        ? `${name} didn't answer. Check that its browser is still open, then try again.`
+        : 'No browser showed up. Is the Inkspect extension installed and its browser open?',
+      'Try Again',
+      'Use a Code Instead',
+    );
+    if (choice === 'Try Again') await this.pair();
+    else if (choice) await this.pairWithCode();
+  }
+
+  /** The fallback: a code for the user to type in the browser. */
+  async pairWithCode(): Promise<void> {
+    if (!this.checkEnabled()) return;
     // Works in any window: the code is shared with the window that serves the link.
     await this.sync();
     const code = this.createPairingCode();
     const choice = await vscode.window.showInformationMessage(
-      `Browser link pairing code: ${code}. In the browser, click the Inkspect toolbar button and enter this code on its settings page within 2 minutes.`,
+      `Browser link pairing code: ${code}. In the browser, open the Inkspect popup, choose "Use a code" and enter it within 2 minutes.`,
       'Copy Code',
     );
     if (choice) await vscode.env.clipboard.writeText(code);
+  }
+
+  /** Linked: what to do next. Unlinked: pair. (The side panel item and status bar run this.) */
+  async manage(): Promise<void> {
+    const { browsers } = this.linkState();
+    if (!browsers.length) {
+      await this.pair();
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      [
+        { label: '$(plug) Pair Another Browser', run: () => this.pair() },
+        { label: '$(debug-disconnect) Unlink All Browsers', run: () => this.forgetAll() },
+      ],
+      { title: `Linked with ${browsers.join(', ')}` },
+    );
+    await picked?.run();
+  }
+
+  /** Writes a Pair click for the serving window (this one, or another). */
+  approve(clientId?: string): void {
+    const approval: PairingApproval = { clientId, expires: Date.now() + PAIRING_MS };
+    this.writeShared(APPROVE_FILE, approval);
+    void this.approvePending();
+  }
+
+  /** Serving window: pairs the waiting browser a Pair click approved, if it is connected. */
+  private async approvePending(): Promise<void> {
+    if (!this.server) return;
+    const waiting = [...this.connections].filter((c) => c.pending && !c.client);
+    if (!waiting.length) return;
+    const approval = parseApproval(this.readShared(APPROVE_FILE));
+    const chosen = choosePending(
+      waiting.map((c) => ({ id: c.pending!.id, connection: c })),
+      approval,
+      Date.now(),
+    );
+    if (!chosen) return;
+    try {
+      await this.completePairing(chosen.connection, chosen.connection.pending!);
+    } catch (error) {
+      this.logger.error(`Browser link: pairing failed: ${errorMessage(error)}`);
+    }
+  }
+
+  /** The link state for this window's views, whichever window serves the link. */
+  linkState(): LinkState {
+    const waiting = Object.entries(this.readOffers()).map(([id, offer]) => ({
+      id,
+      browser: offer.browser,
+    }));
+    if (this.server) return { browsers: this.connected.map((c) => c.browser), waiting };
+    return { browsers: this.sharedLink()?.browsers ?? [], waiting };
   }
 
   /** An unpaired browser connected: record an offer for the next focused window to show. */
   private offerPairing(client: ClientInfo): void {
     const offers = this.readOffers();
     if (!offers[client.id]) {
-      offers[client.id] = { browser: client.browser, at: Date.now() };
+      // A browser the user just unlinked comes right back unpaired: no notification for it (the
+      // side panel still offers to pair it).
+      const quietSince = this.quiet.get(client.id);
+      this.quiet.delete(client.id);
+      const shown =
+        (quietSince !== undefined && Date.now() - quietSince < QUIET_MS) ||
+        this.recentlyOffered(client.id) ||
+        undefined;
+      offers[client.id] = { browser: client.browser, at: Date.now(), shown };
       this.writeShared(OFFERS_FILE, offers);
     }
+    this.onOffersChanged();
+  }
+
+  private onOffersChanged(): void {
     this.showOffers();
+    this.onDidChangeEmitter.fire();
+  }
+
+  /** When each browser's "wants to link" notification was last shown (any window, any session). */
+  private offersShown(): Record<string, number> {
+    const now = Date.now();
+    const stored = this.context.globalState.get<Record<string, number>>(OFFERS_SHOWN_KEY) ?? {};
+    return Object.fromEntries(
+      Object.entries(stored).filter(
+        ([, at]) => typeof at === 'number' && now - at < OFFER_REMIND_MS,
+      ),
+    );
+  }
+
+  /**
+   * Its notification was shown lately: it isn't shown again each time the browser reconnects
+   * (VS Code reloads, the browser restarts); the side panel still offers to pair it.
+   */
+  private recentlyOffered(clientId: string): boolean {
+    return clientId in this.offersShown();
   }
 
   /** Shows offers no window has shown yet, if this window has focus (one notification each). */
   private showOffers(): void {
     if (!vscode.window.state.focused) return;
     const offers = this.readOffers();
-    const fresh = Object.values(offers).filter((offer) => !offer.shown);
+    const fresh = Object.entries(offers).filter(([, offer]) => !offer.shown);
     if (!fresh.length) return;
-    for (const offer of fresh) offer.shown = true;
+    for (const [, offer] of fresh) offer.shown = true;
     this.writeShared(OFFERS_FILE, offers);
-    for (const offer of fresh) {
+    const shownAt = {
+      ...this.offersShown(),
+      ...Object.fromEntries(fresh.map(([id]) => [id, Date.now()])),
+    };
+    void this.context.globalState.update(OFFERS_SHOWN_KEY, shownAt);
+    for (const [id, offer] of fresh) {
       void vscode.window
-        .showInformationMessage(`${offer.browser} wants to sync bookmarks with VS Code.`, 'Pair')
-        .then((choice) => (choice ? this.startPairing() : undefined));
+        .showInformationMessage(`${offer.browser} wants to link with VS Code.`, 'Pair')
+        .then((choice) => {
+          if (!choice) return;
+          const older = this.olderServingWindow();
+          if (older) void this.warnOlderServingWindow(older, 'pair in one click');
+          else this.approve(id);
+        });
     }
   }
 
@@ -382,12 +614,64 @@ export class BridgeServer implements vscode.Disposable {
     }
   }
 
-  /** Forgets every paired browser and closes their connections. */
-  async forgetAll(): Promise<void> {
+  /**
+   * Forgets every paired browser and closes their connections. Works from any window: the
+   * serving window holds the connections and its own copy of the paired list, so it is told too.
+   */
+  async forgetAll(options: { confirm?: boolean } = {}): Promise<void> {
+    const older = this.olderServingWindow();
+    if (older) {
+      await this.warnOlderServingWindow(older, 'unlink browsers from here');
+      return;
+    }
+    const browsers = this.linkState().browsers;
+    // Sends and bookmark sync stop, and pairing again needs the browser: ask first.
+    if (options.confirm !== false) {
+      const choice = await vscode.window.showWarningMessage(
+        browsers.length ? `Unlink ${browsers.join(', ')}?` : 'Unlink all browsers?',
+        {
+          modal: true,
+          detail: 'Sends from the browser and bookmark sync stop until you pair it again.',
+        },
+        'Unlink',
+      );
+      if (choice !== 'Unlink') return;
+    }
+    const ids = Object.keys(this.paired);
+    await this.forgetHere(ids);
+    if (!this.server) this.writeShared(UNLINK_FILE, { at: Date.now(), ids });
+    void vscode.window.showInformationMessage(
+      browsers.length
+        ? `Unlinked ${browsers.join(', ')}. Pair again from the Browser side panel.`
+        : 'Unlinked all browsers.',
+    );
+  }
+
+  private async forgetHere(ids: readonly string[]): Promise<void> {
+    for (const id of [...ids, ...Object.keys(this.paired)]) this.quiet.set(id, Date.now());
+    // A Pair click still waiting would pair the unlinked browser again as it comes back.
+    this.writeShared(APPROVE_FILE, undefined);
     await this.context.globalState.update(CLIENTS_KEY, {});
-    for (const connection of this.connections) connection.socket.close(4001, 'Unpaired');
+    for (const connection of this.connections) {
+      if (connection.client) connection.socket.close(4001, 'Unpaired');
+    }
     this.links.update(() => ({}));
     this.updateStatus();
+  }
+
+  /** Serving window: carries out an Unlink clicked in another window. */
+  private async unlinkIfAsked(): Promise<void> {
+    if (!this.server) return;
+    const request = this.readShared<{ at?: unknown; ids?: unknown }>(UNLINK_FILE);
+    if (!request) return;
+    this.writeShared(UNLINK_FILE, undefined);
+    // An old request (this window wasn't serving then) must not unlink a newer pairing.
+    if (typeof request.at !== 'number' || Date.now() - request.at > LINK_STALE_MS) return;
+    this.logger.info('Browser link: unlinking all browsers (asked by another window).');
+    const ids = Array.isArray(request.ids)
+      ? request.ids.filter((id): id is string => typeof id === 'string')
+      : [];
+    await this.forgetHere(ids);
   }
 
   private acceptable(request: IncomingMessage, port: number): boolean {
@@ -420,8 +704,38 @@ export class BridgeServer implements vscode.Disposable {
     });
     socket.on('close', () => {
       this.connections.delete(connection);
+      // A waiting browser that went away can't be paired any more.
+      const gone = connection.pending;
+      if (gone && ![...this.connections].some((c) => c.pending?.id === gone.id)) {
+        this.removeOffer(gone.id);
+        this.onDidChangeEmitter.fire();
+      }
       this.updateStatus();
     });
+  }
+
+  /** Pairing approved (a code typed in the browser, or a Pair click in VS Code): send a token. */
+  private async completePairing(connection: Connection, client: ClientInfo): Promise<void> {
+    // Settled first, so a second approval can't pair the same connection again.
+    connection.pending = undefined;
+    connection.client = client;
+    this.writeShared(PAIRING_FILE, undefined);
+    this.writeShared(APPROVE_FILE, undefined);
+    this.removeOffer(client.id);
+    this.logger.info(`Browser link: paired with ${client.browser}.`);
+    const token = randomBytes(32).toString('base64url');
+    await this.context.globalState.update(CLIENTS_KEY, {
+      ...this.paired,
+      [client.id]: {
+        ...client,
+        origin: connection.origin,
+        tokenHash: hash(token),
+        pairedAt: Date.now(),
+      },
+    });
+    this.send(connection, { type: 'paired', token, peer: this.peerName() });
+    void vscode.window.showInformationMessage(`${client.browser} is now linked with VS Code.`);
+    this.welcome(connection);
   }
 
   private async onMessage(connection: Connection, message: ClientMessage): Promise<void> {
@@ -443,29 +757,11 @@ export class BridgeServer implements vscode.Disposable {
           type: 'error',
           code: 'bad-code',
           message:
-            'Wrong or expired code. Run "Browser: Connect Browser Extension" in VS Code for a new one.',
+            'Wrong or expired code. Run "Browser: Pair Browser Extension with a Code" in VS Code for a new one.',
         });
         return;
       }
-      this.writeShared(PAIRING_FILE, undefined);
-      this.removeOffer(message.client.id);
-      this.logger.info(`Browser link: paired with ${message.client.browser}.`);
-      const token = randomBytes(32).toString('base64url');
-      await this.context.globalState.update(CLIENTS_KEY, {
-        ...this.paired,
-        [message.client.id]: {
-          ...message.client,
-          origin: connection.origin,
-          tokenHash: hash(token),
-          pairedAt: Date.now(),
-        },
-      });
-      connection.client = message.client;
-      this.send(connection, { type: 'paired', token, peer: this.peerName() });
-      void vscode.window.showInformationMessage(
-        `${message.client.browser} is now linked with VS Code.`,
-      );
-      this.welcome(connection);
+      await this.completePairing(connection, message.client);
       return;
     }
     if (message.type === 'hello') {
@@ -489,10 +785,14 @@ export class BridgeServer implements vscode.Disposable {
           this.logger.info(
             `Browser link: ${message.client.browser} connected but is not paired; offering to pair.`,
           );
+          connection.pending = message.client;
           this.offerPairing(message.client);
+          // A Pair click may have come first (the browser started after it).
+          await this.approvePending();
         }
         return;
       }
+      connection.pending = undefined;
       connection.client = message.client;
       this.welcome(connection);
       return;
@@ -730,8 +1030,32 @@ export class BridgeServer implements vscode.Disposable {
             : undefined,
           url: message.pageUrl,
           key,
+          group: message.group,
         });
         return { ok: true };
+      }
+      if (
+        message.captures?.length &&
+        (message.target === 'chat' || message.target === 'terminal')
+      ) {
+        // Several captures, already in the list: one send with all of them.
+        const tray = contextTray();
+        const items = message.captures.flatMap(
+          (capture) => tray?.all().find((i) => i.key === `browser:${capture}`) ?? [],
+        );
+        if (items.length < message.captures.length) {
+          return {
+            ok: false,
+            error: 'Some of those screenshots are not in this VS Code window. Send them again.',
+          };
+        }
+        const sent = await sendContextItems(
+          items,
+          message.target === 'terminal' ? 'terminal' : CHAT_TARGET,
+        );
+        return sent
+          ? { ok: true }
+          : { ok: false, error: 'Nothing was sent: no agent is running in a VS Code terminal.' };
       }
       let path: string | undefined;
       if (message.image) {
@@ -758,8 +1082,8 @@ export class BridgeServer implements vscode.Disposable {
             file: path,
             url: message.pageUrl,
           },
-          // "chat" follows the default agent; "terminal" always means an agent in a terminal.
-          message.target === 'terminal' ? 'terminal' : undefined,
+          // The browser names the agent: the chat, or an agent in a terminal.
+          message.target === 'terminal' ? 'terminal' : CHAT_TARGET,
         );
         if (!sent) {
           return {
@@ -801,8 +1125,56 @@ export class BridgeServer implements vscode.Disposable {
       browsers: this.connected.map((c) => c.browser),
       servedBy: vscode.workspace.name ?? 'another window',
       at: Date.now(),
+      features: LINK_FEATURES,
     };
     this.writeShared(LINK_FILE, link);
+  }
+
+  /**
+   * The name of the window serving the link, if it runs an older version that can't act on Pair
+   * or Unlink clicks from other windows (it wasn't reloaded after an update).
+   */
+  private olderServingWindow(): string | undefined {
+    if (this.server) return undefined;
+    const link = this.sharedLink();
+    return link && (link.features ?? 0) < LINK_FEATURES ? link.servedBy : undefined;
+  }
+
+  private warnOlderServingWindow(name: string, action: string): Thenable<string | undefined> {
+    return vscode.window.showWarningMessage(
+      `The browser link is held by the "${name}" window, which runs an older version of VS Code Browser and can't ${action}. Reload that window (Developer: Reload Window), then try again.`,
+      'Use a Code Instead',
+    );
+  }
+
+  /** Serving window: waiting browsers are the ones connected now; drops offers from gone ones. */
+  private pruneOffers(): void {
+    const offers = this.readOffers();
+    const live = new Set([...this.connections].flatMap((c) => (c.pending ? [c.pending.id] : [])));
+    const stale = Object.keys(offers).filter((id) => !live.has(id));
+    if (!stale.length) return;
+    for (const id of stale) delete offers[id];
+    this.writeShared(OFFERS_FILE, Object.keys(offers).length ? offers : undefined);
+    this.onDidChangeEmitter.fire();
+  }
+
+  /** What the serving window last reported, unless that window is gone. */
+  private sharedLink(): SharedLink | undefined {
+    const link = this.readShared<SharedLink>(LINK_FILE);
+    if (
+      !link ||
+      !Array.isArray(link.browsers) ||
+      typeof link.at !== 'number' ||
+      Date.now() - link.at >= LINK_STALE_MS
+    ) {
+      return undefined;
+    }
+    return {
+      browsers: link.browsers.filter((b): b is string => typeof b === 'string'),
+      servedBy: String(link.servedBy),
+      at: link.at,
+      features: typeof link.features === 'number' ? link.features : undefined,
+    };
   }
 
   private updateStatus(): void {
@@ -821,15 +1193,10 @@ export class BridgeServer implements vscode.Disposable {
           };
     } else {
       // Another window serves the link: show what it reports, while it is still around.
-      const link = this.readShared<SharedLink>(LINK_FILE);
-      if (
-        link &&
-        Array.isArray(link.browsers) &&
-        typeof link.at === 'number' &&
-        Date.now() - link.at < LINK_STALE_MS
-      ) {
-        const browsers = link.browsers.filter((b): b is string => typeof b === 'string');
-        const through = `through the "${String(link.servedBy)}" window`;
+      const link = this.sharedLink();
+      if (link) {
+        const { browsers } = link;
+        const through = `through the "${link.servedBy}" window`;
         status = browsers.length
           ? {
               text: `$(plug) ${browsers.length}`,

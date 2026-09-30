@@ -2,9 +2,38 @@
 
 ## Unreleased
 
+### Fixes
+
+- **New default keys that leave VS Code its own:** the modes are Alt+Shift+letter (element picker Alt+Shift+E, draw W, screenshot G, console J, device M, measure U, eyedropper Y, overlay O, CSS tweak V, accessibility H), so Explorer, Debug, Problems, Output and Save As keep their keys while the browser has focus. Quick actions is Ctrl+Shift+K and the cheat sheet Ctrl+Shift+/ (Ctrl+K chords and web apps' Ctrl+K and Ctrl+/ work again), Downloads is Alt+Shift+L (Ctrl+J toggles the panel), and Save as PDF has no key (Ctrl+P is Quick Open). Keys the operating system keeps are replaced: close the console Alt+W, close the overlay Alt+Z, pause a recording Alt+Y. Keys you changed stay as they are.
+- **Shortcuts work on every keyboard layout:** keys are the letter or sign printed on them, so Ctrl+Z is Undo on French and German keyboards (it closed the tab on AZERTY), Ctrl+- zooms out on a German keyboard and "?" opens the shortcut list everywhere. Typing with AltGr (Czech, Polish, German...) never runs a shortcut.
+- **Screenshots taken together no longer overwrite each other** on disk (their names went down to the second), so a group sends every image. A screenshot that fails no longer stops the rest of its group from being offered and sent.
+- **Undo in Agent Context:** Clear all, Remove, the Delete key and removing a group can be undone for 15 seconds.
+- **Asks first** before deleting a bookmark folder that holds bookmarks (they are removed from linked browsers too), removing a Chrome extension (its files are deleted) and unlinking browsers.
+- **Errors stay on screen:** they are marked as errors, last 8 seconds and can be dismissed.
+- Esc leaves CSS tweak mode, as its hint says. An Alt+Shift+click screenshot is no longer attached to the next element copied. A selected group card sends only its checked items.
+- Pairing: a Pair click is always cleared afterwards (it could pair the next browser without asking), and a browser's "wants to link" notification isn't repeated on every reconnect (for a week; the side panel still offers it).
+- Shortcut search finds Ctrl+- and Ctrl++; clicking elsewhere cancels recording a key.
+- **Several picked elements are a group too:** one row per element, each with a checkbox, sent together ("Send 3 of 4"), like grouped screenshots. The clipboard still gets all their details at once.
+- **Clearer element cards in Agent Context:** the preview names the elements (`h2#title · div.card · +2 more`) instead of showing the Markdown sent to the agent, and several elements show their page, not a framework's internal component (such as Next.js' SegmentViewNode). Previews of other text drop Markdown marks too.
+- **Screenshots taken together stay together:** each drawing separately, the screenshots of a Shift+click selection and several captures from the browser extension show as one group in Agent Context, with a thumbnail each, and go to the agent in one send (the chat gets them all attached; a terminal agent gets all the paths at once). Uncheck any to send "2 of 3". Send latest sends the whole group.
+- **Select items in Agent Context** (their checkbox, Ctrl/Shift+click, or Space) to send, remove, or **Group** them by hand; a group has **Ungroup**.
+- **A tidier picker hint:** two rows, mouse actions then keys ("Click copy details · Ctrl + click chat agent · Ctrl Shift + click terminal agent · Shift + click select · Alt + click with screenshot").
+- **Pick the agent with the click:** in the element picker, Ctrl+click sends the element to the chat agent and Ctrl+Shift+click to a terminal agent (Cmd on macOS). The hint says so.
+- **A bar for Shift+click selections:** "2 selected" with Copy details (Enter), Chat agent, Terminal agent, Screenshot (each element), Save (the details, in the workspace) and ×, all acting on every selected element.
+- **A clearer element-picker hint,** in plain words: "Click an element to copy its details · Ctrl + click chat agent · Ctrl Shift + click terminal agent · Shift + click select several · Alt + click copy with a screenshot │ ↑ ↓ parent / child · Enter copy selected · Esc stop · ? all keys". Keys show as key caps, in your own keys when you remap them, on a dark bar that reads well on any page. Shared with the browser extension.
+- **Fixed: shortcuts whose default key was written Alt+Shift+… never worked** (send the page context to the agent, Alt+Shift+P; close the design overlay, Alt+Shift+Esc) unless you changed them. The Shortcuts view also lists the browser extension's new "After a capture" keys (tagged BR).
+- **Menus and popups close when their button is pressed again** (menus, the bookmark star, extension popups): before, the press closed them and the click reopened them.
+
+### New logo
+
+- **A new, simpler logo:** an ink drop inside white "inspect element" corner brackets, on a dark tile, as the extension icon and (as an outline) in the Activity Bar. Its source is `brand/logo.svg`; `npm run logo` renders every size.
+
 ### Shortcuts for everything
 
 - **Every action has a shortcut, and every shortcut can be changed** in the new **Shortcuts** view of the Browser sidebar: search, click a key to record a new one, add a second key, reset, and fix conflicts. Export and import them as JSON.
+- **Search by shortcut:** type it in any form ("alt shift k", "Alt+Shift+K", "shift alt k", "option shift k"), or just press it while the search box has focus and it becomes the search. Plain typing and the box's editing keys (Ctrl+A, Ctrl+V, Ctrl+Z...) work as usual.
+- **Tags for where each key works:** **VS** (VS Code Browser) and **BR** (the Inkspect toolbar in your browser), in the Shortcuts view and in the browser extension. While the search box has focus it traps every shortcut you press (Ctrl+C and Ctrl+V included) and searches for it.
+- **The shortcut search really traps keys now:** it catches them before the page, the toolbar or VS Code can act on them, and the toolbar's own browser key (Alt+Shift+K) is searched for instead of closing the toolbar. Keys the browser keeps for itself (DevTools: Ctrl+Shift+I/J/C, F12; Ctrl+T, Ctrl+W, Ctrl+N) never reach a page: type those instead.
 - **Each mode has a key**, and its own keys while it is on:
   - element picker Ctrl+Shift+C (↑/↓ parent and child, Enter copy, S screenshot, A send to agent)
   - draw Ctrl+Shift+D (a letter per tool, 1–9 colors, [ ] width, F fill, Enter screenshot)
@@ -50,6 +79,16 @@
 - **Engine and crash screens, page dialogs, the find bar and the bookmark editor** have a cleaner layout. Dialogs put the main button last.
 - **Bookmarks bar like Chrome's:** bookmarks that don't fit go into a **»** menu pinned to the right edge, and folders open as cascading submenus (hover or Right arrow) with favicons. Untitled bookmarks show their address.
 - **Colors work in every theme:** accents follow the theme's button color instead of its focus border (dim in many themes), and secondary text stays readable in low-contrast themes.
+
+### One-click browser pairing
+
+- **Pair the Inkspect browser extension with one click, no code.** The Browser side panel's first item is **Pair Browser Extension** (also a plug button in its title bar). The browser extension is already connected and waiting, so the click links it and the browser updates by itself. With several browsers waiting, you pick one. With none yet, VS Code waits up to 2 minutes for the browser to show up.
+- The item shows the link: **Pair Google Chrome** (waiting to link) or **Linked: Google Chrome**. Clicking it when linked, or the status bar item, offers **Pair Another Browser** and **Unlink All Browsers**.
+- The "wants to link" notification's **Pair** button pairs directly too, instead of showing a code.
+- The code is now the fallback: **Browser: Pair Browser Extension with a Code**. **Browser: Connect Browser Extension** is renamed **Browser: Pair Browser Extension**.
+- The Shortcuts view's "Browser" badge is right in every window, not only the one serving the link.
+- **Unlink works from any window.** Before, it only cleared the list in the window you used, while the window serving the link kept the browser connected. Unlinked browsers can be paired again from the side panel, without a notification popping up right away.
+- **No endless "Linking…".** If the link is held by a VS Code window that still runs an older version (not reloaded after an update), Pair and Unlink name that window and ask you to reload it (a code still works). Linking a waiting browser gives up after 10 seconds with a message, Cancel just stops, and browsers that went away no longer show as waiting.
 
 ### Browser link pairing prompt
 

@@ -226,7 +226,8 @@ export class BridgeClient {
       this.retry = undefined;
       this.connect();
     }, this.delay);
-    this.delay = Math.min(this.delay * 2, 30_000);
+    // Unpaired, retry often: VS Code's Pair click should find this browser within seconds.
+    this.delay = Math.min(this.delay * 2, this.token ? 30_000 : 5_000);
   }
 
   private async handle(message: ServerMessage): Promise<void> {

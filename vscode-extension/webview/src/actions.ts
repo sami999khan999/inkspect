@@ -14,29 +14,12 @@ import {
 } from '@shared/devices';
 import type { TabState } from '@shared/protocol';
 import type { ShortcutScope } from '@shared/shortcuts';
-import { CAPTURE_ACTIONS, type CaptureMode } from './drawing/DrawToolbar';
+import { CAPTURE_ACTIONS, DRAW_TOOLS, type CaptureMode } from './drawing/DrawToolbar';
 import type { ShortcutHandlers } from './shortcuts';
 import { postToHost } from './vscode';
 
-/** Drawing tools with a shortcut (`draw.<tool>`). */
-export const DRAW_TOOLS: readonly DrawTool[] = [
-  'select',
-  'pen',
-  'pencil',
-  'marker',
-  'brush',
-  'highlighter',
-  'neon',
-  'line',
-  'arrow',
-  'doubleArrow',
-  'rect',
-  'ellipse',
-  'text',
-  'callout',
-  'blur',
-  'eraser',
-];
+/** Drawing tools with a shortcut (`draw.<tool>`): the shared toolbar's list. */
+export { DRAW_TOOLS };
 
 export type DevCommand = 'console' | 'network' | 'filter';
 
@@ -97,6 +80,8 @@ export function buildHandlers(ctx: ActionContext): ShortcutHandlers {
     handlers[`${scope}.help`] = ctx.showHelp;
     handlers[`${scope}.exit`] = ctx.exitMode;
   }
+  // CSS tweak has no help key; leaving it reverts the page.
+  handlers['tweak.exit'] = ctx.exitMode;
 
   // Element picker.
   const inspect = (action: 'parent' | 'child' | 'copySelection' | 'screenshot' | 'agent') => () =>

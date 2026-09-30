@@ -2,8 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 import { copyText } from './clipboard';
-import { sendContextItem } from '../agent/chat';
-import { addContext, type ContextItem } from '../agent/contextTray';
+import { sendContextItems } from '../agent/chat';
+import { addContext, contextTray, type ContextItem } from '../agent/contextTray';
 import { getAgentTerminals } from './terminalSend';
 import { getConfig } from '../config';
 
@@ -29,6 +29,24 @@ export function screenshotDirectory(globalStorage: string): string {
   return workspace
     ? join(workspace, '.vscode-browser', 'screenshots')
     : join(globalStorage, 'screenshots');
+}
+
+/**
+ * Writes `bytes` to `path`, or to `name-2.png`, `name-3.png`... when that file exists: names
+ * go down to the second, and several screenshots taken together (a group) share one.
+ */
+async function writeUnique(path: string, bytes: Uint8Array): Promise<string> {
+  const dot = path.lastIndexOf('.');
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? path : `${path.slice(0, dot)}-${n}${path.slice(dot)}`;
+    try {
+      // 'wx': fails if the file exists, so two writes can't pick the same name.
+      await writeFile(candidate, bytes, { flag: 'wx' });
+      return candidate;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || n > 999) throw error;
+    }
+  }
 }
 
 /** `screenshot-2026-09-27_14-03-12-example.com.png` */
@@ -70,8 +88,7 @@ export async function saveScreenshot(
 ): Promise<string> {
   const directory = screenshotDirectory(globalStorage);
   await mkdir(directory, { recursive: true });
-  const path = join(directory, screenshotName(url, format));
-  await writeFile(path, bytes);
+  const path = await writeUnique(join(directory, screenshotName(url, format)), bytes);
   lastScreenshot = path;
   return path;
 }
@@ -91,8 +108,7 @@ export async function deliverRecording(
   const name = screenshotName(url, 'png')
     .replace(/^screenshot/, 'recording')
     .replace(/\.png$/, '.webm');
-  const path = join(directory, name);
-  await writeFile(path, bytes);
+  const path = await writeUnique(join(directory, name), bytes);
   const item = addContext({
     kind: 'recording',
     title: `Recording (${Math.round(seconds)} s)`,
@@ -100,7 +116,11 @@ export async function deliverRecording(
     file: path,
     url,
   });
-  offerActions(`Recording saved (${Math.round(seconds)} s) · ${displayPath(path)}`, item, path);
+  offerActions(
+    `Recording saved (${Math.round(seconds)} s) · ${displayPath(path)}`,
+    item ? [item] : [],
+    path,
+  );
   return path;
 }
 
@@ -120,14 +140,17 @@ interface ScreenshotAction extends vscode.QuickPickItem {
  * The notification after a capture: "Send to Agent", and "More..." with the other actions
  * (another agent or chat, copy the path, open, reveal).
  */
-function offerActions(message: string, item: ContextItem | undefined, path?: string): void {
-  const buttons = item ? ['Send to Agent', 'More...'] : path ? ['More...'] : [];
+function offerActions(message: string, items: ContextItem[], path?: string): void {
+  const buttons = items.length ? ['Send to Agent', 'More...'] : path ? ['More...'] : [];
   void vscode.window.showInformationMessage(message, ...buttons).then(async (choice) => {
-    if (choice === 'Send to Agent' && item) await sendContextItem(item);
+    if (choice === 'Send to Agent') await sendContextItems(items);
     else if (choice === 'More...') {
-      const actions = moreActions(item, path);
+      const actions = moreActions(items, path);
       const pick = await vscode.window.showQuickPick(actions, {
-        title: item?.title ?? basename(path ?? ''),
+        title:
+          items.length > 1
+            ? `${items.length} screenshots`
+            : (items[0]?.title ?? basename(path ?? '')),
         placeHolder: path ? displayPath(path) : undefined,
       });
       await pick?.run();
@@ -135,9 +158,9 @@ function offerActions(message: string, item: ContextItem | undefined, path?: str
   });
 }
 
-function moreActions(item: ContextItem | undefined, path?: string): ScreenshotAction[] {
+function moreActions(items: ContextItem[], path?: string): ScreenshotAction[] {
   const actions: ScreenshotAction[] = [];
-  if (item) {
+  if (items.length) {
     actions.push(
       {
         label: '$(sparkle) Send to Agent...',
@@ -148,7 +171,7 @@ function moreActions(item: ContextItem | undefined, path?: string): ScreenshotAc
             targets.map((t) => ({ label: t.label, description: t.detail, id: t.id })),
             { title: 'Send to which agent?' },
           );
-          if (pick) await sendContextItem(item, pick.id);
+          if (pick) await sendContextItems(items, pick.id);
         },
       },
       {
@@ -190,6 +213,11 @@ export interface DeliverOptions {
   label: string;
   /** Send it to the agent right away (the "and send to agent" shortcuts). */
   toAgent?: boolean;
+  /**
+   * Screenshots taken together (each drawing separately, several elements): they join one group
+   * in Agent Context, and the last one sends or offers the whole group, once.
+   */
+  group?: { id: string; index: number; count: number };
 }
 
 /**
@@ -211,14 +239,20 @@ export async function deliverScreenshot(options: DeliverOptions): Promise<string
     image: { bytes, mimeType },
     file: path,
     url: options.url,
+    group: options.group?.id,
   });
+  const group = options.group;
+  // The group's other screenshots are still coming: it is sent or offered with the last one.
+  if (group && group.index < group.count - 1) return path;
+  const items = group ? (contextTray()?.inGroup(group.id) ?? []) : item ? [item] : [];
   if (options.toAgent) {
-    if (item) {
-      await sendContextItem(item);
-      return item.file;
+    if (items.length) {
+      await sendContextItems(items);
+      return item?.file ?? path;
     }
     return path;
   }
-  offerActions(`${options.label} copied${path ? ' · saved' : ''}`, item, path);
+  const what = group ? `${group.count} screenshots` : options.label;
+  offerActions(`${what} copied${path ? ' · saved' : ''}`, items, path);
   return path;
 }

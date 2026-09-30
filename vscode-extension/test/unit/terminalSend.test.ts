@@ -8,7 +8,12 @@ import {
   splitCommandLine,
 } from '../../src/agent/agentDetect';
 import { bracketedPaste, shellPath } from '../../src/features/terminalSend';
-import { isContextViewMessage, previewText, timeAgo } from '../../src/shared/agentContext';
+import {
+  elementSummary,
+  isContextViewMessage,
+  previewText,
+  timeAgo,
+} from '../../src/shared/agentContext';
 
 describe('sending to a terminal agent', () => {
   it('quotes paths only when needed', () => {
@@ -120,9 +125,32 @@ describe('the Agent Context view', () => {
     expect(isContextViewMessage(null)).toBe(false);
   });
 
-  it('previews text on one line', () => {
-    expect(previewText('# Title\n\n```html\n<div>\n```')).toBe('# Title <div>');
+  it('validates the messages for several items (a group, a selection)', () => {
+    expect(isContextViewMessage({ type: 'sendMany', ids: ['a', 'b'] })).toBe(true);
+    expect(isContextViewMessage({ type: 'sendMany', ids: ['a'], target: 'chat' })).toBe(true);
+    expect(isContextViewMessage({ type: 'sendMany', ids: [] })).toBe(false);
+    expect(isContextViewMessage({ type: 'sendMany', ids: 'a' })).toBe(false);
+    expect(isContextViewMessage({ type: 'removeMany', ids: Array(61).fill('a') })).toBe(false);
+    expect(isContextViewMessage({ type: 'group', ids: ['a', 'b'] })).toBe(true);
+    expect(isContextViewMessage({ type: 'group', ids: [1, 2] })).toBe(false);
+    expect(isContextViewMessage({ type: 'ungroup', group: 'g' })).toBe(true);
+    expect(isContextViewMessage({ type: 'ungroup' })).toBe(false);
+  });
+
+  it('previews text on one line, without Markdown marks', () => {
+    expect(previewText('# Title\n\n```html\n<div>\n```')).toBe('Title <div>');
+    expect(previewText('**Error** in `app.js`')).toBe('Error in app.js');
     expect(previewText('x'.repeat(200), 10)).toBe(`${'x'.repeat(9)}…`);
+  });
+
+  it('previews element details by their elements', () => {
+    const one = '### Element: `h2#title.big`\n- Page: http://x.dev';
+    expect(elementSummary(one)).toBe('h2#title.big');
+    const many = [1, 2, 3, 4, 5]
+      .map((n) => `### ${n}. Element: \`div.card-${n}\`\n- Selector: \`.card-${n}\``)
+      .join('\n\n');
+    expect(elementSummary(many)).toBe('div.card-1 · div.card-2 · div.card-3 · +2 more');
+    expect(elementSummary('Just some text')).toBeUndefined();
   });
 
   it('says how long ago', () => {

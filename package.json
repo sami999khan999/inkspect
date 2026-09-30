@@ -15,6 +15,7 @@
     "test:e2e": "npm run test:e2e -w vscode-extension",
     "test:e2e:browser": "npm run test:e2e -w browser-extension",
     "package": "npm run package -w vscode-extension",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "logo": "node brand/render.mjs"
   }
 }

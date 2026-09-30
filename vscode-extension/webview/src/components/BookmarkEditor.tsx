@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { findNode, folderList, type BookmarkRoots } from '@shared/bookmarks';
 import { Button } from '@inkspect/shared/ui/Button';
 import { Field } from '@inkspect/shared/ui/Field';
-import { isInPopup } from '@inkspect/shared/ui/popover';
+import { isInPopup, listenOutsidePress, pressedOpener } from '@inkspect/shared/ui/popover';
 import { Select } from '@inkspect/shared/ui/Select';
 import { TextField } from '@inkspect/shared/ui/TextField';
 import { postToHost } from '../vscode';
@@ -33,13 +33,18 @@ export function BookmarkEditor({ roots, nodeId, anchor, onClose }: BookmarkEdito
     element.style.top = `${anchor.y}px`;
   }, [anchor]);
 
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node) && !isInPopup(event)) onClose();
-    };
-    window.addEventListener('pointerdown', onPointerDown, true);
-    return () => window.removeEventListener('pointerdown', onPointerDown, true);
-  }, [onClose]);
+  // The star that opened it: pressing it again closes the editor (see listenOutsidePress).
+  const [opener] = useState(pressedOpener);
+  useEffect(
+    () =>
+      listenOutsidePress(
+        () => [ref.current],
+        opener,
+        () => onClose(),
+        isInPopup,
+      ),
+    [onClose, opener],
+  );
 
   const save = () => {
     if (node) {

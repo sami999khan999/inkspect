@@ -1304,7 +1304,14 @@ kbd {
   cursor: default !important;
 }
 
-.inspect-hint,
+/* The picker's hint (PickerHint, styled in @inkspect/shared/ui): centered at the page's bottom. */
+.inspect-hint {
+  position: absolute;
+  z-index: 5;
+  max-width: calc(100% - 24px);
+  transform: translate(-50%, -100%);
+}
+
 .region-hint {
   position: absolute;
   z-index: 5;
@@ -2039,4 +2046,12 @@ body.vscode-high-contrast .list-row:hover {
   padding: var(--ink-space-4);
   color: var(--ink-muted);
   text-align: center;
+}
+
+/* The bar over a Shift+click selection (SelectionBar), just above the picker's hint. */
+.inspect-selection-bar {
+  position: absolute;
+  z-index: 6;
+  max-width: calc(100% - 24px);
+  transform: translate(-50%, -100%);
 }

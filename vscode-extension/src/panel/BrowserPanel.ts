@@ -599,6 +599,13 @@ export class BrowserPanel implements vscode.Disposable {
       case 'clearBrowsingData':
         await clearBrowsingData(this.services, this.openOrigins());
         return;
+      case 'selectionAction': {
+        const tab = this.tab(message.tabId);
+        if (tab?.session) {
+          await this.inspector.selectionAction(tab.session, message.action, tab.url);
+        }
+        return;
+      }
       case 'inspect': {
         const tab = this.tab(message.tabId);
         const session = tab?.session;
@@ -618,7 +625,7 @@ export class BrowserPanel implements vscode.Disposable {
             await this.inspector.copySelection(session);
             return;
           case 'agent':
-            await this.inspector.copySelection(session, true);
+            await this.inspector.copySelection(session, 'agent');
             return;
           case 'screenshot':
             await this.inspector.screenshotCurrent(session, tab.url);
@@ -656,6 +663,19 @@ export class BrowserPanel implements vscode.Disposable {
           copyImage: (data, mimeType) => void this.copyImage(data, mimeType),
           label: message.label.slice(0, 80),
           toAgent: message.toAgent,
+          // A group's last screenshot sends or offers it: a count or index out of range would
+          // do that more than once, so such a message is taken as a single screenshot.
+          group:
+            message.group &&
+            message.group.count <= 200 &&
+            message.group.index >= 0 &&
+            message.group.index < message.group.count
+              ? {
+                  id: message.group.id.slice(0, 64),
+                  index: message.group.index,
+                  count: message.group.count,
+                }
+              : undefined,
         });
         return;
       }
@@ -1620,9 +1640,17 @@ export class BrowserPanel implements vscode.Disposable {
       }
       const id = message.id!;
       switch (message.action) {
-        case 'remove':
-          await extensions.remove(id);
+        case 'remove': {
+          // Its files are deleted: ask first (the command, for scripts and tests, doesn't).
+          const name = extensions.list().find((e) => e.id === id)?.name ?? 'this extension';
+          const choice = await vscode.window.showWarningMessage(
+            `Remove ${name}?`,
+            { modal: true, detail: 'Its files are deleted. You can install it again later.' },
+            'Remove',
+          );
+          if (choice === 'Remove') await extensions.remove(id);
           return;
+        }
         case 'enable':
         case 'disable':
           await extensions.setEnabled(id, message.action === 'enable');

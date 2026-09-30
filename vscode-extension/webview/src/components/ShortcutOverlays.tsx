@@ -93,7 +93,7 @@ export function CheatSheet({ scope, onClose }: { scope: ShortcutScope; onClose: 
   );
 }
 
-/** Ctrl+K: every browser action, searchable, with its shortcut. */
+/** Quick actions (Ctrl+Shift+K): every browser action, searchable, with its shortcut. */
 export function QuickActions({
   scope,
   run,

@@ -1,11 +1,16 @@
 import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
-import { sendContextItem } from './agent/chat';
+import { sendContextItem, sendContextItems } from './agent/chat';
 import { contextTray } from './agent/contextTray';
 import { getAgentTerminals } from './features/terminalSend';
 import { getConfig } from './config';
 import { BrowserPanel, type Services } from './panel/BrowserPanel';
-import { clearBrowsingData, exportBookmarks, importBookmarks } from './panel/browserData';
+import {
+  clearBrowsingData,
+  confirmRemoveBookmark,
+  exportBookmarks,
+  importBookmarks,
+} from './panel/browserData';
 import { BAR_ID, findNode } from './shared/bookmarks';
 import type { TabAction } from './shared/protocol';
 import { normalizeInput } from './shared/url';
@@ -84,8 +89,9 @@ export function registerCommands(services: Services): vscode.Disposable {
         void vscode.window.showInformationMessage('Open a web page in the browser to bookmark it.');
     }),
     // Tree view items pass themselves as the argument: a bookmark id, or a tab node.
-    vscode.commands.registerCommand('vscodeBrowser.removeBookmark', (id: unknown) => {
-      if (typeof id === 'string') services.bookmarks.remove(id);
+    vscode.commands.registerCommand('vscodeBrowser.removeBookmark', async (id: unknown) => {
+      if (typeof id !== 'string') return;
+      if (await confirmRemoveBookmark(services.bookmarks, id)) services.bookmarks.remove(id);
     }),
     vscode.commands.registerCommand('vscodeBrowser.renameBookmark', async (id: unknown) => {
       if (typeof id !== 'string') return;
@@ -233,8 +239,11 @@ export function registerCommands(services: Services): vscode.Disposable {
         );
         return undefined;
       }
-      const sent = await sendContextItem(item);
-      if (sent) BrowserPanel.active()?.toast(`Sent "${item.title}" to ${sent}`);
+      // The latest capture with the rest of its group (the drawings taken together).
+      const items = item.group ? (contextTray()?.inGroup(item.group) ?? [item]) : [item];
+      const sent = await sendContextItems(items);
+      const what = items.length === 1 ? `"${item.title}"` : `${items.length} screenshots`;
+      if (sent) BrowserPanel.active()?.toast(`Sent ${what} to ${sent}`);
       return sent;
     }),
     vscode.commands.registerCommand('vscodeBrowser.chooseAgentTerminal', async () => {

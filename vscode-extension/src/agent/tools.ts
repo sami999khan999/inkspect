@@ -166,7 +166,7 @@ export const BROWSER_TOOLS: BrowserTool[] = [
       return {
         text:
           agent.selection() ??
-          'The user has not picked an element yet. They can pick one with the element selector (Ctrl+Shift+C in the browser).',
+          'The user has not picked an element yet. They can pick one with the element picker in the browser (its toolbar button, or Alt+Shift+E).',
       };
     },
   },

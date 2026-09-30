@@ -383,7 +383,18 @@
       },
       {
         "command": "vscodeBrowser.bridge.pair",
-        "title": "Connect Browser Extension",
+        "title": "Pair Browser Extension",
+        "category": "Browser",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "vscodeBrowser.bridge.pairWithCode",
+        "title": "Pair Browser Extension with a Code",
+        "category": "Browser"
+      },
+      {
+        "command": "vscodeBrowser.bridge.manage",
+        "title": "Manage Browser Link",
         "category": "Browser",
         "icon": "$(plug)"
       },
@@ -651,9 +662,14 @@
           "group": "2_io"
         },
         {
+          "command": "vscodeBrowser.bridge.manage",
+          "when": "view == vscodeBrowser.actions && config.vscodeBrowser.bridge.enabled",
+          "group": "navigation@1"
+        },
+        {
           "command": "vscodeBrowser.openSettings",
           "when": "view == vscodeBrowser.actions",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "vscodeBrowser.chooseAgentTerminal",
@@ -974,7 +990,7 @@
         "vscodeBrowser.bridge.enabled": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Let the **Inkspect browser extension** (Chrome, Edge, Brave, Firefox) link to VS Code on `127.0.0.1` to sync bookmarks and send screenshots and element details to chat or a terminal agent. Browsers must be paired once with **Browser: Connect Browser Extension**."
+          "markdownDescription": "Let the **Inkspect browser extension** (Chrome, Edge, Brave, Firefox) link to VS Code on `127.0.0.1` to sync bookmarks and send screenshots and element details to chat or a terminal agent. Pair a browser once: click **Pair Browser Extension** in the Browser side panel."
         },
         "vscodeBrowser.bridge.port": {
           "type": "number",
@@ -1389,7 +1405,7 @@
   ],
   "icon": "media/icon.png",
   "galleryBanner": {
-    "color": "#1b4fb8",
+    "color": "#0f172a",
     "theme": "dark"
   }
 }

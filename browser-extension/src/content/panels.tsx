@@ -10,10 +10,11 @@ import {
 import type { VsCodeWindow } from '@inkspect/shared/bridge';
 import type { ShortcutMap, ShortcutOverrides } from '@inkspect/shared/shortcuts';
 import { Button } from '@inkspect/shared/ui/Button';
+import { ConfirmButton } from '@inkspect/shared/ui/ConfirmButton';
 import { Field } from '@inkspect/shared/ui/Field';
 import { IconButton } from '@inkspect/shared/ui/IconButton';
 import { ShortcutList } from '@inkspect/shared/ui/ShortcutList';
-import { TextField } from '@inkspect/shared/ui/TextField';
+import { ShortcutSearch } from '@inkspect/shared/ui/ShortcutSearch';
 import { Segmented } from '@inkspect/shared/ui/Segmented';
 import { Select } from '@inkspect/shared/ui/Select';
 import { Switch } from '@inkspect/shared/ui/Switch';
@@ -24,13 +25,13 @@ import {
   type EmulationRequest,
   type SendTarget,
 } from '../messages';
+import { SHORTCUT_ACTIONS } from '@inkspect/shared/shortcuts';
 import {
+  ALL_SCOPES,
   labelOf,
+  resetAllShortcuts,
   scopeLabelOf,
-  resetToolbarShortcuts,
   setShortcutKeys,
-  TOOLBAR_ACTIONS,
-  TOOLBAR_SCOPES,
 } from '../shortcuts';
 import { pageRequest } from './page';
 import { LAST_USED, WindowPicker } from './WindowPicker';
@@ -366,11 +367,12 @@ export function LinkPanel({ onClose, status }: PanelProps & { status: BridgeStat
               ? 'Connecting to VS Code…'
               : 'VS Code is not reachable. Start VS Code with the VS Code Browser extension (its link is on by default).'}
       </p>
-      {status.state !== 'connected' && (
+      {status.state === 'unpaired' && (
         <>
           <p className="note">
-            In VS Code run <b>Browser: Connect Browser Extension</b>, then type the 6-digit code
-            here.
+            In VS Code, click <b>Pair Browser Extension</b> in the Browser side panel: that links
+            this browser, no code needed. Or type a code from{' '}
+            <b>Browser: Pair Browser Extension with a Code</b> here.
           </p>
           <div className="row">
             <input
@@ -412,8 +414,9 @@ export function LinkPanel({ onClose, status }: PanelProps & { status: BridgeStat
 }
 
 /**
- * The toolbar's keyboard shortcuts. They are VS Code Browser's too: a change here reaches VS Code
- * through the link (and VS Code's changes arrive here), and follows the browser account.
+ * Every keyboard shortcut, the toolbar's and VS Code Browser's (one key map): a change here
+ * reaches VS Code through the link (and VS Code's changes arrive here), and follows the browser
+ * account.
  */
 export function ShortcutsPanel({
   onClose,
@@ -427,25 +430,21 @@ export function ShortcutsPanel({
   linked: boolean;
 }) {
   const [query, setQuery] = useState('');
-  const changed = TOOLBAR_ACTIONS.filter((a) => a.id in overrides).length;
+  const changed = Object.keys(overrides).length;
   return (
     <PanelFrame title="Keyboard shortcuts" onClose={onClose}>
       <div className="shortcuts-bar">
-        <TextField
-          size="sm"
-          icon="search"
-          placeholder="Search actions or keys"
-          aria-label="Search shortcuts"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onClear={() => setQuery('')}
-        />
-        <IconButton
+        <ShortcutSearch size="sm" value={query} onChange={setQuery} />
+        {/* Shared with VS Code: a reset there too, so it takes a second click. */}
+        <ConfirmButton
           icon="discard"
-          label="Reset all shortcuts"
+          confirmLabel="Click again to reset"
+          title="Reset all shortcuts (here and in VS Code)"
           disabled={!changed}
-          onClick={() => void resetToolbarShortcuts(overrides)}
-        />
+          onConfirm={() => void resetAllShortcuts()}
+        >
+          Reset all
+        </ConfirmButton>
       </div>
       <p className="note shortcuts-sync">
         <span className={`codicon codicon-${linked ? 'sync' : 'cloud'}`} aria-hidden="true" />
@@ -454,8 +453,8 @@ export function ShortcutsPanel({
           : 'Saved to your browser account. They sync with VS Code once it is linked.'}
       </p>
       <ShortcutList
-        actions={TOOLBAR_ACTIONS}
-        scopes={TOOLBAR_SCOPES}
+        actions={SHORTCUT_ACTIONS}
+        scopes={ALL_SCOPES}
         map={map}
         overrides={overrides}
         query={query}

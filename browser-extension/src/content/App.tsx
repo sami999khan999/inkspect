@@ -19,6 +19,7 @@ import {
   chordFromEvent,
   effectiveShortcuts,
   formatKey,
+  keyParts,
   type ShortcutMap,
   type ShortcutOverrides,
   type ShortcutScope,
@@ -27,12 +28,15 @@ import { DrawingLayer, type DrawMapper } from '@inkspect/shared/ui/DrawingLayer'
 import {
   captureMenu,
   DrawToolbar,
-  TOOL_KEYS,
+  DRAW_TOOLS,
   type CaptureMode,
 } from '@inkspect/shared/ui/DrawToolbar';
 import { Button } from '@inkspect/shared/ui/Button';
 import { IconButton } from '@inkspect/shared/ui/IconButton';
 import { Menu, type MenuItem, type MenuState } from '@inkspect/shared/ui/Menu';
+import { isInPopup, listenOutsidePress, pressedOpener } from '@inkspect/shared/ui/popover';
+import { SelectionBar, type SelectionAction } from '@inkspect/shared/ui/SelectionBar';
+import { ThumbPicker } from '@inkspect/shared/ui/ThumbPicker';
 import {
   TARGET_ATTRIBUTE,
   toBackground,
@@ -87,6 +91,10 @@ interface ToastAction {
   run: () => void;
   /** It goes to VS Code: the popup offers a choice of window when several are open. */
   toVsCode?: boolean;
+  /** Its shortcut action (`capture.*`), which runs it while the popup shows. */
+  shortcut?: string;
+  /** Its label when only some of several screenshots are checked ("Send 2 to chat"). */
+  partial?: (count: number) => string;
 }
 
 interface ToastOptions {
@@ -150,7 +158,13 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
   // Where the popup's sends go: the window used last, or one the user picked.
   const [sendWindow, setSendWindow] = useState(LAST_USED);
   const sendWindowRef = useRef(LAST_USED);
+  /** The toast showing now, for sends that finish later (see send). */
+  const toastRef = useRef<ToastState | null>(null);
+  useEffect(() => {
+    toastRef.current = toast;
+  }, [toast]);
   const bar = useRef<HTMLDivElement>(null);
+  const dock = useRef<HTMLDivElement>(null);
   const [barHeight, setBarHeight] = useState(0);
   // The responsive view: the device, its zoom, and the page's address once it may be framed.
   const [responsive, setResponsive] = useState<DeviceSettings | null>(null);
@@ -286,10 +300,20 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     };
   }, []);
 
+  const [toastChecked, setToastChecked] = useState<ReadonlySet<number>>(new Set());
+  const toastCheckedRef = useRef<ReadonlySet<number>>(new Set());
+  const setChecked = (next: ReadonlySet<number>) => {
+    toastCheckedRef.current = next;
+    setToastChecked(next);
+  };
   const showToast = useCallback(
     (message: string, actions?: ToastAction[], options: ToastOptions = {}) => {
       const tone = options.tone ?? (FAILURE.test(message) ? 'error' : 'info');
       setToast({ id: Date.now(), message, actions, ...options, tone });
+      // Several screenshots: all checked to start with.
+      const all = new Set((options.images ?? []).map((_, index) => index));
+      toastCheckedRef.current = all;
+      setToastChecked(all);
       // Each popup starts on the window used last; a choice holds for that popup only.
       setSendWindow(LAST_USED);
       sendWindowRef.current = LAST_USED;
@@ -340,7 +364,8 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     if (!toast || toast.held) return;
     const timer = setTimeout(
       () => setToast((t) => (t?.id === toast.id ? null : t)),
-      toast.actions ? 12_000 : 3500,
+      // Choices and errors are read, not glanced at.
+      toast.actions ? 12_000 : toast.tone === 'error' ? 8000 : 3500,
     );
     return () => clearTimeout(timer);
   }, [toast]);
@@ -367,12 +392,19 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
         label: string;
         capture?: string;
         kind?: CaptureKind;
+        /** Captures already in Agent Context, sent together in one send. */
+        captures?: string[];
       },
-      /** The window picked where the send starts (the console panel); else the popup's choice. */
-      picked?: string,
+      /**
+       * The window picked where the send starts: the popup's choice (read when its button is
+       * pressed), the console panel's; else the window used last.
+       */
+      picked: string = LAST_USED,
     ) => {
-      // Read when sending: the popup's actions were made before a window was picked.
-      const vscodeWindow = windowOf(picked ?? sendWindowRef.current);
+      const vscodeWindow = windowOf(picked);
+      // The popup showing when the send started: a newer one (another capture, waiting for a
+      // choice) must not be replaced by this send's result.
+      const started = toastRef.current?.id;
       const reply = await toBackground({
         type: 'send',
         target,
@@ -380,12 +412,14 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
         window: vscodeWindow,
         ...payload,
       });
+      const newer = toastRef.current;
+      if (reply.ok && newer && newer.id !== started && newer.actions) return;
       if (!reply.ok) showToast(reply.error, undefined, { tone: 'error' });
       else if (target === 'save')
         showToast('Saved to VS Code', undefined, { tone: 'success', detail: reply.path });
       else if (target === 'terminal')
         showToast('Sent to the terminal agent', undefined, { tone: 'success', detail: reply.path });
-      else showToast('Sent to VS Code chat', undefined, { tone: 'success' });
+      else if (target === 'chat') showToast('Sent to VS Code chat', undefined, { tone: 'success' });
     },
     [showToast],
   );
@@ -397,23 +431,26 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
   const share = useCallback(
     (
       capture: string,
-      payload: { text?: string; image?: string; label: string; kind: CaptureKind },
+      payload: { text?: string; image?: string; label: string; kind: CaptureKind; group?: string },
+      /** The VS Code window (the popup's choice when sending); the one used last if unset. */
+      window?: string,
     ) => {
-      if (!linked) return;
-      void toBackground({
+      if (!linked) return Promise.resolve();
+      return toBackground({
         type: 'send',
         target: 'context',
         pageUrl: location.href,
+        window,
         capture,
         ...payload,
-      });
+      }).then(() => undefined);
     },
     [linked],
   );
 
   const copy = useCallback(
     async (text: string, what: string, kind: CaptureKind = 'text') => {
-      share(crypto.randomUUID(), { text, label: what, kind });
+      void share(crypto.randomUUID(), { text, label: what, kind });
       const ok = await copyText(text);
       showToast(ok ? `${what} copied` : `Could not copy ${what.toLowerCase()}`, undefined, {
         tone: ok ? 'success' : 'error',
@@ -434,27 +471,61 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       const many = list.length > 1;
       const labelOf = (index: number) => (many ? `${label} ${index + 1} of ${list.length}` : label);
       const captures = list.map(() => crypto.randomUUID());
-      list.forEach((image, index) =>
-        share(captures[index]!, { image, label: labelOf(index), kind: 'screenshot' }),
+      // Taken together: one group in VS Code's Agent Context, sent together.
+      const group = many ? crypto.randomUUID() : undefined;
+      list.forEach(
+        (image, index) =>
+          void share(captures[index]!, { image, label: labelOf(index), kind: 'screenshot', group }),
       );
       const copied = await copyImage(list[0]!);
+      // The screenshots checked in the popup (all, unless some were unchecked).
+      const picked = () =>
+        list.map((_, index) => index).filter((i) => toastCheckedRef.current.has(i));
       const download = () => {
-        for (const dataUrl of list) {
+        for (const index of picked()) {
           void toBackground({
             type: 'download',
-            dataUrl,
+            dataUrl: list[index]!,
             filename: `Inkspect/${screenshotName()}`,
           });
         }
       };
       const sendAll = (target: SendTarget) => async () => {
-        for (const [index, image] of list.entries()) {
-          await send(target, {
-            image,
-            label: labelOf(index),
-            capture: captures[index],
-            kind: 'screenshot',
-          });
+        // The window picked in the popup, read as its button is pressed (it closes then).
+        const chosen = sendWindowRef.current;
+        const indexes = picked();
+        if (many && (target === 'chat' || target === 'terminal') && indexes.length) {
+          // In the chosen window's Agent Context first (the automatic share went to the window
+          // used last), then one send with all of them.
+          for (const index of indexes) {
+            await share(
+              captures[index]!,
+              { image: list[index], label: labelOf(index), kind: 'screenshot', group },
+              windowOf(chosen),
+            );
+          }
+          await send(
+            target,
+            {
+              label: `${indexes.length} screenshots`,
+              kind: 'screenshot',
+              captures: indexes.map((index) => captures[index]!),
+            },
+            chosen,
+          );
+          return;
+        }
+        for (const index of indexes) {
+          await send(
+            target,
+            {
+              image: list[index],
+              label: labelOf(index),
+              capture: captures[index],
+              kind: 'screenshot',
+            },
+            chosen,
+          );
         }
       };
       const actions: ToastAction[] = linked
@@ -462,24 +533,32 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
             {
               label: 'Send to terminal',
               icon: 'terminal',
+              shortcut: 'capture.terminal',
+              partial: (n) => `Send ${n} to terminal`,
               run: () => void sendAll('terminal')(),
               toVsCode: true,
             },
             {
               label: 'Send to chat',
               icon: 'comment-discussion',
+              shortcut: 'capture.chat',
+              partial: (n) => `Send ${n} to chat`,
               run: () => void sendAll('chat')(),
               toVsCode: true,
             },
             {
               label: many ? 'Save all' : 'Save',
               icon: 'save',
+              shortcut: 'capture.save',
+              partial: (n) => `Save ${n}`,
               run: () => void sendAll('save')(),
               toVsCode: true,
             },
             {
               label: many ? 'Download all' : 'Download',
               icon: 'desktop-download',
+              shortcut: 'capture.download',
+              partial: (n) => `Download ${n}`,
               run: download,
             },
           ]
@@ -487,6 +566,8 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
             {
               label: many ? 'Download all' : 'Download',
               icon: 'desktop-download',
+              shortcut: 'capture.download',
+              partial: (n) => `Download ${n}`,
               run: download,
             },
           ];
@@ -494,7 +575,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
         ? `${list.length} ${label.toLowerCase()} captured`
         : `${label} ${copied ? 'copied' : 'taken'}`;
       const detail = many
-        ? `${copied ? 'The first is copied. ' : ''}${linked ? 'Send them all to VS Code, or download them.' : 'Download them all to keep them.'}`
+        ? `${copied ? 'The first is copied. ' : ''}Uncheck any you don't want, then ${linked ? 'send them to VS Code or download them' : 'download them'}.`
         : linked
           ? 'Paste it anywhere, or send it to VS Code.'
           : copied
@@ -548,22 +629,79 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     [hideUi],
   );
 
+  // The bar over a Shift+click selection: every choice acts on all the selected elements.
+  const onSelectionAction = async (action: SelectionAction) => {
+    const list = selection;
+    setSelection([]);
+    if (action === 'clear') return;
+    if (action === 'copy') await copyElements(list);
+    else if (action === 'screenshot') {
+      try {
+        const shots = [];
+        for (const el of list) shots.push((await captureElement(el)).dataUrl);
+        await deliver(shots, list.length === 1 ? 'Element screenshot' : 'Element screenshots');
+      } catch (error) {
+        showToast(`Screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    } else await copyElements(list, action);
+  };
+
+  // Copies the elements' details, or with `target` sends them to that agent (or saves them).
   const copyElements = useCallback(
-    async (elements: Element[], chat = false) => {
+    async (elements: Element[], target?: 'chat' | 'terminal' | 'save') => {
       const s = settings.current ?? (await loadSettings());
       const details = await Promise.all(elements.map(detailsOf));
-      if (chat) {
-        await send('chat', {
-          text: formatDetails(details, 'markdown', s.fields),
-          label: 'Element details',
+      const one = details.length === 1;
+      const what = one ? elementLabel(details[0]!) : `${details.length} elements`;
+      const markdown = formatDetails(details, 'markdown', s.fields);
+      // In VS Code's Agent Context, one item per element; several share a group (one card, a
+      // checkbox each, sent together).
+      const group = one ? undefined : crypto.randomUUID();
+      const captures = details.map(() => crypto.randomUUID());
+      const shareEach = (vscodeWindow?: string) =>
+        Promise.all(
+          details.map((d, index) =>
+            share(
+              captures[index]!,
+              {
+                text: one ? markdown : formatDetails([d], 'markdown', s.fields),
+                label: `Element ${elementLabel(d)}`,
+                kind: 'element',
+                group,
+              },
+              vscodeWindow,
+            ),
+          ),
+        );
+      /** `chosen`: the window picked in the popup (else the one used last). */
+      const sendTo = async (to: 'chat' | 'terminal', chosen: string = LAST_USED) => {
+        if (one) {
+          await send(
+            to,
+            { text: markdown, label: `Element ${what}`, capture: captures[0], kind: 'element' },
+            chosen,
+          );
+          return;
+        }
+        // In the chosen window's list first (the automatic share went to the window used last),
+        // then one send with all of them.
+        await shareEach(windowOf(chosen));
+        await send(to, { label: what, kind: 'element', captures }, chosen);
+      };
+      if (target === 'save') {
+        await send('save', {
+          text: markdown,
+          label: one ? `Element ${what}` : what,
+          kind: 'element',
         });
         return;
       }
+      if (target) {
+        await sendTo(target);
+        return;
+      }
       const text = formatDetails(details, s.copyFormat, s.fields);
-      const what = details.length === 1 ? elementLabel(details[0]!) : `${details.length} elements`;
-      const capture = crypto.randomUUID();
-      const markdown = formatDetails(details, 'markdown', s.fields);
-      share(capture, { text: markdown, label: `Element ${what}`, kind: 'element' });
+      void shareEach();
       const ok = await copyText(text);
       showToast(
         ok ? `Copied details of ${what}` : 'Could not copy',
@@ -572,26 +710,16 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
               {
                 label: 'Send to chat',
                 icon: 'comment-discussion',
+                shortcut: 'capture.chat',
                 toVsCode: true,
-                run: () =>
-                  void send('chat', {
-                    text: markdown,
-                    label: `Element ${what}`,
-                    capture,
-                    kind: 'element',
-                  }),
+                run: () => void sendTo('chat', sendWindowRef.current),
               },
               {
                 label: 'Send to terminal',
                 icon: 'terminal',
+                shortcut: 'capture.terminal',
                 toVsCode: true,
-                run: () =>
-                  void send('terminal', {
-                    text: markdown,
-                    label: `Element ${what}`,
-                    capture,
-                    kind: 'element',
-                  }),
+                run: () => void sendTo('terminal', sendWindowRef.current),
               },
             ]
           : undefined,
@@ -627,7 +755,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
         }
         return;
       }
-      await copyElements([el], modifiers.chat);
+      await copyElements([el], modifiers.send);
     },
     [captureElement, copyElements, deliver, showToast, tool],
   );
@@ -832,13 +960,30 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
   const keyHandlers = useRef<Record<string, () => void>>({});
   useEffect(() => {
     const drawTools = Object.fromEntries(
-      Object.values(TOOL_KEYS).map((t) => [`draw.${t}`, () => setDrawTool(t)]),
+      DRAW_TOOLS.map((t) => [`draw.${t}`, () => setDrawTool(t)]),
     );
     const colors = Object.fromEntries(
       COLORS.slice(0, 9).map((color, i) => [`draw.color${i + 1}`, () => setDrawStyle({ color })]),
     );
     const width = styles[drawTool]?.width ?? DEFAULT_STYLE.width;
+    // The popup's buttons, by their shortcut (only while it shows one for that action).
+    // Only the popup's own buttons have keys (the others go to the page), and a button that
+    // is off (no screenshot checked) is off for its key too.
+    const images = toast?.images && toast.images.length > 1 ? toast.images.length : 0;
+    const toastKeys = Object.fromEntries(
+      (toast?.actions ?? [])
+        .filter((action) => action.shortcut)
+        .map((action) => [
+          action.shortcut!,
+          () => {
+            if (action.partial && images && !toastCheckedRef.current.size) return;
+            action.run();
+            setToast(null);
+          },
+        ]),
+    );
     keyHandlers.current = {
+      ...toastKeys,
       'mode.inspect': () => !viewing && toggleTool({ kind: 'inspect', purpose: 'copy' }),
       'mode.draw': () => !viewing && toggleTool({ kind: 'draw' }),
       'mode.screenshot': () =>
@@ -861,7 +1006,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       'draw.captureClean': () => void captureDrawing('clean'),
       'draw.captureViewport': () => void captureDrawing('viewport'),
       'draw.captureFullPage': () => void captureDrawing('fullPage'),
-      'draw.captureMenu': () => openMenuAt('.draw-capture', drawingItems(), null),
+      'draw.captureMenu': () => openMenuAt('.draw-capture', drawingItems(), 'draw'),
       'draw.exit': () => setTool(null),
       'shot.viewport': () => void screenshot('viewport'),
       'shot.fullPage': () => void screenshot('fullPage'),
@@ -870,6 +1015,18 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       'shot.drawing': () => void captureDrawing('area'),
     };
   });
+  // A panel closes when the toolbar is pressed outside it (its own button toggles it). The page
+  // stays usable next to it (picking, drawing, the page the console shows), and choosing from a
+  // panel's own lists (portaled) counts as inside.
+  useEffect(() => {
+    if (!panel) return;
+    return listenOutsidePress(
+      () => [dock.current],
+      pressedOpener(),
+      () => setPanel(null),
+      (event) => !bar.current || !event.composedPath().includes(bar.current) || isInPopup(event),
+    );
+  }, [panel]);
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -894,13 +1051,15 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
         return;
       }
       // An open menu takes its own scope's keys (the Screenshot menu's letters) or none.
+      // The popup after a capture takes its keys (capture.*) while it shows.
+      const capture: ShortcutScope[] = toast?.actions ? ['capture'] : [];
       const scopes: ShortcutScope[] = menu
         ? menuScope
           ? [menuScope]
           : []
         : tool?.kind === 'draw'
-          ? ['draw', 'global']
-          : ['global'];
+          ? [...capture, 'draw', 'global']
+          : [...capture, 'global'];
       const action = actionForChord(shortcuts.map, scopes, chordFromEvent(event));
       const run = action && TOOLBAR_IDS.has(action.id) && keyHandlers.current[action.id];
       if (!run) return;
@@ -911,8 +1070,12 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [open, tool, panel, menu, menuScope, shortcuts.map, host]);
+  }, [open, tool, panel, menu, menuScope, shortcuts.map, host, toast]);
   if (!open) return null;
+  const toastKeys = actionKeys(toast?.actions ?? [], shortcuts.map);
+  // Several screenshots: how many are checked ("Send 2 to chat").
+  const imageCount = toast?.images && toast.images.length > 1 ? toast.images.length : 0;
+  const pickedCount = imageCount ? toastChecked.size : 0;
 
   const mapper: DrawMapper = { scale: 1, scroll, bounds: { left: 0, top: 0, ...size } };
   const style = styles[drawTool] ?? DEFAULT_STYLE;
@@ -937,6 +1100,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       {tool?.kind === 'inspect' && (
         <Inspector
           host={host}
+          map={shortcuts.map}
           purpose={tool.purpose}
           selection={selection}
           onPick={(el, modifiers) => void onPick(el, modifiers)}
@@ -952,6 +1116,15 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           actionOf={(event) =>
             actionForChord(shortcuts.map, ['inspect'], chordFromEvent(event))?.id
           }
+        />
+      )}
+      {tool?.kind === 'inspect' && selection.length > 0 && (
+        <SelectionBar
+          className="toolbar-selection-bar"
+          count={selection.length}
+          map={shortcuts.map}
+          canSend={linked}
+          onAction={(action) => void onSelectionAction(action)}
         />
       )}
       {tool?.kind === 'region' && (
@@ -1069,7 +1242,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           />
           <IconButton
             icon="close"
-            label="Close toolbar (Alt+Shift+I)"
+            label="Close toolbar"
             onClick={() => {
               closeResponsive();
               setTool(null);
@@ -1096,14 +1269,15 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
             onToggleVisible={() => setDrawingVisible((v) => !v)}
             onCapture={(x, y) => {
               setMenu({ x, y, items: drawingItems() });
-              setMenuScope(null);
+              // Its items' keys (Alt+G...) work while it is open.
+              setMenuScope('draw');
             }}
             onClose={() => setTool(null)}
           />
         )}
       </div>
       {panel && (
-        <div className="panel-dock" style={{ top: barHeight + 8 }}>
+        <div className="panel-dock" ref={dock} style={{ top: barHeight + 8 }}>
           {panel === 'emulation' && (
             <EmulationPanel
               onClose={() => setPanel(null)}
@@ -1143,20 +1317,22 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           role={toast.tone === 'error' ? 'alert' : 'status'}
           onPointerEnter={() => setToast((t) => (t?.id === toast.id ? { ...t, held: true } : t))}
           onPointerLeave={() => setToast((t) => (t?.id === toast.id ? { ...t, held: false } : t))}
+          // Working it from the keyboard holds it too.
+          onFocus={() => setToast((t) => (t?.id === toast.id ? { ...t, held: true } : t))}
+          onBlur={(event) => {
+            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+            setToast((t) => (t?.id === toast.id ? { ...t, held: false } : t));
+          }}
         >
           <div className="toast-top">
-            {toast.images?.length ? (
-              <div
-                className={`toast-thumbs${toast.images.length > 1 ? ' many' : ''}`}
-                aria-hidden="true"
-              >
-                {toast.images.slice(0, 3).map((image, index) => (
-                  <img key={index} className="toast-thumb" src={image} alt="" />
-                ))}
-                {toast.images.length > 1 && (
-                  <span className="toast-count">{toast.images.length}</span>
-                )}
+            {toast.images?.length === 1 ? (
+              <div className="toast-thumbs" aria-hidden="true">
+                <img className="toast-thumb" src={toast.images[0]} alt="" />
               </div>
+            ) : toast.images?.length ? (
+              <span className="toast-icon toast-count-icon" aria-hidden="true">
+                {toast.images.length}
+              </span>
             ) : (
               toast.tone !== 'info' && (
                 <span
@@ -1167,7 +1343,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
             )}
             <div className="toast-body">
               <div className="toast-title">
-                {toast.images?.length && (
+                {toast.images?.length === 1 && (
                   <span className="toast-check codicon codicon-pass-filled" aria-hidden="true" />
                 )}
                 {toast.message}
@@ -1181,6 +1357,26 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
               onClick={() => setToast(null)}
             />
           </div>
+          {toast.images && toast.images.length > 1 && (
+            <ThumbPicker
+              className="toast-picker"
+              items={toast.images.map((src, index) => ({
+                id: String(index),
+                src,
+                label: `Screenshot ${index + 1} of ${toast.images!.length}`,
+              }))}
+              checked={new Set([...toastChecked].map(String))}
+              onToggle={(id) => {
+                const next = new Set(toastChecked);
+                const index = Number(id);
+                if (next.has(index)) next.delete(index);
+                else next.add(index);
+                setChecked(next);
+                // A choice was made: keep the popup until it is used.
+                setToast((t) => (t?.id === toast.id ? { ...t, held: true } : t));
+              }}
+            />
+          )}
           {toast.actions && (
             <div className="toast-bottom">
               {windows.length > 1 && toast.actions.some((action) => action.toVsCode) && (
@@ -1200,6 +1396,18 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
                 </div>
               )}
               <div className="toast-actions">
+                {toastKeys.prefix.length > 0 && (
+                  <span className="toast-keys" title="Hold these, then press a button's key">
+                    <span className="keycaps size-sm">
+                      {toastKeys.prefix.map((cap) => (
+                        <kbd key={cap} className="keycap">
+                          {cap}
+                        </kbd>
+                      ))}
+                    </span>
+                    +
+                  </span>
+                )}
                 {toast.actions.map((action, index) => (
                   <Button
                     key={action.label}
@@ -1213,12 +1421,26 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
                     }
                     className={action.toVsCode ? undefined : 'toast-local'}
                     icon={action.icon}
+                    title={toastKeys.titles[index]}
+                    aria-keyshortcuts={toastKeys.aria[index]}
+                    disabled={!!action.partial && imageCount > 0 && pickedCount === 0}
                     onClick={() => {
                       action.run();
                       setToast(null);
                     }}
                   >
-                    {action.label}
+                    {action.partial && pickedCount < imageCount
+                      ? action.partial(pickedCount)
+                      : action.label}
+                    {toastKeys.caps[index]!.length > 0 && (
+                      <span className="keycaps size-sm">
+                        {toastKeys.caps[index]!.map((cap) => (
+                          <kbd key={cap} className="keycap">
+                            {cap}
+                          </kbd>
+                        ))}
+                      </span>
+                    )}
                   </Button>
                 ))}
               </div>
@@ -1228,6 +1450,37 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       )}
     </div>
   );
+}
+
+/**
+ * The popup buttons' keys as caps. When every key shares its modifiers (Alt+Shift by default),
+ * those show once before the buttons ("Alt Shift +") and each button shows only its key.
+ */
+function actionKeys(actions: readonly ToastAction[], map: ShortcutMap) {
+  const bindings = actions.map((a) => (a.shortcut ? map[a.shortcut]?.[0] : undefined));
+  const full = bindings.map((b) => (b ? keyParts(b, isMac) : []));
+  const bound = full.filter((parts) => parts.length > 0);
+  const first = bound[0];
+  const shared = first && first.length > 1 && bound.length > 1 ? first.slice(0, -1) : [];
+  const prefix = bound.every(
+    (parts) => parts.length === shared.length + 1 && parts.slice(0, -1).join() === shared.join(),
+  )
+    ? shared
+    : [];
+  return {
+    prefix,
+    caps: full.map((parts) => parts.slice(prefix.length)),
+    titles: bindings.map((b, i) =>
+      b ? `${actions[i]!.label} (${formatKey(b, isMac)})` : undefined,
+    ),
+    // aria-keyshortcuts wants "Alt+Shift+C".
+    aria: bindings.map((b) =>
+      b
+        ?.split('+')
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join('+'),
+    ),
+  };
 }
 
 /** Drag a rectangle over the page; Enter or releasing the mouse captures it. */

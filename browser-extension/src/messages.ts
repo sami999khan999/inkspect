@@ -56,6 +56,10 @@ export type ToBackground =
       /** The capture it comes from (sends of one capture share one Agent Context item). */
       capture?: string;
       kind?: CaptureKind;
+      /** Captures made together: one group in Agent Context. */
+      group?: string;
+      /** Captures already shared as context, sent together in one send. */
+      captures?: string[];
     }
   | { type: 'openOptions' }
   | { type: 'pair'; code: string };
@@ -64,7 +68,15 @@ export type BackgroundReply =
   | { ok: true; dataUrl?: string; path?: string; bookmarked?: boolean; status?: BridgeStatus }
   | { ok: false; error: string };
 
-export type ToContent = { type: 'toggle' } | { type: 'bridgeStatus'; status: BridgeStatus };
+export type ToContent =
+  /** Opens or closes the toolbar. `key`: pressed with the browser's shortcut (see content/index.tsx). */
+  { type: 'toggle'; key?: string } | { type: 'bridgeStatus'; status: BridgeStatus };
+
+/** To the extension's own pages: the toolbar's browser shortcut was pressed there. */
+export interface ShortcutPressed {
+  type: 'shortcutPressed';
+  key: string;
+}
 
 /** Requests from the content script to its page's MAIN-world helper. */
 export type PageRequest =

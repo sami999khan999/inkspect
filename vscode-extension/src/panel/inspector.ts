@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
@@ -10,13 +11,18 @@ import {
   localWorkspaceFolder,
   saveScreenshot,
 } from '../features/screenshots';
-import { captureAndSend, rememberPick } from '../agent/chat';
+import { captureAndSend, rememberPick, sendContextItems } from '../agent/chat';
+import { saveContext } from '../features/context';
+import { CHAT_TARGET } from '../features/terminalSend';
 import { addContext, type ContextInput } from '../agent/contextTray';
 import { normalizeSourcePath } from '../features/sourcePaths';
 import { elementLabel, formatDetails, type ElementDetails } from '../shared/elementInfo';
 import type { HostToWebview, InspectPurpose, Rect } from '../shared/protocol';
 
 type Details = ElementDetails & { ancestry: string[]; scroll: { x: number; y: number } };
+
+/** Where picked elements go instead of the clipboard. */
+type SendTo = 'agent' | 'chat' | 'terminal' | 'save';
 
 interface InspectorDeps {
   post: (message: HostToWebview) => void;
@@ -83,7 +89,7 @@ export class Inspector {
       purpose: InspectPurpose;
       add: boolean;
       screenshot: boolean;
-      chat?: boolean;
+      send?: 'chat' | 'terminal';
       url: string;
     },
   ): Promise<void> {
@@ -124,24 +130,26 @@ export class Inspector {
       await session.highlight(node).catch(() => {});
     }
     if (options.add) {
+      // The screenshot of an Alt+Shift+click is saved and copied already; it must not be
+      // attached to whatever is copied next.
+      this.pendingImage = undefined;
       if (!this.selection.some((s) => s.nodeId === node))
         this.selection.push({ nodeId: node, details });
       this.postSelection();
-      this.deps.toast(`${this.selection.length} selected. Press Enter to copy all, Esc to cancel.`);
       return;
     }
-    await this.copy([details], options.chat);
+    await this.copy([details], options.send);
   }
 
   /**
    * Enter: copies the multi-selection, or the element reached with the pointer or arrow keys.
-   * With `toAgent`, sends it to the agent instead.
+   * With `send`, sends it instead (`agent`: the default agent, as the A key does).
    */
-  async copySelection(session: TabSession, toAgent = false): Promise<void> {
+  async copySelection(session: TabSession, send?: SendTo): Promise<void> {
     if (this.selection.length) {
       await this.copy(
         this.selection.map((s) => s.details),
-        toAgent,
+        send,
       );
       this.selection = [];
       this.postSelection();
@@ -152,7 +160,60 @@ export class Inspector {
     const details = await session.elementDetails(node, getConfig().inspectorMaxHtml);
     if (!details) return;
     workspaceComponentPath(details);
-    await this.copy([details], toAgent);
+    await this.copy([details], send);
+  }
+
+  /**
+   * The bar over the multi-selection: copy, send to the chat or a terminal agent, save the
+   * details, or screenshot every selected element. The selection ends with any of them.
+   */
+  async selectionAction(
+    session: TabSession,
+    action: 'copy' | 'chat' | 'terminal' | 'screenshot' | 'save' | 'clear',
+    url: string,
+  ): Promise<void> {
+    const selected = this.selection;
+    this.selection = [];
+    this.pendingImage = undefined;
+    this.postSelection();
+    if (!selected.length || action === 'clear') return;
+    if (action === 'screenshot') {
+      const format = getConfig().screenshotFormat;
+      // Every screenshot first: an element that can't be captured (gone from the page) is left
+      // out, and the group is what was captured.
+      const shots: { bytes: Uint8Array; details: Details }[] = [];
+      for (const { nodeId, details } of selected) {
+        try {
+          shots.push({
+            bytes: await session.screenshot('element', { format, backendNodeId: nodeId }),
+            details,
+          });
+        } catch (error) {
+          this.deps.logger.warn(`Element screenshot failed: ${String(error)}`);
+        }
+      }
+      if (shots.length < selected.length) {
+        this.deps.toast(`${selected.length - shots.length} of the elements could not be captured.`);
+      }
+      // One group in Agent Context, sent or offered together.
+      const group = shots.length > 1 ? randomUUID() : undefined;
+      for (const [index, { bytes, details }] of shots.entries()) {
+        await deliverScreenshot({
+          bytes,
+          url,
+          format,
+          globalStorage: this.deps.globalStorage,
+          copyImage: this.deps.copyImage,
+          label: `Element ${elementLabel(details)}`,
+          group: group && { id: group, index, count: shots.length },
+        });
+      }
+      return;
+    }
+    await this.copy(
+      selected.map((s) => s.details),
+      action === 'copy' ? undefined : action,
+    );
   }
 
   /** S in the picker: a screenshot of the element under the pointer (or reached with arrows). */
@@ -177,6 +238,7 @@ export class Inspector {
   async stop(session?: TabSession): Promise<void> {
     await session?.stopInspect();
     this.current = undefined;
+    this.pendingImage = undefined;
     this.selection = [];
     if (this.tabId) this.postSelection();
   }
@@ -188,26 +250,42 @@ export class Inspector {
     this.selection = [];
   }
 
-  private async copy(elements: Details[], chat = false): Promise<void> {
+  /** Copies the details, or sends them (`send`) to an agent, or saves them in the workspace. */
+  private async copy(elements: Details[], send?: SendTo): Promise<void> {
     const config = getConfig();
     const markdown = formatDetails(elements, 'markdown', config.inspectorFields);
     rememberPick(markdown);
     const image = this.pendingImage;
     this.pendingImage = undefined;
     const first = elements[0]!;
-    const context: ContextInput = {
+    const title = elements.length === 1 ? elementLabel(first) : `${elements.length} elements`;
+    // One item per element; several share a group (one card, a checkbox each, sent together).
+    const group = elements.length > 1 ? randomUUID() : undefined;
+    const inputs: ContextInput[] = elements.map((element) => ({
       kind: 'element',
-      title: elements.length === 1 ? elementLabel(first) : `${elements.length} elements`,
-      detail: first.component?.name ?? pageHost(first.pageUrl),
-      text: markdown,
-      image: image && { bytes: image.bytes, mimeType: image.mimeType },
-      file: image?.path,
-      url: first.pageUrl,
-    };
-    if (chat) {
-      await captureAndSend(context);
+      title: elementLabel(element),
+      // The component only when it is the user's code (it has a source file), not a
+      // framework's internals (Next.js' SegmentViewNode); else the page.
+      detail: element.component?.file ? element.component.name : pageHost(element.pageUrl),
+      text: group ? formatDetails([element], 'markdown', config.inspectorFields) : markdown,
+      // An Alt+click screenshot belongs to a single pick.
+      image: !group && image ? { bytes: image.bytes, mimeType: image.mimeType } : undefined,
+      file: group ? undefined : image?.path,
+      url: element.pageUrl,
+      group,
+    }));
+    if (send === 'save') {
+      for (const input of inputs) addContext(input);
+      const path = await saveContext(markdown, title, this.deps.globalStorage);
+      this.deps.toast(`Saved ${title} to ${displayPath(path)}`);
+    } else if (send) {
+      // The chat agent, a terminal agent, or (the A key) the agent used by default.
+      const target = send === 'chat' ? CHAT_TARGET : send === 'terminal' ? 'terminal' : undefined;
+      const items = inputs.flatMap((input) => addContext(input) ?? []);
+      if (items.length) await sendContextItems(items, target);
+      else await captureAndSend({ ...inputs[0]!, title, text: markdown }, target);
     } else {
-      addContext(context);
+      for (const input of inputs) addContext(input);
       const text = formatDetails(elements, config.inspectorCopyFormat, config.inspectorFields);
       await copyText(text);
       this.deps.toast(

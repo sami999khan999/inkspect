@@ -1,6 +1,6 @@
 # Test at any resolution
 
-**Ctrl+Shift+M** opens the device toolbar. It offers:
+**Alt+Shift+M** opens the device toolbar. It offers:
 
 - phone, tablet and desktop presets, or any custom width × height
 - pixel ratio, rotation and touch emulation

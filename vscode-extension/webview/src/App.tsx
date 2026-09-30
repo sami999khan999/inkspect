@@ -30,11 +30,13 @@ import { BookmarkEditor } from './components/BookmarkEditor';
 import { DevDrawer } from './components/DevDrawer';
 import { DeviceToolbar } from './components/DeviceToolbar';
 import { DialogOverlay } from './components/DialogOverlay';
+import { IconButton } from './components/IconButton';
 import { CrashedOverlay, EngineOverlay } from './components/EngineOverlay';
 import { FindBar } from './components/FindBar';
 import { InspectOverlay } from './components/InspectOverlay';
 import { RegionSelect } from './components/RegionSelect';
 import { Menu, type MenuItem, type MenuState } from './components/Menu';
+import { listenOutsidePress, pressedOpener } from '@inkspect/shared/ui/popover';
 import { TabStrip } from './components/TabStrip';
 import { Toolbar } from './components/Toolbar';
 import { Viewport, type ViewportMapper, type ViewportMode } from './components/Viewport';
@@ -66,6 +68,11 @@ import { SettingsPage } from './pages/SettingsPage';
 import { onHostMessage, postToHost, saveWebviewState } from './vscode';
 
 const TOAST_MS = 2_500;
+/** Errors stay longer: they are read, not glanced at (and they can be dismissed). */
+const ERROR_TOAST_MS = 8_000;
+/** Messages about a failure (the host's and the webview's), shown as errors. */
+const FAILURE =
+  /\b(failed|could not|can't|cannot|did not|didn't|nothing was|not linked|not running|error)\b/i;
 
 /** A tool that takes over the pointer on the page. */
 type Tool =
@@ -205,7 +212,7 @@ export function App() {
     index: number;
     count: number;
   } | null>(null);
-  const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
+  const [toast, setToast] = useState<{ id: number; message: string; error: boolean } | null>(null);
   const [omniboxFocus, setOmniboxFocus] = useState(0);
   const [viewportFocus, setViewportFocus] = useState(0);
   const contextPoint = useRef({ x: 0, y: 0 });
@@ -214,7 +221,10 @@ export function App() {
 
   const activeTab = windowState.tabs.find((tab) => tab.id === windowState.activeTabId);
 
-  const showToast = useCallback((message: string) => setToast({ id: Date.now(), message }), []);
+  const showToast = useCallback(
+    (message: string) => setToast({ id: Date.now(), message, error: FAILURE.test(message) }),
+    [],
+  );
   const openMenu = useCallback((x: number, y: number, items: MenuItem[]) => {
     setMenuScope(null);
     setMenu(items.length ? { x, y, items } : null);
@@ -298,23 +308,39 @@ export function App() {
         return;
       }
       const groups = mode === 'groups' ? clusterShapes(shapes, 80) : [shapes];
-      for (const [index, group] of groups.entries()) {
+      // Every screenshot first, then all of them: a group is only as big as what was captured
+      // (one that fails ends it, with what came before still delivered and offered).
+      const images: string[] = [];
+      for (const group of groups) {
         const area = mode === 'viewport' ? 'viewport' : mode === 'fullPage' ? 'fullPage' : 'region';
         const rect = area === 'region' ? union(group.map(shapeBounds)) : undefined;
         const image = await requestCapture(tabId, area, rect);
         if (image.error || !image.data || !image.rect) {
           showToast(`Screenshot failed: ${image.error ?? 'no image'}`);
-          return;
+          break;
         }
-        const base64 = await compositeScreenshot(
-          image.data,
-          image.mimeType ?? 'image/png',
-          image.rect,
-          mode === 'clean' ? [] : group,
+        images.push(
+          await compositeScreenshot(
+            image.data,
+            image.mimeType ?? 'image/png',
+            image.rect,
+            mode === 'clean' ? [] : group,
+          ),
         );
+      }
+      // Several screenshots at once: one group in Agent Context, sent together.
+      const groupId = images.length > 1 ? crypto.randomUUID() : undefined;
+      for (const [index, base64] of images.entries()) {
         const label =
-          groups.length > 1 ? `Drawing ${index + 1} of ${groups.length}` : CAPTURE_LABELS[mode];
-        postToHost({ type: 'saveImage', tabId, base64, label, toAgent });
+          groups.length > 1 ? `Drawing ${index + 1} of ${images.length}` : CAPTURE_LABELS[mode];
+        postToHost({
+          type: 'saveImage',
+          tabId,
+          base64,
+          label,
+          toAgent,
+          group: groupId && { id: groupId, index, count: images.length },
+        });
       }
     },
     [requestCapture, showToast],
@@ -574,7 +600,7 @@ export function App() {
 
   useEffect(() => {
     if (!toast) return;
-    const timer = setTimeout(() => setToast(null), TOAST_MS);
+    const timer = setTimeout(() => setToast(null), toast.error ? ERROR_TOAST_MS : TOAST_MS);
     return () => clearTimeout(timer);
   }, [toast]);
 
@@ -896,6 +922,9 @@ export function App() {
                           mapper={mapper}
                           purpose={tool.purpose}
                           selection={inspectSelection}
+                          onSelectionAction={(action) =>
+                            postToHost({ type: 'selectionAction', tabId: activeTab.id, action })
+                          }
                         />
                       )}
                       {overlay && (
@@ -1053,8 +1082,21 @@ export function App() {
         <QuickActions scope={helpScope} run={runAction} onClose={() => setQuickOpen(false)} />
       )}
       {toast && (
-        <div key={toast.id} className="toast" role="status">
-          {toast.message}
+        <div
+          key={toast.id}
+          className={`toast${toast.error ? ' error' : ''}`}
+          role={toast.error ? 'alert' : 'status'}
+        >
+          {toast.error && <span className="codicon codicon-error" aria-hidden="true" />}
+          <span className="toast-message">{toast.message}</span>
+          {toast.error && (
+            <IconButton
+              icon="close"
+              label="Dismiss"
+              className="small toast-dismiss"
+              onClick={() => setToast(null)}
+            />
+          )}
         </div>
       )}
     </div>
@@ -1070,20 +1112,23 @@ function ExtensionPopup({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // The extension's button: pressing it again closes the popup (see listenOutsidePress).
+  const [opener] = useState(pressedOpener);
   useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node)) onClose();
-    };
+    const stopPointer = listenOutsidePress(
+      () => [ref.current],
+      opener,
+      () => onClose(),
+    );
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
-    window.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('keydown', onKeyDown, true);
     return () => {
-      window.removeEventListener('pointerdown', onPointerDown, true);
+      stopPointer();
       window.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [onClose]);
+  }, [onClose, opener]);
   const tab: TabState = {
     id: popup.tabId,
     url: '',

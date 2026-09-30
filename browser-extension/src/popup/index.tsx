@@ -55,7 +55,8 @@ function Popup() {
     const stop = watchShortcuts((next) => setMap(next));
     void chrome.commands
       .getAll()
-      .then((all) => setToolbarKey(all.find((c) => c.name === 'toggle-toolbar')?.shortcut));
+      // '' when the browser didn't assign the suggested key (it was taken) or the user cleared it.
+      .then((all) => setToolbarKey(all.find((c) => c.name === 'toggle-toolbar')?.shortcut ?? ''));
     return () => {
       clearInterval(timer);
       stop();
@@ -84,17 +85,22 @@ function Popup() {
       </header>
 
       <section className="popup-link" aria-label="VS Code">
-        <LinkGraph status={status} size="sm" limit={3} />
+        <LinkGraph status={status} size="sm" />
         {!linked && (
           <div className="popup-unlinked">
             <p>
-              {status.state === 'unpaired'
-                ? 'VS Code is running. Pair once to send captures to it.'
-                : 'Start VS Code with VS Code Browser to link it.'}
+              {status.state === 'unpaired' ? (
+                <>
+                  In VS Code, click <b>Pair Browser Extension</b> in the Browser side panel. No code
+                  needed.
+                </>
+              ) : (
+                'Start VS Code with VS Code Browser to link it.'
+              )}
             </p>
             {status.state === 'unpaired' && (
-              <Button size="sm" icon="link" onClick={() => openPage('vscode')}>
-                Pair
+              <Button size="sm" variant="ghost" icon="key" onClick={() => openPage('vscode-code')}>
+                Use a code
               </Button>
             )}
           </div>
@@ -106,6 +112,21 @@ function Popup() {
           <span className="open-label">Open toolbar on this page</span>
           {toolbarKey && <KeyCaps binding={toolbarKey.toLowerCase()} size="sm" />}
         </Button>
+        {toolbarKey === '' && (
+          <p className="popup-hint">
+            <span className="codicon codicon-keyboard" aria-hidden="true" />
+            <span>No shortcut is set for this.</span>
+            {__BROWSER__ === 'chrome' && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' })}
+              >
+                Set one
+              </Button>
+            )}
+          </p>
+        )}
         {failed && (
           <p className="popup-error" role="alert">
             <span className="codicon codicon-error" aria-hidden="true" />

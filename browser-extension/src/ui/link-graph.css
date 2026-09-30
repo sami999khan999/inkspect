@@ -7,14 +7,16 @@
   --node: 44px;
   --stem: 32px;
   --stroke: 2px;
+  --row-pad: 5px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   min-width: 0;
 }
 
 .link-graph.size-sm {
   --node: 30px;
   --stem: 18px;
+  --row-pad: 3px;
 }
 
 .link-graph.state-unpaired {
@@ -51,9 +53,11 @@
   font-size: 15px !important;
 }
 
-/* The source's stem into the branches. */
+/* The source sits level with the first branch; its stem runs straight into it (the border is
+   outside the pseudo-element's box, so it starts one pixel further out to meet the bus). */
 .graph-node.source {
   position: relative;
+  margin-top: var(--row-pad);
   margin-right: var(--stem);
 }
 
@@ -61,7 +65,7 @@
   content: '';
   position: absolute;
   top: calc(50% - var(--stroke) / 2);
-  left: 100%;
+  left: calc(100% + 1px);
   width: var(--stem);
   height: var(--stroke);
   background: var(--line);
@@ -91,13 +95,11 @@
   align-items: center;
   gap: 12px;
   min-width: 0;
-  padding: 5px 0 5px var(--stem);
+  padding: var(--row-pad) 0 var(--row-pad) var(--stem);
 }
 
 .size-sm .graph-target {
   gap: 9px;
-  padding-top: 3px;
-  padding-bottom: 3px;
 }
 
 /* The branch into this target, and the bus down to the next (rounded into the bus). */
@@ -138,8 +140,31 @@
   background: repeating-linear-gradient(90deg, var(--line) 0 5px, transparent 5px 9px);
 }
 
-/* Where sends go: lit. */
+/* Where sends go: lit, and so is the bus from the browser down to it. */
 .graph-target.lit::before {
+  z-index: 1;
+  background: var(--lit);
+}
+
+.graph-target::before,
+.graph-target::after,
+.graph-node {
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.graph-target.on-path::after {
+  background: var(--lit);
+}
+
+/* The lit row: the bus is lit down to its branch, and plain below it. */
+.graph-target.lit:not(:first-child)::after {
+  background: linear-gradient(var(--lit) 0 50%, var(--line) 50% 100%);
+}
+
+.graph-target.lit:last-child:not(:first-child)::after {
   background: var(--lit);
 }
 

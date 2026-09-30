@@ -19,7 +19,7 @@ describe('manifests', () => {
     const manifest = buildManifest(root, 'chrome', { version: '1.2.3' });
     expect(manifest.version).toBe('1.2.3');
     expect(manifest.background).toEqual({ service_worker: 'background.js' });
-    expect(manifest.commands['toggle-toolbar'].suggested_key.default).toBe('Alt+Shift+I');
+    expect(manifest.commands['toggle-toolbar'].suggested_key.default).toBe('Alt+Shift+K');
     expect(manifest.permissions).toEqual(
       expect.arrayContaining(['storage', 'bookmarks', 'activeTab', 'scripting', 'debugger']),
     );

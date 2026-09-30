@@ -374,7 +374,29 @@
 .toast-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+}
+
+/* The buttons' shared modifiers ("Alt Shift +"), then each button's own key after its label. */
+.toast-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-xs);
+}
+
+.toast-actions .button-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toast-actions .button.primary .keycap {
+  border-color: color-mix(in srgb, var(--vscode-button-foreground) 35%, transparent);
+  background: color-mix(in srgb, var(--vscode-button-foreground) 16%, transparent);
+  color: var(--vscode-button-foreground);
 }
 
 /* Download (stays in the browser): set apart at the end. */
@@ -604,18 +626,13 @@
 
 /* Element inspector (DevTools colors) ------------------------------------------------------- */
 
+/* The picker's hint (PickerHint, styled in @inkspect/shared/ui): centered at the bottom. */
 .inspect-hint {
   position: fixed;
   left: 50%;
   bottom: 16px;
+  max-width: calc(100vw - 32px);
   transform: translateX(-50%);
-  padding: 4px 10px;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.78);
-  color: #fff;
-  font-size: 12px;
-  white-space: nowrap;
-  pointer-events: none;
 }
 
 .hl {
@@ -970,4 +987,33 @@
 .shortcuts-sync .codicon {
   flex-shrink: 0;
   margin-top: 1px;
+}
+
+/* The bar over a Shift+click selection (SelectionBar), just above the picker's hint. */
+.toolbar-selection-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 92px;
+  transform: translateX(-50%);
+}
+
+/* Several screenshots: their count where a single one shows its thumbnail, and the picker. */
+.toast-count-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--ink-radius-pill);
+  background: var(--ink-accent);
+  color: var(--vscode-button-foreground);
+  font-size: var(--ink-font-xs);
+  font-weight: 700;
+}
+
+.toast-picker {
+  max-height: 188px;
+  overflow-y: auto;
+  padding: 0 16px 4px;
 }

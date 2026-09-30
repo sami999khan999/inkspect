@@ -43,6 +43,7 @@ interface DebugState {
     file?: string;
     url?: string;
     sentTo: string[];
+    group?: string;
   }[];
   agents: { id: string; kind: string; label: string }[];
 }
@@ -665,6 +666,56 @@ export async function run(): Promise<void> {
           await until('the text in the terminal', () => typed.join('').includes('Fix the header'));
           assert.ok(!typed.join('').includes('\r'), 'Enter was pressed');
 
+          // Screenshots taken together: one group in Agent Context, and one send with both.
+          const run = Date.now();
+          for (const n of [1, 2]) {
+            sendPaired({
+              type: 'send',
+              id: `g${n}`,
+              target: 'context',
+              image: png,
+              label: `Drawings ${n} of 2`,
+              capture: `group-${run}-${n}`,
+              group: `group-${run}`,
+              kind: 'screenshot',
+            });
+            assert.equal((await next('send.result')).ok, true);
+          }
+          const grouped = await waitFor('the grouped captures', (st) => {
+            const items = st.context.filter((c) => c.title.startsWith('Drawings ') && c.group);
+            return items.length === 2 ? items : undefined;
+          });
+          assert.equal(grouped[0]!.group, grouped[1]!.group);
+          typed.length = 0;
+          sendPaired({
+            type: 'send',
+            id: 'g3',
+            target: 'terminal',
+            label: '2 screenshots',
+            kind: 'screenshot',
+            captures: [`group-${run}-1`, `group-${run}-2`],
+          });
+          const together = await next('send.result');
+          assert.equal(together.ok, true, JSON.stringify(together));
+          // Both paths, pasted together (one after the other in the same send).
+          await until(
+            'both screenshots in the terminal',
+            () => (typed.join('').match(/\.png/g) ?? []).length >= 2,
+          );
+          const marked = await waitFor('both marked as sent', (st) => {
+            const items = st.context.filter((c) => c.group === grouped[0]!.group);
+            return items.every((c) => c.sentTo.length) ? items : undefined;
+          });
+          assert.equal(marked.length, 2);
+          // Captures not in this window's list are refused (the browser sends them again).
+          sendPaired({
+            type: 'send',
+            id: 'g4',
+            target: 'chat',
+            captures: ['not-here'],
+          });
+          assert.equal((await next('send.result')).ok, false);
+
           // A capture reaches the Agent Context list by itself ("context"), and a later send of
           // the same capture reuses that item instead of adding another.
           const capture = `cap-${Date.now()}`;
@@ -706,6 +757,61 @@ export async function run(): Promise<void> {
       } finally {
         socket.terminate();
         paired.terminate();
+      }
+    });
+
+    await test('a Pair click in VS Code pairs the waiting browser without a code', async () => {
+      const { port } = (await exec('vscodeBrowser.debug.bridge')) as { port: number };
+      const origin = 'chrome-extension://bcdefghijklmnopabcdefghijklmnopa';
+      const sockets: WebSocket[] = [];
+      /** A browser that was never paired: connects, says hello without a token, and waits. */
+      const waiting = async (id: string) => {
+        const socket = new WebSocket(`ws://127.0.0.1:${port}/bridge`, { origin });
+        sockets.push(socket);
+        const received: string[] = [];
+        socket.on('message', (data) => received.push(String(JSON.parse(String(data)).type)));
+        await new Promise((resolve) => socket.on('open', resolve));
+        const client = { id, browser: `Browser ${id}` };
+        socket.send(JSON.stringify({ v: 1, type: 'hello', client, token: '' }));
+        await until(`${id} to wait`, () => received.includes('error'));
+        return { socket, received };
+      };
+      try {
+        const run = Date.now();
+        // The click names the waiting browser: it gets a token and is linked at once.
+        const a = await waiting(`click-a-${run}`);
+        const { offers } = (await exec('vscodeBrowser.debug.bridge')) as { offers: string[] };
+        assert.ok(offers.includes(`click-a-${run}`), JSON.stringify(offers));
+        await exec('vscodeBrowser.debug.bridge', { approve: `click-a-${run}` });
+        await until('the token for the clicked browser', () => a.received.includes('paired'));
+        await until('the welcome', () => a.received.includes('welcome'));
+        const after = (await exec('vscodeBrowser.debug.bridge')) as { offers: string[] };
+        assert.ok(!after.offers.includes(`click-a-${run}`), 'the offer stayed after pairing');
+
+        // A click without a name never picks one of two waiting browsers...
+        const b = await waiting(`click-b-${run}`);
+        const c = await waiting(`click-c-${run}`);
+        await exec('vscodeBrowser.debug.bridge', { approve: true });
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        assert.ok(!b.received.includes('paired'), 'one of two waiting browsers was picked');
+        assert.ok(!c.received.includes('paired'), 'one of two waiting browsers was picked');
+        // ...and pairs the one left once the other goes away.
+        c.socket.terminate();
+        await until('the one left waiting to be paired', () => b.received.includes('paired'));
+
+        // A click before the browser shows up pairs it when it connects.
+        await exec('vscodeBrowser.debug.bridge', { approve: true });
+        const d = await waiting(`click-d-${run}`);
+        await until('the browser that came after the click to be paired', () =>
+          d.received.includes('paired'),
+        );
+
+        // Unlink drops linked browsers, and their tokens stop working.
+        const closed = new Promise<number>((resolve) => d.socket.on('close', resolve));
+        await exec('vscodeBrowser.bridge.forget', { confirm: false });
+        assert.equal(await closed, 4001);
+      } finally {
+        for (const socket of sockets) socket.terminate();
       }
     });
 

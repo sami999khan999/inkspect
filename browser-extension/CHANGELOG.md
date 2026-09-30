@@ -2,9 +2,33 @@
 
 ## Unreleased
 
+### Fixes
+
+- **New default keys that leave Chrome its own:** the toolbar's modes are Alt+Shift+letter (element picker Alt+Shift+E, draw W, screenshot G, console J, responsive view M), so DevTools keeps Ctrl+Shift+C, J, I and M. Keys you changed stay as they are.
+- **Shortcuts work on every keyboard layout** (the letter on the key, not its place), and AltGr typing never runs one.
+- **Reset all shortcuts and Unlink take a second click** ("Click again to …"): both reach VS Code.
+- **Errors stay 8 seconds**, and a popup worked from the keyboard stays until you leave it.
+- A window picked in a popup applies to that popup only; a late "Sent" message no longer replaces a newer capture's popup; the popup's keys only work for its own buttons, and not with nothing checked; the drawing Screenshot menu's keys work while it is open.
+- **Several picked elements are a group in VS Code:** each element is its own row in Agent Context, with a checkbox; sending them goes in one send.
+- Several elements sent to VS Code are titled "4 elements", not "Element 4 elements".
+- **Several screenshots at once:** the popup shows each with a checkbox; the buttons act on the checked ones ("Send 2 to chat", "Download 2"). Sent to VS Code, they are one group in Agent Context and go to the agent in one send.
+- **A tidier picker hint:** two rows, mouse actions then keys, with the selection bar just above it.
+- **Pick the agent with the click:** in the element picker, Ctrl+click sends the element to the chat agent and Ctrl+Shift+click to a terminal agent (Cmd on macOS). The hint says so.
+- **A bar for Shift+click selections:** "2 selected" with Copy details (Enter), Chat agent, Terminal agent, Screenshot (each element), Save (the details, in the workspace) and ×, all acting on every selected element. Sending needs the link to VS Code; without it the bar offers Copy details and Screenshot.
+- **"Send to chat" goes to the chat.** It used to go to VS Code's default agent, which could be a terminal agent; "Send to terminal" is there for that.
+- **A clearer element-picker hint,** in plain words: "Click an element to copy its details · Ctrl + click chat agent · Ctrl Shift + click terminal agent · Shift + click select several · Alt + click screenshot it │ ↑ ↓ parent / child · Enter copy selected · Esc stop", with key caps, in your own keys when you remap them. Shared with VS Code Browser.
+- **The popup after a capture has keys:** Alt+Shift+X send to the terminal, Alt+Shift+C send to chat, Alt+Shift+S save in VS Code, Alt+Shift+D download. The popup shows them (Alt Shift + once, then each button's letter); change them in Shortcuts ("After a capture").
+- **Popups behave like popups:** in the toolbar, a press anywhere else on the bar closes an open panel (console, shortcuts, VS Code link, emulation), and a panel's or menu's own button now closes it instead of closing and reopening it.
+- **Pencil (I), brush (U), neon (G) and double arrow (D) keys work in the toolbar:** only the tools that once had a letter on the drawing toolbar were wired up.
+
+### New logo
+
+- **A new, simpler logo:** an ink drop inside white "inspect element" corner brackets, on a dark tile, readable down to the 16 px toolbar icon. Its source is `brand/logo.svg` (shared with VS Code Browser); `npm run logo` renders every size.
+- Fixed "Uncaught (in promise) Error: No SW" on the extensions page: the toolbar button's title was updated while the background was still starting.
+
 ### The toolbar is back, across the top of the page
 
-- **Alt+Shift+I** (or the extension's button) opens the toolbar again, now as a **full-width bar that slides down from the top**. The page moves down to make room, and fixed and sticky headers move with it, so nothing hides under the bar. While drawing, the drawing tools are its second row. Screenshots of the visible area and the full page leave out the room made for the bar.
+- **Alt+Shift+K** (or the extension's button) opens the toolbar again, now as a **full-width bar that slides down from the top**. The page moves down to make room, and fixed and sticky headers move with it, so nothing hides under the bar. While drawing, the drawing tools are its second row. Screenshots of the visible area and the full page leave out the room made for the bar.
 - **Responsive view:** the page at a device's size, **centered in the tab** and scaled to fit, with device presets, a custom width and height, rotate and zoom. It replaces full emulation, which drew the page at the tab's top-left, and the "Resize window" mode. In Chrome, the emulation panel adds the device's user agent and touch, network and CPU throttling, the color scheme and print media, applied as you change them.
 - Sites that forbid being framed still load in the responsive view: while it is open, the extension removes those headers for that site, in that tab only. New permission: `declarativeNetRequestWithHostAccess`.
 - The picker, drawing, console and page-context tools don't reach inside the responsive view yet, and are disabled while it is open.
@@ -13,6 +37,16 @@
 
 - **The toolbar uses VS Code Browser's shortcuts**, remapped keys included: the modes (element picker, drawing, the Screenshot menu, the responsive view, console), every drawing tool, color and stroke key, the drawing Screenshot menu (S, and a key per item), the Screenshot menu's letters and the element picker's keys. Buttons and menus show the current keys.
 - **Change them from the toolbar** (the keyboard button in the top bar) or on the full page: click a key and press the new one. Changes sync both ways: to VS Code through the link, and VS Code's changes arrive here; they also follow your browser account.
+- **Every shortcut is listed**, not only the toolbar's: VS Code Browser's own (tabs, the address bar, measure, record...) are there too, tagged **VS** (only BR-tagged keys work in the toolbar), and can be changed here; it is one key map, synced both ways. The Shortcuts tab also shows the browser's own key that opens the toolbar, with a link to change it, and **Reset all** resets every shortcut.
+- **Search by shortcut:** type it in any form ("alt shift k", "Alt+Shift+K", "shift alt k", "option shift k"), or just press it while the search box has focus and it becomes the search. Plain typing and the box's editing keys (Ctrl+A, Ctrl+V, Ctrl+Z...) work as usual.
+- **Tags for where each key works:** **VS** (VS Code Browser) and **BR** (the Inkspect toolbar in your browser), in the Shortcuts view and in the browser extension. While the search box has focus it traps every shortcut you press (Ctrl+C and Ctrl+V included) and searches for it.
+- **The shortcut search really traps keys now:** it catches them before the page, the toolbar or VS Code can act on them, and the toolbar's own browser key (Alt+Shift+K) is searched for instead of closing the toolbar. Keys the browser keeps for itself (DevTools: Ctrl+Shift+I/J/C, F12; Ctrl+T, Ctrl+W, Ctrl+N) never reach a page: type those instead.
+
+### One-click pairing
+
+- **No more codes to type:** click **Pair Browser Extension** in VS Code's Browser side panel, and the popup and settings page show **Linked** within seconds. The code is still there under **Use a code instead**.
+- The settings page and popup say what to do in VS Code, and no longer show a code form while VS Code isn't running.
+- An unpaired browser looks for VS Code every 5 seconds at most (it was up to 30), so pairing right after starting VS Code is quick.
 
 ### Popup and full page
 
@@ -21,7 +55,8 @@
 
 ### A new look for the popup and the full page
 
-- **The link, drawn:** the popup and the full page show this browser with a branch to every open VS Code window; the branch to the window used last (where sends go) is lit and marked "Sends go here".
+- **The link, drawn:** the popup and the full page show this browser with a branch to every open VS Code window; the branch to the window used last (where sends go) is lit and marked "Sends go here". The popup lists every window, in a stable order (by name). The lit line runs from the browser down to the window used last, and moves when you switch VS Code windows; the rows stay put.
+- **The popup's open button shows its key.** The default is now **Alt+Shift+K**: Chrome and Edge keep Alt+Shift+I for their own "Report an issue", so the old default was never assigned. If the browser still assigns none (another extension has the key), the popup says so and links to the browser's shortcut settings.
 - **The full page:** a top bar with the sections as pills (VS Code, with the number of windows; Shortcuts; About) and the link's state; a headline next to the link, drawn on a dot-grid canvas, with the flow to the window used last as its one animation; and cards with icon tiles. Pairing is a numbered two-step card.
 - **The popup:** the link at a glance on the same canvas, the Open toolbar button with its key, the main keys as tiles with icons, and Open Inkspect.
 
