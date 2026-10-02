@@ -4,12 +4,12 @@ What is known and not done yet, across both products: found by the review of Sep
 
 ## Bugs
 
-- [ ] **Browser sends split between two VS Code windows.** A group's re-shared screenshots ("context") and the later send naming their `captures` are relayed separately (`windowRelay.ts` claim, `bridgeServer.ts` runSend). If the target window doesn't claim the re-share in time, the serving window keeps it and the send then fails with "Some of those screenshots are not in this VS Code window". Fix the target window once for the whole send, or carry the images in the `captures` send as a fallback.
-- [ ] **Relayed group members arrive in random order**, and re-sharing only the checked ones moves them to the top of Agent Context (the group looks split). Carry each member's index and sort `inGroup` by it; re-share without moving (`add(..., { quiet: true })`).
+- [x] *(Through the browser helper: captures are saved in the project and every window reads them from disk.)* **Browser sends split between two VS Code windows.** A group's re-shared screenshots ("context") and the later send naming their `captures` are relayed separately (`windowRelay.ts` claim, `bridgeServer.ts` runSend). If the target window doesn't claim the re-share in time, the serving window keeps it and the send then fails with "Some of those screenshots are not in this VS Code window". Fix the target window once for the whole send, or carry the images in the `captures` send as a fallback.
+- [x] *(Through the browser helper: group members carry `groupIndex`.)* **Relayed group members arrive in random order**, and re-sharing only the checked ones moves them to the top of Agent Context (the group looks split). Carry each member's index and sort `inGroup` by it; re-share without moving (`add(..., { quiet: true })`).
 - [ ] **Browser: pairing with a code can show an error that isn't one.** The server's `unpaired` answer to the connection's first `hello` resolves `pairWaiter` (`browser-extension/src/background/bridge.ts`), so the page shows "This browser is not paired" a moment before pairing succeeds. Resolve it only on `paired` or on real pairing errors (`bad-code`).
 - [ ] **Shared globalStorage files are written without retry or locking** (`bridgeServer.ts` `writeShared`). On Windows a rename fails while another window reads the file; `bridge-offers.json` is read, changed and written by several windows. Reuse the relay's retrying write; let only the serving window write the offers file.
 - [ ] **No limit on pairing-code attempts.** Any extension origin can try codes while one is valid. Close the socket (or drop the code) after about 5 wrong ones.
-- [ ] **Agent Context keeps full-size images in memory** when they have no file (every browser share), up to 60 of them, and posts the full bytes to the view as thumbnails. Write the file with `fileOf` before dropping bytes; send a downscaled thumbnail.
+- [x] *(Agent Context is the `.inkspect/` store: images are files, with a small JPEG for the browser's lists.)* **Agent Context keeps full-size images in memory** when they have no file (every browser share), up to 60 of them, and posts the full bytes to the view as thumbnails. Write the file with `fileOf` before dropping bytes; send a downscaled thumbnail.
 - [ ] **Browser toolbar: a panel opened by its key reopens when its button is clicked** (the opener is the last pointer press, not the panel's button). Find the opener by panel (`data-panel`).
 - [ ] **Browser toolbar in the picker or region mode:** mode keys go to the page (Alt+Shift+E doesn't turn the picker off), and in the responsive view mode keys are consumed without doing anything.
 - [ ] **Browser extension Ctrl+D removes a bookmark** without asking when the page is bookmarked already (Chrome opens an edit bubble).
@@ -52,8 +52,19 @@ What is known and not done yet, across both products: found by the review of Sep
 ## Security and linking
 
 - [ ] **Unlinking in the browser doesn't tell VS Code**: the token hash stays until VS Code unlinks it.
-- [ ] **No pinned extension id or origin**: another installed extension could appear as a waiting browser (it is shown by name before pairing).
+- [x] *(Through the browser helper: only the extension id fixed by the manifest key may start it. The WebSocket fallback is unchanged.)* **No pinned extension id or origin**: another installed extension could appear as a waiting browser (it is shown by name before pairing).
 - [ ] **The test hooks ship in every build**: `globalThis.__inkspectTest` (toggle the toolbar, pair with a code, link status) is defined in the production background too (`background/index.ts`), not only in the `--test` build. Only the extension's own pages and workers can reach it, not web pages; still, define it only under `__TEST__` (check first that the real-build end-to-end test doesn't use it).
+
+## Projects and the browser helper
+
+- [ ] **Firefox** native host and sidebar are untested (Firefox isn't installed on the development machine); the host manifest is written to both `~/.mozilla` and `$XDG_CONFIG_HOME/mozilla`.
+- [ ] **macOS and Windows** don't get the hub yet (the WebSocket link is used there): host manifest locations, the registry on Windows, and named pipes instead of a Unix socket.
+- [ ] **`.inkspect/` shows in the Explorer and in search.** It is git-ignored; adding it to `files.exclude`/`search.exclude` is a user choice.
+- [ ] **The hub's tmux sockets** come from `INKSPECT_TMUX_SOCKETS` or default to `agents` and `default`; VS Code's `agent.tmuxSockets` setting isn't passed to it.
+- [ ] **Bookmark sync from two transports at once:** a browser uses one (the helper when installed), but `bookmark-links.json` is written by whichever window serves each; check for lost updates when both a WebSocket browser and a helper browser sync.
+- [ ] **A browser on the WebSocket link doesn't switch to the helper** while that link stays up (the helper is looked for when connecting, and again 5 minutes after it wasn't found). Restarting the browser or VS Code switches it.
+- [ ] **Two hubs starting at the same moment after a crash** could still both clear a stale lock (very unlikely; an empty lock being written now is no longer taken for stale).
+- [ ] **The device-emulation integration test** ("emulates a device and turns emulation off again") failed twice on a heavily loaded machine with touch emulation still on after it was turned off (`touch=5`), and passed in the other runs. Possibly a race between clearing touch emulation and the reload.
 
 ## Not verified
 

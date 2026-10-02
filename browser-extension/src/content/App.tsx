@@ -63,6 +63,8 @@ import {
   ShortcutsPanel,
   type EmulationOptions,
 } from './panels';
+import type { CaptureToSave, Project } from '@inkspect/shared/hub';
+import { ProjectPicker, thumbnailOf } from './ProjectPicker';
 import { ResponsiveView, type Zoom } from './ResponsiveView';
 import { LAST_USED, WindowPicker, windowOf } from './WindowPicker';
 import {
@@ -88,9 +90,14 @@ interface ToastAction {
   label: string;
   /** Codicon name. */
   icon: string;
-  run: () => void;
+  /** `anchor`: the button, when clicked (a menu opens under it). */
+  run: (anchor?: HTMLElement) => void;
+  /** It needs an agent in the picked project: off for projects where none runs. */
+  needsAgent?: boolean;
   /** It goes to VS Code: the popup offers a choice of window when several are open. */
   toVsCode?: boolean;
+  /** It saves into a project (browser helper): the popup offers the choice of project. */
+  toProject?: boolean;
   /** Its shortcut action (`capture.*`), which runs it while the popup shows. */
   shortcut?: string;
   /** Its label when only some of several screenshots are checked ("Send 2 to chat"). */
@@ -139,6 +146,44 @@ interface AppProps {
   toggleSignal: number;
 }
 
+/**
+ * The popup's actions with the browser helper: send to the picked project's agent, to another of
+ * its agents (a menu under the button), or only save into it.
+ */
+function projectActions(
+  save: (send?: string) => Promise<void>,
+  openTargetMenu: (anchor: HTMLElement | undefined, pick: (target: string) => void) => void,
+  many = false,
+): ToastAction[] {
+  return [
+    {
+      label: 'Send to agent',
+      icon: 'send',
+      shortcut: 'capture.terminal',
+      partial: (n) => `Send ${n} to agent`,
+      toProject: true,
+      needsAgent: true,
+      run: () => void save('default'),
+    },
+    {
+      label: 'Send to…',
+      icon: 'list-selection',
+      shortcut: 'capture.chat',
+      toProject: true,
+      needsAgent: true,
+      run: (anchor) => openTargetMenu(anchor, (target) => void save(target)),
+    },
+    {
+      label: many ? 'Save all to project' : 'Save to project',
+      icon: 'save',
+      shortcut: 'capture.save',
+      partial: (n) => `Save ${n} to project`,
+      toProject: true,
+      run: () => void save(),
+    },
+  ];
+}
+
 export function App({ host, hideHost, toggleSignal }: AppProps) {
   const [open, setOpen] = useState(false);
   const [tool, setTool] = useState<Tool | null>(null);
@@ -158,6 +203,15 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
   // Where the popup's sends go: the window used last, or one the user picked.
   const [sendWindow, setSendWindow] = useState(LAST_USED);
   const sendWindowRef = useRef(LAST_USED);
+  // With the browser helper: the projects, and the one the popup saves into.
+  const [projects, setProjects] = useState<Project[]>([]);
+  const projectsRef = useRef<Project[]>([]);
+  const [project, setProjectState] = useState<string | undefined>();
+  const projectRef = useRef<string | undefined>(undefined);
+  const setProject = (path: string | undefined) => {
+    projectRef.current = path;
+    setProjectState(path);
+  };
   /** The toast showing now, for sends that finish later (see send). */
   const toastRef = useRef<ToastState | null>(null);
   useEffect(() => {
@@ -382,6 +436,88 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
 
   const linked = link.state === 'connected';
   const windows = linked ? (link.windows ?? []) : [];
+  // The browser helper is there: captures are saved into projects (even without VS Code).
+  const viaHub = link.via === 'hub';
+
+  /** Asks the helper for the projects, and starts the popup on the one this page suggests. */
+  const refreshProjects = useCallback(async () => {
+    const reply = await toBackground({ type: 'projects', url: location.href });
+    if (!reply.ok || !reply.projects) return;
+    projectsRef.current = reply.projects;
+    setProjects(reply.projects);
+    projectRef.current = reply.suggested ?? reply.projects[0]?.path;
+    setProjectState(projectRef.current);
+  }, []);
+
+  /**
+   * Saves captures into the project picked in the popup (see ProjectPicker); with `send` (a
+   * target, or 'default'), sends them to that agent too.
+   */
+  const saveToProject = useCallback(
+    async (captures: CaptureToSave[], send?: string) => {
+      const path = projectRef.current;
+      const name = projects.find((p) => p.path === path)?.name ?? path?.split('/').pop();
+      if (!path) {
+        showToast(
+          'No project to save into: open one in VS Code or start an agent in it.',
+          undefined,
+          {
+            tone: 'error',
+          },
+        );
+        return;
+      }
+      const reply = await toBackground({
+        type: 'saveCapture',
+        project: path,
+        url: location.href,
+        captures,
+        send,
+      });
+      if (!reply.ok) showToast(reply.error, undefined, { tone: 'error' });
+      else if (send)
+        showToast(`Sent to ${reply.sentTo ?? 'the agent'}`, undefined, {
+          tone: 'success',
+          detail: `Saved in ${name} too. Add your prompt there and press Enter.`,
+        });
+      else
+        showToast(`Saved to ${name}`, undefined, {
+          tone: 'success',
+          detail: 'It shows in the Agent Context of that project.',
+        });
+    },
+    [projects, showToast],
+  );
+
+  /** Whether an agent runs in the project picked in the popup (read when a key is pressed). */
+  const projectHasAgent = () =>
+    !!projectsRef.current.find((p) => p.path === projectRef.current)?.targets?.length;
+
+  /** A menu of the picked project's agents, under the popup's "Send to…" button. */
+  const openTargetMenu = useCallback(
+    (anchor: HTMLElement | undefined, pick: (target: string) => void) => {
+      const project = projectsRef.current.find((p) => p.path === projectRef.current);
+      const targets = project?.targets ?? [];
+      const rect = anchor?.getBoundingClientRect();
+      setMenu({
+        x: rect?.left ?? window.innerWidth / 2,
+        y: rect ? rect.bottom + 4 : window.innerHeight - 200,
+        items: targets.length
+          ? targets.map((t) => ({
+              label: `${t.label} · ${t.detail}`,
+              icon:
+                t.kind === 'chat'
+                  ? 'comment-discussion'
+                  : t.kind === 'tmux'
+                    ? 'terminal-tmux'
+                    : 'terminal',
+              onSelect: () => pick(t.id),
+            }))
+          : [{ label: 'No agent runs in this project', disabled: true, onSelect: () => {} }],
+      });
+    },
+    [],
+  );
 
   const send = useCallback(
     async (
@@ -434,8 +570,13 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       payload: { text?: string; image?: string; label: string; kind: CaptureKind; group?: string },
       /** The VS Code window (the popup's choice when sending); the one used last if unset. */
       window?: string,
+      /**
+       * Taken just now, not on the way to a send. With the browser helper, captures go to the
+       * project the user saves them into, not to whichever window answers the link.
+       */
+      automatic = false,
     ) => {
-      if (!linked) return Promise.resolve();
+      if (!linked || (automatic && viaHub)) return Promise.resolve();
       return toBackground({
         type: 'send',
         target: 'context',
@@ -445,18 +586,26 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
         ...payload,
       }).then(() => undefined);
     },
-    [linked],
+    [linked, viaHub],
   );
 
   const copy = useCallback(
     async (text: string, what: string, kind: CaptureKind = 'text') => {
-      void share(crypto.randomUUID(), { text, label: what, kind });
+      void share(crypto.randomUUID(), { text, label: what, kind }, undefined, true);
       const ok = await copyText(text);
-      showToast(ok ? `${what} copied` : `Could not copy ${what.toLowerCase()}`, undefined, {
-        tone: ok ? 'success' : 'error',
-      });
+      if (viaHub) void refreshProjects();
+      showToast(
+        ok ? `${what} copied` : `Could not copy ${what.toLowerCase()}`,
+        viaHub
+          ? projectActions(
+              (send) => saveToProject([{ kind, title: what, text }], send),
+              openTargetMenu,
+            )
+          : undefined,
+        { tone: ok ? 'success' : 'error' },
+      );
     },
-    [share, showToast],
+    [openTargetMenu, refreshProjects, saveToProject, share, showToast, viaHub],
   );
 
   /**
@@ -475,8 +624,14 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       const group = many ? crypto.randomUUID() : undefined;
       list.forEach(
         (image, index) =>
-          void share(captures[index]!, { image, label: labelOf(index), kind: 'screenshot', group }),
+          void share(
+            captures[index]!,
+            { image, label: labelOf(index), kind: 'screenshot', group },
+            undefined,
+            true,
+          ),
       );
+      if (viaHub) void refreshProjects();
       const copied = await copyImage(list[0]!);
       // The screenshots checked in the popup (all, unless some were unchecked).
       const picked = () =>
@@ -528,49 +683,70 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           );
         }
       };
-      const actions: ToastAction[] = linked
-        ? [
-            {
-              label: 'Send to terminal',
-              icon: 'terminal',
-              shortcut: 'capture.terminal',
-              partial: (n) => `Send ${n} to terminal`,
-              run: () => void sendAll('terminal')(),
-              toVsCode: true,
-            },
-            {
-              label: 'Send to chat',
-              icon: 'comment-discussion',
-              shortcut: 'capture.chat',
-              partial: (n) => `Send ${n} to chat`,
-              run: () => void sendAll('chat')(),
-              toVsCode: true,
-            },
-            {
-              label: many ? 'Save all' : 'Save',
-              icon: 'save',
-              shortcut: 'capture.save',
-              partial: (n) => `Save ${n}`,
-              run: () => void sendAll('save')(),
-              toVsCode: true,
-            },
-            {
-              label: many ? 'Download all' : 'Download',
-              icon: 'desktop-download',
-              shortcut: 'capture.download',
-              partial: (n) => `Download ${n}`,
-              run: download,
-            },
-          ]
-        : [
-            {
-              label: many ? 'Download all' : 'Download',
-              icon: 'desktop-download',
-              shortcut: 'capture.download',
-              partial: (n) => `Download ${n}`,
-              run: download,
-            },
-          ];
+      const saveAll = async (send?: string) => {
+        const indexes = picked();
+        const thumbs = await Promise.all(indexes.map((index) => thumbnailOf(list[index]!)));
+        await saveToProject(
+          indexes.map((index, i) => ({
+            kind: 'screenshot',
+            title: labelOf(index),
+            image: list[index]!.replace(/^data:image\/\w+;base64,/, ''),
+            thumb: thumbs[i],
+            group,
+            groupIndex: many ? index : undefined,
+          })),
+          send,
+        );
+      };
+      const download_: ToastAction = {
+        label: many ? 'Download all' : 'Download',
+        icon: 'desktop-download',
+        shortcut: 'capture.download',
+        partial: (n) => `Download ${n}`,
+        run: download,
+      };
+      // With the browser helper, everything goes through the picked project.
+      const actions: ToastAction[] = viaHub
+        ? [...projectActions(saveAll, openTargetMenu, many), download_]
+        : linked
+          ? [
+              {
+                label: 'Send to terminal',
+                icon: 'terminal',
+                shortcut: 'capture.terminal',
+                partial: (n) => `Send ${n} to terminal`,
+                run: () => void sendAll('terminal')(),
+                toVsCode: true,
+              },
+              {
+                label: 'Send to chat',
+                icon: 'comment-discussion',
+                shortcut: 'capture.chat',
+                partial: (n) => `Send ${n} to chat`,
+                run: () => void sendAll('chat')(),
+                toVsCode: true,
+              },
+              ...(viaHub
+                ? []
+                : [
+                    {
+                      label: many ? 'Save all' : 'Save',
+                      icon: 'save',
+                      shortcut: 'capture.save',
+                      partial: (n: number) => `Save ${n}`,
+                      run: () => void sendAll('save')(),
+                      toVsCode: true,
+                    },
+                  ]),
+              {
+                label: many ? 'Download all' : 'Download',
+                icon: 'desktop-download',
+                shortcut: 'capture.download',
+                partial: (n) => `Download ${n}`,
+                run: download,
+              },
+            ]
+          : [download_];
       const title = many
         ? `${list.length} ${label.toLowerCase()} captured`
         : `${label} ${copied ? 'copied' : 'taken'}`;
@@ -582,9 +758,9 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
             ? 'Paste it anywhere, or download it.'
             : 'Download it to keep it.';
       showToast(title, actions, { images: list, tone: 'success', detail });
-      if (!copied && !linked && !many) download();
+      if (!copied && !linked && !viaHub && !many) download();
     },
-    [linked, send, share, showToast],
+    [linked, openTargetMenu, refreshProjects, saveToProject, send, share, showToast, viaHub],
   );
 
   const screenshot = useCallback(
@@ -701,32 +877,56 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
         return;
       }
       const text = formatDetails(details, s.copyFormat, s.fields);
-      void shareEach();
+      if (!viaHub) void shareEach();
       const ok = await copyText(text);
+      if (viaHub) void refreshProjects();
+      const saveElements = (send?: string) =>
+        saveToProject(
+          details.map((d, index) => ({
+            kind: 'element',
+            title: `Element ${elementLabel(d)}`,
+            text: one ? markdown : formatDetails([d], 'markdown', s.fields),
+            group,
+            groupIndex: one ? undefined : index,
+          })),
+          send,
+        );
       showToast(
         ok ? `Copied details of ${what}` : 'Could not copy',
-        linked
-          ? [
-              {
-                label: 'Send to chat',
-                icon: 'comment-discussion',
-                shortcut: 'capture.chat',
-                toVsCode: true,
-                run: () => void sendTo('chat', sendWindowRef.current),
-              },
-              {
-                label: 'Send to terminal',
-                icon: 'terminal',
-                shortcut: 'capture.terminal',
-                toVsCode: true,
-                run: () => void sendTo('terminal', sendWindowRef.current),
-              },
-            ]
-          : undefined,
+        viaHub
+          ? projectActions(saveElements, openTargetMenu)
+          : linked
+            ? [
+                {
+                  label: 'Send to chat',
+                  icon: 'comment-discussion',
+                  shortcut: 'capture.chat',
+                  toVsCode: true,
+                  run: () => void sendTo('chat', sendWindowRef.current),
+                },
+                {
+                  label: 'Send to terminal',
+                  icon: 'terminal',
+                  shortcut: 'capture.terminal',
+                  toVsCode: true,
+                  run: () => void sendTo('terminal', sendWindowRef.current),
+                },
+              ]
+            : undefined,
         { tone: ok ? 'success' : 'error', detail: ok ? 'Paste it into your AI chat.' : undefined },
       );
     },
-    [detailsOf, linked, send, share, showToast],
+    [
+      detailsOf,
+      linked,
+      openTargetMenu,
+      refreshProjects,
+      saveToProject,
+      send,
+      share,
+      showToast,
+      viaHub,
+    ],
   );
 
   const onPick = useCallback(
@@ -977,6 +1177,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           action.shortcut!,
           () => {
             if (action.partial && images && !toastCheckedRef.current.size) return;
+            if (action.needsAgent && !projectHasAgent()) return;
             action.run();
             setToast(null);
           },
@@ -1073,6 +1274,9 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
   }, [open, tool, panel, menu, menuScope, shortcuts.map, host, toast]);
   if (!open) return null;
   const toastKeys = actionKeys(toast?.actions ?? [], shortcuts.map);
+  // The project the popup saves into, and where its Send goes.
+  const pickedProject = projects.find((p) => p.path === project);
+  const defaultAgent = pickedProject?.targets?.find((t) => t.id === pickedProject.defaultTarget);
   // Several screenshots: how many are checked ("Send 2 to chat").
   const imageCount = toast?.images && toast.images.length > 1 ? toast.images.length : 0;
   const pickedCount = imageCount ? toastChecked.size : 0;
@@ -1379,7 +1583,27 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           )}
           {toast.actions && (
             <div className="toast-bottom">
-              {windows.length > 1 && toast.actions.some((action) => action.toVsCode) && (
+              {viaHub && toast.actions.some((action) => action.toProject) && (
+                <div className="toast-target">
+                  <span className="toast-target-label">Project</span>
+                  <ProjectPicker
+                    projects={projects}
+                    className="toast-window"
+                    value={project}
+                    onChange={(value) => {
+                      setProject(value);
+                      // A choice was made: keep the popup until it is used.
+                      setToast((t) => (t?.id === toast.id ? { ...t, held: true } : t));
+                    }}
+                  />
+                  <span className="toast-target-label toast-agent">
+                    {defaultAgent
+                      ? `Send goes to ${defaultAgent.label} · ${defaultAgent.detail}`
+                      : 'No agent runs here: save only'}
+                  </span>
+                </div>
+              )}
+              {!viaHub && windows.length > 1 && toast.actions.some((action) => action.toVsCode) && (
                 <div className="toast-target">
                   <span className="toast-target-label">Send to</span>
                   <WindowPicker
@@ -1413,19 +1637,22 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
                     key={action.label}
                     size="sm"
                     variant={
-                      !action.toVsCode
+                      !action.toVsCode && !action.toProject
                         ? 'ghost'
                         : index === 0 && toast.actions!.length > 1
                           ? 'primary'
                           : 'secondary'
                     }
-                    className={action.toVsCode ? undefined : 'toast-local'}
+                    className={action.toVsCode || action.toProject ? undefined : 'toast-local'}
                     icon={action.icon}
                     title={toastKeys.titles[index]}
                     aria-keyshortcuts={toastKeys.aria[index]}
-                    disabled={!!action.partial && imageCount > 0 && pickedCount === 0}
-                    onClick={() => {
-                      action.run();
+                    disabled={
+                      (!!action.partial && imageCount > 0 && pickedCount === 0) ||
+                      (!!action.needsAgent && !pickedProject?.targets?.length)
+                    }
+                    onClick={(event) => {
+                      action.run(event.currentTarget);
                       setToast(null);
                     }}
                   >

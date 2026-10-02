@@ -1,4 +1,5 @@
-// Bundles the extension host code (src/extension.ts) into dist/extension.js.
+// Bundles the extension host code (src/extension.ts) into dist/extension.js, and the hub that
+// browsers start (src/hub/main.ts, see src/hub/install.ts) into dist/hub.js.
 import * as esbuild from 'esbuild';
 
 const watch = process.argv.includes('--watch');
@@ -20,8 +21,8 @@ const watchMarkers = {
 };
 
 const ctx = await esbuild.context({
-  entryPoints: ['src/extension.ts'],
-  outfile: 'dist/extension.js',
+  entryPoints: { extension: 'src/extension.ts', hub: 'src/hub/main.ts' },
+  outdir: 'dist',
   bundle: true,
   format: 'cjs',
   platform: 'node',

@@ -24,6 +24,11 @@ describe('bridge protocol', () => {
     expect(parseServerMessage(encode(ops))).toEqual(ops);
   });
 
+  it('rejects message types that are only inherited object keys', () => {
+    for (const type of ['toString', 'constructor', '__proto__', 'hasOwnProperty'])
+      expect(parseClientMessage(JSON.stringify({ v: 1, type }))).toBeUndefined();
+  });
+
   it('sends captures made together as a group, and several of them in one send', () => {
     const grouped = { type: 'send' as const, id: '1', target: 'context' as const, group: 'g' };
     expect(parseClientMessage(encode(grouped))).toEqual(grouped);

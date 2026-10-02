@@ -5,6 +5,7 @@ import { initContextTray } from './agent/contextTray';
 import { registerLanguageModelTools } from './agent/languageModelTools';
 import { McpHttpServer, registerMcpCommands } from './agent/mcpServer';
 import { BridgeServer } from './bridge/bridgeServer';
+import { HubClient } from './link/hubClient';
 import { registerCommands } from './commands';
 import { getConfig } from './config';
 import { EngineHost } from './engineHost';
@@ -53,6 +54,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const contextView = new ContextViewProvider(context.extensionUri, tray, agentTerminals);
   const bridge = new BridgeServer(context, bookmarks, logger);
   void bridge.sync();
+  // Browsers with the helper registered link through the hub instead (no pairing).
+  const hub = new HubClient(context, bridge.service, bridge, logger);
+  void hub.sync();
   const shortcutsView = new ShortcutsViewProvider(
     context.extensionUri,
     () => bridge.linkState().browsers.length > 0,
@@ -87,6 +91,10 @@ export function activate(context: vscode.ExtensionContext): void {
     mcp,
     ...registerMcpCommands(mcp),
     bridge,
+    hub,
+    vscode.commands.registerCommand('vscodeBrowser.hub.register', () => hub.register()),
+    vscode.commands.registerCommand('vscodeBrowser.hub.unregister', () => hub.unregister()),
+    vscode.commands.registerCommand('vscodeBrowser.debug.hub', () => hub.debugState()),
     vscode.commands.registerCommand('vscodeBrowser.bridge.pair', () => bridge.pair()),
     vscode.commands.registerCommand('vscodeBrowser.bridge.pairWithCode', () =>
       bridge.pairWithCode(),
@@ -149,6 +157,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (event.affectsConfiguration('vscodeBrowser.showStatusBarItem')) updateStatusBar();
       if (event.affectsConfiguration('vscodeBrowser.mcp')) void mcp.sync();
       if (event.affectsConfiguration('vscodeBrowser.bridge')) void bridge.sync();
+      if (event.affectsConfiguration('vscodeBrowser.hub')) void hub.sync();
       if (event.affectsConfiguration('vscodeBrowser.downloads.directory')) {
         void services.engineHost.current?.setDownloadsDir(downloads.directory);
       }

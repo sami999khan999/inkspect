@@ -159,16 +159,12 @@ export class ContextViewProvider implements vscode.WebviewViewProvider, vscode.D
   }
 
   private postThumbnail(item: ContextItem): void {
-    if (!this.view || !item.image) return;
-    const message: HostToContextView = {
-      type: 'thumbnail',
-      id: item.id,
-      // A copy: Node buffers can be views into a larger shared pool, which doesn't survive
-      // postMessage as the image alone.
-      data: new Uint8Array(item.image.bytes),
-      mimeType: item.image.mimeType,
-    };
-    void this.view.webview.postMessage(message);
+    if (!this.view || !item.mimeType) return;
+    void this.tray.thumbnailOf(item).then((thumbnail) => {
+      if (!thumbnail || !this.view) return;
+      const message: HostToContextView = { type: 'thumbnail', id: item.id, ...thumbnail };
+      void this.view.webview.postMessage(message);
+    });
   }
 
   dispose(): void {

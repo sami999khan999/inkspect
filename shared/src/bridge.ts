@@ -2,6 +2,19 @@
 // (client), over a WebSocket. Every message is JSON with the protocol version `v`; both sides
 // validate what they receive with the parsers below and drop anything else.
 import type { FlatNode, RemoteOp } from './bookmarkSync';
+import type { Check } from './validate';
+import {
+  arrayOf,
+  isBoolean,
+  isNumber,
+  isRecord,
+  isString,
+  oneOf,
+  optional,
+  parseMessage,
+  shape,
+  stringMap,
+} from './validate';
 
 export const BRIDGE_VERSION = 1;
 export const DEFAULT_BRIDGE_PORT = 47110;
@@ -108,29 +121,6 @@ export function encode(message: ClientMessage | ServerMessage): string {
   return JSON.stringify({ v: BRIDGE_VERSION, ...message });
 }
 
-type Check = (value: unknown) => boolean;
-const isString: Check = (v) => typeof v === 'string';
-const isNumber: Check = (v) => typeof v === 'number' && Number.isFinite(v);
-const isBoolean: Check = (v) => typeof v === 'boolean';
-const optional =
-  (check: Check): Check =>
-  (v) =>
-    v === undefined || check(v);
-const oneOf =
-  (...values: string[]): Check =>
-  (v) =>
-    typeof v === 'string' && values.includes(v);
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-const shape =
-  (fields: Record<string, Check>): Check =>
-  (v) =>
-    isRecord(v) && Object.entries(fields).every(([k, check]) => check(v[k]));
-const arrayOf =
-  (check: Check, max = 100_000): Check =>
-  (v) =>
-    Array.isArray(v) && v.length <= max && v.every(check);
-const stringMap: Check = (v) => isRecord(v) && Object.values(v).every(isString);
 /** A shortcut map: a bounded number of ids, each with a key or a few keys. */
 const isKey: Check = (k) => typeof k === 'string' && k.length <= 40;
 const shortcutMap: Check = (v) =>
@@ -201,32 +191,14 @@ const SERVER_MESSAGES: Record<ServerMessage['type'], Record<string, Check>> = {
   'settings.shortcuts': { shortcuts: shortcutMap, updated: isNumber },
 };
 
-function parse<T extends { type: string }>(
-  raw: string,
-  table: Record<string, Record<string, Check>>,
-): T | undefined {
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-  if (!isRecord(value) || value.v !== BRIDGE_VERSION || typeof value.type !== 'string')
-    return undefined;
-  const fields = table[value.type];
-  if (!fields || !shape(fields)(value)) return undefined;
-  const { v: _version, ...message } = value;
-  return message as T;
-}
-
 /** A message from the browser extension, or undefined if it isn't one (or has another version). */
 export function parseClientMessage(raw: string): ClientMessage | undefined {
-  return parse<ClientMessage>(raw, CLIENT_MESSAGES);
+  return parseMessage<ClientMessage>(raw, CLIENT_MESSAGES, BRIDGE_VERSION);
 }
 
 /** A message from VS Code, or undefined. */
 export function parseServerMessage(raw: string): ServerMessage | undefined {
-  return parse<ServerMessage>(raw, SERVER_MESSAGES);
+  return parseMessage<ServerMessage>(raw, SERVER_MESSAGES, BRIDGE_VERSION);
 }
 
 /** Origins allowed to connect: extension pages only (never web pages). */

@@ -143,7 +143,7 @@ export function ContextApp() {
 
   if (!state) return null;
   const targets = state.targets;
-  const terminalAgents = targets.filter((t) => t.kind === 'terminal');
+  const terminalAgents = targets.filter((t) => t.kind !== 'chat');
   const target = targets.find((t) => t.id === state.target);
   // Only what is still in the list counts (items go away when removed elsewhere).
   const selectedRows = rows.filter((row) => selected.has(row.key));
@@ -171,7 +171,7 @@ export function ContextApp() {
       y: rect.bottom + 2,
       items: targets.map((t) => ({
         label: t.kind === 'chat' ? t.label : `${t.label} (${t.detail})`,
-        icon: t.kind === 'chat' ? 'comment-discussion' : 'terminal',
+        icon: targetIcon(t),
         onSelect: () =>
           post(
             ids.length === 1
@@ -348,9 +348,18 @@ export function ContextApp() {
   );
 }
 
-/** Where Send goes: the agents running in terminals, and VS Code chat. */
+/** A target's icon: chat, an agentmux (tmux) pane, or a VS Code terminal. */
+function targetIcon(target: AgentTarget): string {
+  return target.kind === 'chat'
+    ? 'comment-discussion'
+    : target.kind === 'tmux'
+      ? 'terminal-tmux'
+      : 'terminal';
+}
+
+/** Where Send goes: the agents running in terminals and agentmux, and VS Code chat. */
 function AgentPicker({ targets, value }: { targets: AgentTarget[]; value?: string }) {
-  const terminals = targets.filter((t) => t.kind === 'terminal');
+  const terminals = targets.filter((t) => t.kind !== 'chat');
   return (
     <div className="agent-picker">
       <span className={`agent-dot ${terminals.length ? 'on' : ''}`} aria-hidden="true" />
@@ -371,7 +380,7 @@ function AgentPicker({ targets, value }: { targets: AgentTarget[]; value?: strin
           value: t.id,
           label: t.label,
           detail: t.detail,
-          icon: t.kind === 'chat' ? 'comment-discussion' : 'terminal',
+          icon: targetIcon(t),
           group: t.kind === 'chat' ? 'Other' : 'Running agents',
         }))}
       />

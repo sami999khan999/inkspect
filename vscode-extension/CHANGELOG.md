@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Projects, the browser helper and agentmux
+
+- **The browser helper:** on Linux, VS Code Browser registers a small helper with your browsers (Chrome, Chromium, Brave, Vivaldi, Edge, Opera, and Firefox where found). The Inkspect extension then links to VS Code through it, without pairing, and it keeps working with VS Code closed. **Browser: Register Browser Helper** and **Browser: Remove Browser Helper**; setting `vscodeBrowser.hub.enabled`. The WebSocket link and pairing stay for browsers without it.
+- **Captures are kept in the project:** Agent Context now lives in the workspace's `.inkspect/` folder (never committed: it ignores itself), so it lasts across sessions, shows what the browser saved into this project, and keeps images on disk instead of in memory. Captures stay until you remove them.
+- **Agents in agentmux and tmux:** agents running in tmux panes of this workspace's folders (agentmux threads by default; setting `vscodeBrowser.agent.tmuxSockets`) show in Agent Context next to terminal agents, and sends are pasted into them, without Enter. Antigravity (`agy`) is recognized as an agent.
+- Text typed into a terminal that isn't a known agent drops control characters, so page text can't trigger a shell binding.
+
 ### Fixes
 
 - **New default keys that leave VS Code its own:** the modes are Alt+Shift+letter (element picker Alt+Shift+E, draw W, screenshot G, console J, device M, measure U, eyedropper Y, overlay O, CSS tweak V, accessibility H), so Explorer, Debug, Problems, Output and Save As keep their keys while the browser has focus. Quick actions is Ctrl+Shift+K and the cheat sheet Ctrl+Shift+/ (Ctrl+K chords and web apps' Ctrl+K and Ctrl+/ work again), Downloads is Alt+Shift+L (Ctrl+J toggles the panel), and Save as PDF has no key (Ctrl+P is Quick Open). Keys the operating system keeps are replaced: close the console Alt+W, close the overlay Alt+Z, pause a recording Alt+Y. Keys you changed stay as they are.

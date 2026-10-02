@@ -24,6 +24,7 @@ const AGENT_CLIS: readonly (AgentCli & { names: string[]; packages?: RegExp })[]
   { id: 'qwen', label: 'Qwen Code', names: ['qwen'], packages: /@qwen-code[\\/]/i },
   { id: 'amp', label: 'Amp', names: ['amp'], packages: /@sourcegraph[\\/]amp/i },
   { id: 'crush', label: 'Crush', names: ['crush'] },
+  { id: 'agy', label: 'Antigravity', names: ['agy'] },
 ];
 
 /** Programs that run a script named in their arguments. */

@@ -26,7 +26,8 @@
     "scripting",
     "downloads",
     "clipboardWrite",
-    "declarativeNetRequestWithHostAccess"
+    "declarativeNetRequestWithHostAccess",
+    "nativeMessaging"
   ],
   "web_accessible_resources": [
     { "resources": ["codicon.ttf", "icons/32.png"], "matches": ["<all_urls>"] }

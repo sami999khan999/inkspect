@@ -307,6 +307,13 @@ browser-extension/
 - [x] Clipboard fallback everywhere when VS Code isn't linked.
 - [ ] Not done yet: **[vscode]** agent tools that target the real browser tab through the link (navigate, screenshot, get element, console errors).
 
+## Phase 9b: Projects through the browser helper
+
+- [x] **The browser helper** (native messaging, installed by VS Code Browser): the background connects to it first (`connectNative`) and falls back to the WebSocket link when it isn't installed. Through it, no pairing is needed. The manifest has a public `key`, so the Chrome id is the same everywhere (a unit test checks it against the helper's allow list).
+- [x] **Captures go to projects:** the capture popup picks a project (VS Code windows, agentmux threads, saved and pinned projects; the suggestion comes from the site, its local dev server, or the last one). **Send to agent**, **Send to…** (any agent in that project) and **Save to project** save the capture into `<project>/.inkspect/`; sending pastes it into the agent (an agentmux pane, or a VS Code terminal or chat through its window). Projects where no agent runs only save.
+- [x] **The side panel** (Chrome `side_panel`, Firefox `sidebar_action`; **Projects** in the popup opens it): every project and its saved captures, with thumbnails, Send, Send to… and Remove; projects only saved or pinned show their captures without sending. Projects can be pinned.
+- [x] End-to-end: Chrome for Testing starts the real helper through a host manifest in its profile; a fake VS Code window answers on the hub's socket.
+
 ## Phase 10: Browser coverage
 
 - [x] **Firefox build:** MV3 background scripts, a gecko id, no `debugger`, and the "Resize window" device mode only.

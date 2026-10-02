@@ -48,6 +48,10 @@ export interface BrowserConfig {
   bridgeEnabled: boolean;
   bridgePort: number;
   bridgeSyncBookmarks: boolean;
+  /** Register the local hub with browsers and link through it (Linux). */
+  hubEnabled: boolean;
+  /** tmux servers (`tmux -L <name>`) to look for agents on (agentmux threads, tmux panes). */
+  agentTmuxSockets: string[];
   logCdp: boolean;
 }
 
@@ -100,6 +104,13 @@ export function getConfig(): BrowserConfig {
     bridgeEnabled: c.get<boolean>('bridge.enabled', true),
     bridgePort: c.get<number>('bridge.port', DEFAULT_BRIDGE_PORT),
     bridgeSyncBookmarks: c.get<boolean>('bridge.syncBookmarks', true),
+    hubEnabled: c.get<boolean>('hub.enabled', true),
+    agentTmuxSockets: (c.get<unknown>('agent.tmuxSockets') instanceof Array
+      ? c.get<unknown[]>('agent.tmuxSockets')!
+      : ['agents', 'default']
+    )
+      .filter((s): s is string => typeof s === 'string' && /^[\w.-]{1,64}$/.test(s))
+      .slice(0, 10),
     logCdp: c.get<boolean>('debug.logCdp', false),
   };
 }

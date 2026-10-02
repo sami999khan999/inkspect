@@ -1,9 +1,18 @@
 // End-to-end tests: Chrome for Testing with the unpacked extension (test build) and a fake
 // VS Code link server that uses the real shared sync code, plus a fixture site for the toolbar.
 //   npm run test:e2e -w browser-extension
-import { existsSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:http';
-import { homedir } from 'node:os';
+import { createConnection } from 'node:net';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -34,6 +43,16 @@ const { outputFiles } = await esbuild.build({
 });
 const shared = await import(
   `data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`
+);
+const { outputFiles: hubFiles } = await esbuild.build({
+  stdin: { contents: `export * from '@inkspect/shared/hub';`, resolveDir: root, loader: 'ts' },
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  write: false,
+});
+const hub = await import(
+  `data:text/javascript;base64,${Buffer.from(hubFiles[0].text).toString('base64')}`
 );
 
 /** Chrome for Testing: the copy VS Code Browser downloaded, else download one into .cache. */
@@ -1111,6 +1130,279 @@ await test('real build: opens from its button, and its menus and lists take real
 });
 
 await realBrowser.close();
+
+// ---------------------------------------------------------------------------------------------
+// The browser helper (native messaging): Chrome starts the real hub, which links the browser to
+// a VS Code window without pairing.
+// ---------------------------------------------------------------------------------------------
+
+await test('links through the browser helper, without pairing', async () => {
+  // A short folder: Unix socket paths are limited to about 100 bytes.
+  const home = mkdtempSync(join(tmpdir(), 'ink-'));
+  const hubDir = join(home, 'hub');
+  const profile = join(home, 'profile');
+  const hubScript = join(home, 'hub.js');
+  await esbuild.build({
+    entryPoints: [join(root, '..', 'vscode-extension', 'src', 'hub', 'main.ts')],
+    outfile: hubScript,
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    logLevel: 'warning',
+  });
+  const launcher = join(home, 'inkspect-hub');
+  writeFileSync(
+    launcher,
+    `#!/bin/sh\nINKSPECT_HUB_DIR='${hubDir}' INKSPECT_HUB_IDLE_MS=3000 INKSPECT_TMUX_SOCKETS= exec '${process.execPath}' '${hubScript}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  // Chrome reads user-level hosts from the profile's NativeMessagingHosts folder.
+  mkdirSync(join(profile, 'NativeMessagingHosts'), { recursive: true });
+  const { CHROME_EXTENSION_ID, HUB_HOST_NAME } = hub;
+  writeFileSync(
+    join(profile, 'NativeMessagingHosts', `${HUB_HOST_NAME}.json`),
+    JSON.stringify({
+      name: HUB_HOST_NAME,
+      description: 'test',
+      path: launcher,
+      type: 'stdio',
+      allowed_origins: [`chrome-extension://${CHROME_EXTENSION_ID}/`],
+    }),
+  );
+  const helperBrowser = await puppeteer.launch({
+    executablePath: await chromePath(),
+    headless: true,
+    pipe: true,
+    enableExtensions: true,
+    userDataDir: profile,
+    args: ['--no-first-run'],
+  });
+  let vscode;
+  try {
+    const id = await helperBrowser.installExtension(extension);
+    assert(id === CHROME_EXTENSION_ID, `the manifest key gives ${id}`);
+    const helperWorker = await (
+      await helperBrowser.waitForTarget(
+        (t) => t.type() === 'service_worker' && t.url().startsWith(`chrome-extension://${id}/`),
+      )
+    ).worker();
+    // The browser starts the hub; with no VS Code window yet, it says so.
+    await until('the hub to start', () => existsSync(join(hubDir, 'hub.token')));
+    await until('the status from the helper', () =>
+      helperWorker.evaluate(() => {
+        const status = globalThis.__inkspectTest.bridgeStatus();
+        return status.via === 'hub' && status.state === 'offline' ? status : undefined;
+      }),
+    );
+    // A VS Code window connects to the hub and answers the browser's hello.
+    vscode = createConnection(join(hubDir, 'hub.sock'));
+    await new Promise((resolve) => vscode.once('connect', resolve));
+    const frame = (message) => {
+      const body = Buffer.from(JSON.stringify({ v: 1, ...message }));
+      const head = Buffer.alloc(4);
+      head.writeUInt32LE(body.length);
+      return Buffer.concat([head, body]);
+    };
+    const hellos = [];
+    const runs = [];
+    let buffer = Buffer.alloc(0);
+    vscode.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (buffer.length >= 4 && buffer.length >= 4 + buffer.readUInt32LE(0)) {
+        const message = JSON.parse(buffer.subarray(4, 4 + buffer.readUInt32LE(0)).toString());
+        buffer = buffer.subarray(4 + buffer.readUInt32LE(0));
+        if (message.type === 'run.send') {
+          // The window's agent gets it.
+          runs.push(message);
+          vscode.write(
+            frame({ type: 'run.sent', req: message.req, ok: true, sentTo: 'Claude Code' }),
+          );
+          continue;
+        }
+        if (message.type !== 'link') continue;
+        const inner = JSON.parse(message.data);
+        if (inner.type !== 'hello') continue;
+        hellos.push(inner);
+        const reply = (m) =>
+          vscode.write(frame({ type: 'link', browser: message.browser, data: shared.encode(m) }));
+        reply({ type: 'welcome', peer: 'VS Code (hub test)', syncBookmarks: false });
+        reply({ type: 'windows', windows: [{ id: 'w1', name: 'hub test', lastUsed: true }] });
+      }
+    });
+    const token = readFileSync(join(hubDir, 'hub.token'), 'utf8');
+    vscode.write(frame({ type: 'auth', token, role: 'vscode' }));
+    // The window has a project open: captures can be saved into it.
+    const project = join(home, 'shop');
+    mkdirSync(project);
+    vscode.write(
+      frame({
+        type: 'window',
+        id: 'w1',
+        name: 'hub test',
+        folders: [project],
+        focusedAt: 1,
+        // An agent in one of the window's terminals.
+        targets: [{ id: 'terminal:1', kind: 'terminal', label: 'Claude Code', detail: 'terminal' }],
+      }),
+    );
+    const status = await until('the link through the helper', () =>
+      helperWorker.evaluate(() => {
+        const status = globalThis.__inkspectTest.bridgeStatus();
+        return status.state === 'connected' ? status : undefined;
+      }),
+    );
+    assert(status.via === 'hub' && status.peer === 'VS Code (hub test)', JSON.stringify(status));
+    // No token was needed or sent.
+    assert(hellos[0]?.token === '', JSON.stringify(hellos));
+
+    // A screenshot from the toolbar, saved into the project picked in its popup.
+    const page = await helperBrowser.newPage();
+    await page.goto(url);
+    await page.bringToFront();
+    const pageTab = await helperWorker.evaluate(
+      async (u) => (await chrome.tabs.query({ url: u }))[0]?.id,
+      url,
+    );
+    await helperWorker.evaluate((t) => globalThis.__inkspectTest.toggleToolbar(t), pageTab);
+    const shadowCall = (fn, ...args) =>
+      page.evaluate(
+        (source, args) => {
+          const shadow = document.querySelector('inkspect-toolbar')?.shadowRoot;
+          return shadow
+            ? new Function('shadow', 'args', `return (${source})(shadow, ...args)`)(shadow, args)
+            : undefined;
+        },
+        fn.toString(),
+        args,
+      );
+    await until('toolbar', () =>
+      shadowCall((shadow) => shadow.querySelectorAll('.bar button').length),
+    );
+    await shadowCall((shadow) =>
+      [...shadow.querySelectorAll('button')]
+        .find((b) => (b.getAttribute('aria-label') ?? '').startsWith('Screenshot'))
+        ?.click(),
+    );
+    await until('menu', () => shadowCall((shadow) => shadow.querySelectorAll('.menu-item').length));
+    const point = await shadowCall((shadow) => {
+      const r = [...shadow.querySelectorAll('.menu-item')]
+        .find((b) => b.textContent.includes('Visible area'))
+        ?.getBoundingClientRect();
+      return r && { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await page.mouse.click(point.x, point.y);
+    // The popup offers the project (the window's folder) and saves into it.
+    await until(
+      'the project picker',
+      () =>
+        shadowCall((shadow) => shadow.querySelector('.toast-target')?.textContent.includes('shop')),
+      20_000,
+    );
+    await shadowCall((shadow) =>
+      [...shadow.querySelectorAll('.toast button')]
+        .find((b) => b.textContent.startsWith('Save to project'))
+        ?.click(),
+    );
+    await until('the saved toast', () =>
+      shadowCall((shadow) => shadow.querySelector('.toast')?.textContent.includes('Saved to shop')),
+    );
+    const items = join(project, '.inkspect', 'items');
+    const saved = await until('the capture in the project', () => {
+      try {
+        const [id] = readdirSync(items).filter((name) => !name.startsWith('.'));
+        return id && readdirSync(join(items, id)).sort();
+      } catch {
+        return undefined;
+      }
+    });
+    assert(
+      JSON.stringify(saved) === JSON.stringify(['capture.png', 'item.json', 'thumb.jpg']),
+      JSON.stringify(saved),
+    );
+
+    // Copied element details, sent to the project's agent: saved, then handed to the window.
+    const pickPoint = await page.evaluate(() => {
+      const r = document.querySelector('#login h2').getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await shadowCall((shadow) =>
+      [...shadow.querySelectorAll('button')]
+        .find((b) => (b.getAttribute('aria-label') ?? '').startsWith('Select an element'))
+        ?.click(),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await page.mouse.click(pickPoint.x, pickPoint.y);
+    await until('the agent in the popup', () =>
+      shadowCall((shadow) =>
+        shadow.querySelector('.toast-agent')?.textContent.includes('Claude Code'),
+      ),
+    );
+    await shadowCall((shadow) =>
+      [...shadow.querySelectorAll('.toast button')]
+        .find((b) => b.textContent.startsWith('Send to agent'))
+        ?.click(),
+    );
+    await until('the sent toast', () =>
+      shadowCall((shadow) =>
+        shadow.querySelector('.toast')?.textContent.includes('Sent to Claude Code'),
+      ),
+    );
+    assert(runs.length === 1 && runs[0].target === 'terminal:1', JSON.stringify(runs));
+    assert(runs[0].project === project && runs[0].ids.length === 1, JSON.stringify(runs));
+
+    // The side panel: the project, its two captures, and their actions.
+    const panel = await helperBrowser.newPage();
+    await panel.goto(`chrome-extension://${id}/sidepanel.html`);
+    await until('the project in the side panel', () =>
+      panel.evaluate(() => document.querySelector('.sp-project-name')?.textContent === 'shop'),
+    );
+    const cards = await until('its captures', () =>
+      panel.evaluate(() => {
+        const titles = [...document.querySelectorAll('.sp-item-title')].map((e) => e.textContent);
+        return titles.length === 2 ? titles : undefined;
+      }),
+    );
+    assert(
+      cards.some((t) => t.startsWith('Element')),
+      JSON.stringify(cards),
+    );
+    assert(
+      await panel.evaluate(() =>
+        document.querySelector('.sp-target')?.textContent.includes('Claude Code'),
+      ),
+      'no default agent shown',
+    );
+    // Send the screenshot from the panel: the window's agent gets it.
+    await panel.evaluate(() =>
+      [...document.querySelectorAll('.sp-item')]
+        .find((li) => li.querySelector('.sp-item-title').textContent.startsWith('Screenshot'))
+        .querySelector('button.btn, button')
+        ?.click(),
+    );
+    await until('the send from the panel', () => runs.length === 2);
+    assert(runs[1].ids.length === 1 && runs[1].target === 'terminal:1', JSON.stringify(runs[1]));
+    await until('the sent note', () =>
+      panel.evaluate(() =>
+        document.querySelector('.sp-note')?.textContent.includes('Sent to Claude Code'),
+      ),
+    );
+    // Remove the element capture.
+    await panel.evaluate(() =>
+      [...document.querySelectorAll('.sp-item')]
+        .find((li) => li.querySelector('.sp-item-title').textContent.startsWith('Element'))
+        .querySelector('[aria-label="Remove"]')
+        ?.click(),
+    );
+    await until('one capture left', () =>
+      panel.evaluate(() => document.querySelectorAll('.sp-item').length === 1),
+    );
+  } finally {
+    vscode?.destroy();
+    await helperBrowser.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 site.close();
 linkServer.close();
 wss.close();

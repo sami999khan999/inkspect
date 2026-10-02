@@ -79,10 +79,13 @@ export interface ContextItemView {
   group?: string;
 }
 
-/** A place sends can go: an agent in a terminal, or VS Code chat. */
+/**
+ * A place sends can go: an agent in a VS Code terminal, an agent in an agentmux (tmux) pane, or
+ * VS Code chat.
+ */
 export interface AgentTarget {
   id: string;
-  kind: 'terminal' | 'chat';
+  kind: 'terminal' | 'tmux' | 'chat';
   label: string;
   detail: string;
 }

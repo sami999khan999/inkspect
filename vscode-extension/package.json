@@ -404,6 +404,16 @@
         "category": "Browser"
       },
       {
+        "command": "vscodeBrowser.hub.register",
+        "title": "Register Browser Helper",
+        "category": "Browser"
+      },
+      {
+        "command": "vscodeBrowser.hub.unregister",
+        "title": "Remove Browser Helper",
+        "category": "Browser"
+      },
+      {
         "command": "vscodeBrowser.chooseAgentTerminal",
         "title": "Choose Agent Terminal",
         "category": "Browser",
@@ -436,6 +446,14 @@
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "vscodeBrowser.hub.register",
+          "when": "isLinux"
+        },
+        {
+          "command": "vscodeBrowser.hub.unregister",
+          "when": "isLinux"
+        },
         {
           "command": "vscodeBrowser.newTab",
           "when": "activeWebviewPanelId == 'vscodeBrowser.browser'"
@@ -1003,6 +1021,25 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Sync bookmarks both ways with linked browsers."
+        },
+        "vscodeBrowser.agent.tmuxSockets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[\\w.-]{1,64}$"
+          },
+          "default": [
+            "agents",
+            "default"
+          ],
+          "scope": "machine",
+          "markdownDescription": "tmux servers to look for agents on, by socket name (`tmux -L <name>`): agents running in their panes (for example **agentmux** threads, on `agents`) can receive sends from the Agent Context view and the browser. `default` is the tmux server you get without `-L`."
+        },
+        "vscodeBrowser.hub.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Register the **browser helper** with your browsers (Linux): the Inkspect browser extension then links to VS Code without pairing, and can save captures into your projects and send them to agents even when VS Code is closed. Run **Browser: Remove Browser Helper** to unregister it."
         },
         "vscodeBrowser.shortcuts": {
           "type": "object",
