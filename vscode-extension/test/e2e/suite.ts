@@ -1,12 +1,15 @@
 // Integration tests. They run inside a VS Code instance (see runTests.mjs), drive the extension
 // through its commands and read its state with the `vscodeBrowser.debug.state` command.
 import * as assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { WebSocket } from 'ws';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { join, sep } from 'node:path';
+import { join } from 'node:path';
 import * as vscode from 'vscode';
+import { CHROME_EXTENSION_ID } from '@inkspect/shared/hub';
+import { frame, FrameDecoder } from '../../src/hub/framing';
 
 interface DebugTab {
   id: string;
@@ -40,6 +43,7 @@ interface DebugState {
     id: string;
     kind: string;
     title: string;
+    time: number;
     file?: string;
     url?: string;
     sentTo: string[];
@@ -343,18 +347,21 @@ export async function run(): Promise<void> {
         await waitFor('the agent terminal', (s) =>
           s.agents.some((a) => a.kind === 'terminal' && a.label === 'Claude Code'),
         );
+        const taken = Date.now();
         const path = (await exec('vscodeBrowser.screenshot.viewport')) as string;
-        // Every capture lands in the Agent Context list.
+        assert.ok(existsSync(path), path);
+        // Every capture lands in the Agent Context list, with its own copy in the project's
+        // .inkspect folder (which is what the agent gets).
         const item = await waitFor('the screenshot in Agent Context', (s) =>
           s.context.find(
-            (i) => i.kind === 'screenshot' && i.file && path.endsWith(i.file.replace(/\//g, sep)),
+            (i) => i.kind === 'screenshot' && i.time >= taken && i.file?.includes(`.inkspect`),
           ),
         );
         assert.equal(await exec('vscodeBrowser.screenshot.sendToTerminal'), 'Claude Code');
         for (const deadline = Date.now() + 5000; !typed && Date.now() < deadline;) {
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
-        assert.ok(typed.includes(path), typed);
+        assert.ok(typed.includes(item.id) && typed.includes('capture.png'), typed);
         assert.ok(!/[\r\n]/.test(typed), 'Enter must not be pressed');
         await waitFor('the item marked as sent', (s) =>
           s.context.find((i) => i.id === item.id)?.sentTo.includes('Claude Code'),
@@ -682,7 +689,8 @@ export async function run(): Promise<void> {
             assert.equal((await next('send.result')).ok, true);
           }
           const grouped = await waitFor('the grouped captures', (st) => {
-            const items = st.context.filter((c) => c.title.startsWith('Drawings ') && c.group);
+            // Its own group: Agent Context keeps earlier runs' captures (the project's store).
+            const items = st.context.filter((c) => c.group === `group-${run}`);
             return items.length === 2 ? items : undefined;
           });
           assert.equal(grouped[0]!.group, grouped[1]!.group);
@@ -719,19 +727,21 @@ export async function run(): Promise<void> {
           // A capture reaches the Agent Context list by itself ("context"), and a later send of
           // the same capture reuses that item instead of adding another.
           const capture = `cap-${Date.now()}`;
+          // Its own title: Agent Context keeps earlier runs' captures.
+          const title = `Element header.site ${capture}`;
           sendPaired({
             type: 'send',
             id: 's3',
             target: 'context',
             text: 'The header overlaps the logo',
-            label: 'Element header.site',
+            label: title,
             kind: 'element',
             capture,
             pageUrl: 'https://x.dev/',
           });
           assert.equal((await next('send.result')).ok, true);
           const shared = await waitFor('the capture in Agent Context', (st) =>
-            st.context.find((c) => c.title === 'Element header.site'),
+            st.context.find((c) => c.title === title),
           );
           assert.equal(shared.kind, 'element');
           assert.deepEqual(shared.sentTo, []);
@@ -740,13 +750,13 @@ export async function run(): Promise<void> {
             id: 's4',
             target: 'terminal',
             text: 'The header overlaps the logo',
-            label: 'Element header.site',
+            label: title,
             kind: 'element',
             capture,
           });
           assert.equal((await next('send.result')).ok, true);
           const after = await waitFor('the capture sent', (st) => {
-            const items = st.context.filter((c) => c.title === 'Element header.site');
+            const items = st.context.filter((c) => c.title === title);
             return items.length === 1 && items[0]!.sentTo.length ? items : undefined;
           });
           assert.equal(after[0]!.id, shared.id);
@@ -812,6 +822,53 @@ export async function run(): Promise<void> {
         assert.equal(await closed, 4001);
       } finally {
         for (const socket of sockets) socket.terminate();
+      }
+    });
+
+    await test('the browser helper links a browser without pairing, through the hub', async () => {
+      if (process.platform !== 'linux') return;
+      type HubState = { leader: boolean; launcher?: string; browsers: { name: string }[] };
+      const hub = () => exec('vscodeBrowser.debug.hub') as Promise<HubState>;
+      // runTests.mjs points the hub's folders at out/e2e, away from the real browsers.
+      let state = await hub();
+      for (const deadline = Date.now() + 10_000; !state.leader && Date.now() < deadline;) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        state = await hub();
+      }
+      assert.ok(state.leader && state.launcher, JSON.stringify(state));
+      // Started the way Chrome starts a native messaging host.
+      const host = spawn(state.launcher, [`chrome-extension://${CHROME_EXTENSION_ID}/`], {
+        stdio: ['pipe', 'pipe', 'inherit'],
+      });
+      const received: { type: string; [key: string]: unknown }[] = [];
+      const decoder = new FrameDecoder(
+        1 << 20,
+        (text) => {
+          const message = JSON.parse(text) as { type: string; data?: string };
+          received.push(message.type === 'link' ? JSON.parse(message.data!) : message);
+        },
+        () => {},
+      );
+      host.stdout.on('data', (chunk: Buffer) => decoder.push(chunk));
+      try {
+        await until('the hub to say VS Code is there', () =>
+          received.some((m) => m.type === 'status' && m.vscode === true),
+        );
+        const client = { id: `hub-${Date.now()}`, browser: 'Hub Browser' };
+        const hello = JSON.stringify({ v: 1, type: 'hello', client, token: '' });
+        host.stdin.write(frame(JSON.stringify({ v: 1, type: 'link', data: hello })));
+        // No token, no pairing: the helper is trusted.
+        await until('the welcome', () => received.some((m) => m.type === 'welcome'));
+        assert.ok(received.some((m) => m.type === 'windows'));
+        assert.ok(!received.some((m) => m.type === 'error'), JSON.stringify(received));
+        for (const deadline = Date.now() + 5_000; Date.now() < deadline;) {
+          if ((await hub()).browsers.some((b) => b.name === 'Hub Browser')) break;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        assert.ok((await hub()).browsers.some((b) => b.name === 'Hub Browser'));
+      } finally {
+        host.stdin.end();
+        host.kill();
       }
     });
 

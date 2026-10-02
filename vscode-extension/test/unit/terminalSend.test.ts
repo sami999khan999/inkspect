@@ -7,6 +7,7 @@ import {
   parseWindowsProcesses,
   splitCommandLine,
 } from '../../src/agent/agentDetect';
+import { fitsInline, pasteText, typedLine } from '../../src/agent/sendParts';
 import { bracketedPaste, shellPath } from '../../src/features/terminalSend';
 import {
   elementSummary,
@@ -30,9 +31,29 @@ describe('pasting into an agent', () => {
   });
 });
 
+describe('putting a send into an agent', () => {
+  it('keeps text inline when the agent can take it', () => {
+    expect(fitsInline('a\nb', true)).toBe(true);
+    expect(fitsInline('x'.repeat(20_001), true)).toBe(false);
+    expect(fitsInline('a\nb', false)).toBe(false);
+    expect(fitsInline('one short line', false)).toBe(true);
+  });
+
+  it('drops paste markers for a paste someone else wraps', () => {
+    expect(pasteText('a\x1b[200~b\x1b[201~\r\nc')).toBe('ab\nc');
+  });
+
+  it('types one line without control characters into a plain terminal', () => {
+    expect(typedLine(['/tmp/a.png', 'look\r\nhere'])).toBe('/tmp/a.png look here');
+    expect(typedLine(['rm\x0f -rf\x1b#8 x\x7f'])).toBe('rm -rf#8 x');
+    expect(typedLine(['tab\tkept'])).toBe('tab\tkept');
+  });
+});
+
 describe('finding agents in terminals', () => {
   it('recognizes agent CLIs by their program or script', () => {
     expect(matchAgent('claude')?.label).toBe('Claude Code');
+    expect(matchAgent('/home/me/.local/bin/agy')?.id).toBe('agy');
     expect(matchAgent('claude --resume')?.id).toBe('claude');
     expect(matchAgent('C:\\Users\\me\\.local\\bin\\claude.exe')?.id).toBe('claude');
     expect(

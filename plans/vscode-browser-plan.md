@@ -610,6 +610,27 @@ plans/                this plan
 - [x] Record: the page as a WebM video, saved next to the screenshots and offered to the agent.
 - [ ] Screen recording as GIF: not done (WebM needs no encoder; agents read video paths).
 
+## Phase 13: Projects, the browser helper and agentmux
+
+The browser, VS Code and agents in tmux (agentmux threads) meet in **projects** (folders), through a local **hub** that browsers start as their native messaging host.
+
+**The hub** (`src/hub/`, bundled as `dist/hub.js`, no `vscode` imports)
+- [x] One daemon per user on a Unix socket in `$XDG_RUNTIME_DIR/inkspect/` (folder 0700, socket and token 0600, a lock file). Browsers start the shim (`hub.js` as a native host), which starts the daemon if needed and authenticates with its token; VS Code windows connect directly. It exits after 10 minutes unused; a newer extension replaces an older hub.
+- [x] **Registered on activation (Linux):** the hub is copied to `$XDG_DATA_HOME/inkspect/hub/` with a launcher that runs it with VS Code's own Node (`ELECTRON_RUN_AS_NODE`), and a host manifest goes to every browser found (Chrome, Chromium, Brave, Vivaldi, Edge, Opera; Firefox best effort). Only the Inkspect extension may start it (`allowed_origins` with the id the manifest `key` fixes). Commands: **Register Browser Helper**, **Remove Browser Helper**; setting `hub.enabled`.
+- [x] **The browser link through the hub:** the bridge protocol travels inside hub frames to one VS Code window (the leader: the oldest one). Browsers on the hub need no pairing. Bookmark sync, shortcuts and sends work as over the WebSocket, which stays as the fallback when the helper isn't installed.
+- [x] The bridge server's browser logic (bookmarks, shortcuts, sends) moved to `LinkService` (`src/link/`), shared by both transports.
+
+**Projects and their store**
+- [x] A project's captures live in `<project>/.inkspect/items/<id>/` (`item.json`, the image or recording, `context.md`, `thumb.jpg`), written whole and renamed into place; `.inkspect/.gitignore` ignores everything. Kept until removed (removals can be undone for 15 seconds). The hub writes the browser's captures; VS Code writes its own.
+- [x] **Agent Context reads the workspace's store** (or one in global storage without a folder): captures saved from the browser appear there, and VS Code's captures are on disk too (no more full images in memory). Long text for agents goes to `.inkspect/files/`.
+- [x] The hub lists projects from VS Code windows' folders, agentmux threads (`@project` on tmux sessions), projects with captures, and pinned ones; and suggests one per page: the project that site's captures went to, the project whose dev server serves a localhost page (`/proc`: port, process, its folder), the last one used.
+
+**Sending to agents**
+- [x] Agents in agentmux threads (`tmux -L agents` by default, setting `agent.tmuxSockets`) are send targets: found under the pane's process (or by `@harness`), never a pane back at its shell. Sends are pasted with `paste-buffer -p` (a bracketed paste), a space after each part, never Enter, never a focus change.
+- [x] Default target per project: the one used last, else the agent in the kitty beside the VS Code window (`kitty-pair`), else a VS Code terminal agent, else the agentmux agent used most recently.
+- [x] The Agent Context view lists agentmux agents next to terminal agents and chat.
+- [ ] Not done yet: macOS and Windows for the hub (the WebSocket link is used there); Firefox's native host and sidebar untested (Firefox isn't installed on the development machine).
+
 ---
 
 ## Milestones

@@ -1,10 +1,23 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
 import * as vscode from 'vscode';
+import type { ItemMeta } from '@inkspect/shared/hub';
 import { copyImageBytes, copyText } from '../features/clipboard';
-import { contextFolder } from '../features/context';
-import { displayPath } from '../features/screenshots';
+import { displayPath, localWorkspaceFolder } from '../features/screenshots';
+import {
+  emptyTrash,
+  itemFile,
+  readItem,
+  readItems,
+  readItemText,
+  removeItems,
+  restoreItems,
+  STORE_FOLDER,
+  TRASH_MS,
+  updateItem,
+  writeItem,
+} from '../hub/store';
 import {
   elementSummary,
   previewText,
@@ -19,9 +32,9 @@ export interface ContextInput {
   detail?: string;
   /** The text sent to the agent (Markdown). */
   text?: string;
-  /** An image kept in memory until it is sent (then written to a file). */
+  /** An image, saved with the item. */
   image?: { bytes: Uint8Array; mimeType: string };
-  /** A file already saved (a screenshot or recording). */
+  /** A file already saved (a screenshot or recording), copied into the item. */
   file?: string;
   url?: string;
   /** Items with the same key replace each other (the console errors of one page). */
@@ -33,74 +46,195 @@ export interface ContextInput {
   group?: string;
 }
 
-export interface ContextItem extends ContextInput {
+export interface ContextItem {
   id: string;
+  kind: ContextKind;
+  title: string;
+  detail?: string;
+  text?: string;
+  /** The item's image or recording, in the project's `.inkspect/`. */
+  file?: string;
+  /** The file's type, when it is an image. */
+  mimeType?: string;
+  /** A small JPEG of the image, if one was saved. */
+  thumb?: string;
+  url?: string;
+  key?: string;
+  group?: string;
+  groupIndex?: number;
+  /** Captured in the browser (through the helper) or in VS Code. */
+  source: 'browser' | 'vscode';
+  /** The folder whose `.inkspect/` holds it. */
+  project: string;
   time: number;
   sentTo: string[];
 }
 
-const MAX_ITEMS = 60;
-/** How long a removal can be undone. */
-const UNDO_MS = 15_000;
-/** Images older than this many items drop their bytes (their file stays, if any). */
-const MAX_IMAGES = 20;
+const IMAGE_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+};
+
+const extensionOf = (mimeType: string) =>
+  mimeType
+    .split('/')[1]
+    ?.replace('jpeg', 'jpg')
+    .replace(/[^a-z0-9]/g, '') || 'png';
+
+/** A store item as an Agent Context item. */
+function itemFromMeta(root: string, meta: ItemMeta): ContextItem {
+  const file = itemFile(root, meta, 'file');
+  const text = readItemText(root, meta);
+  return {
+    id: meta.id,
+    kind: meta.kind,
+    title: meta.title,
+    detail: meta.detail,
+    text: text?.replace(/\n$/, ''),
+    file,
+    mimeType: file ? IMAGE_TYPES[extname(file).slice(1).toLowerCase()] : undefined,
+    thumb: itemFile(root, meta, 'thumb'),
+    url: meta.url,
+    key: meta.key,
+    group: meta.group,
+    groupIndex: meta.groupIndex,
+    source: meta.source,
+    time: meta.time,
+    sentTo: meta.sentTo,
+    project: root,
+  };
+}
 
 /**
- * The Agent Context list: everything captured in the browser, newest first, ready to send to an
- * agent. It lives for the VS Code session.
+ * The Agent Context list: everything captured for this project, newest first, ready to send to
+ * an agent. It lives in the project's `.inkspect/` folder (see src/hub/store.ts), shared with the
+ * browser: captures saved there from the browser show up here, and the other way round. Without
+ * a local folder, a store in global storage is used.
  */
 export class ContextTray implements vscode.Disposable {
   private items: ContextItem[] = [];
+  private root: string;
   private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChange = this.onDidChangeEmitter.event;
   private readonly onDidAddImageEmitter = new vscode.EventEmitter<ContextItem>();
   /** An item with an image was added (the view fetches its thumbnail). */
   readonly onDidAddImage = this.onDidAddImageEmitter.event;
+  private watcher?: vscode.Disposable[];
+  /** The last capture time given out: captures in the same millisecond keep their order. */
+  private lastTime = 0;
+  private reloadTimer?: ReturnType<typeof setTimeout>;
+  private readonly disposables: vscode.Disposable[] = [];
 
-  constructor(private readonly globalStorage: string) {}
-
-  /**
-   * Adds an item at the top. An item with the same `key` is replaced; with `quiet`, it keeps its
-   * place (so a growing error list doesn't jump above what the user captured last).
-   */
-  add(input: ContextInput, options: { quiet?: boolean } = {}): ContextItem {
-    const index = input.key ? this.items.findIndex((i) => i.key === input.key) : -1;
-    const previous = index >= 0 ? this.items[index] : undefined;
-    const item: ContextItem = {
-      ...input,
-      // A capture sent again (same key) stays in its group.
-      group: input.group ?? previous?.group,
-      id: previous?.id ?? randomUUID(),
-      time: options.quiet && previous ? previous.time : Date.now(),
-      sentTo: previous && options.quiet ? previous.sentTo : [],
-    };
-    if (previous && options.quiet) this.items[index] = item;
-    else {
-      if (index >= 0) this.items.splice(index, 1);
-      this.items.unshift(item);
-    }
-    this.trim();
-    if (item.image) this.onDidAddImageEmitter.fire(item);
-    this.onDidChangeEmitter.fire();
-    return item;
+  constructor(
+    globalStorage: string,
+    /** The folder whose store the list shows (the workspace's, else the inbox). */
+    private readonly rootOf: () => string = () =>
+      localWorkspaceFolder() ?? join(globalStorage, 'inbox'),
+  ) {
+    this.root = rootOf();
+    emptyTrash(this.root, 0);
+    this.load();
+    this.watch();
+    const folders = vscode.workspace.onDidChangeWorkspaceFolders?.(() => {
+      const root = this.rootOf();
+      if (root === this.root) return;
+      this.root = root;
+      this.load();
+      this.watch();
+    });
+    if (folders) this.disposables.push(folders);
   }
 
-  /** Keeps the newest MAX_ITEMS; a group is kept or dropped whole, never cut in half. */
-  private trim(): void {
-    if (this.items.length > MAX_ITEMS) {
-      // A group reaching past the limit goes whole, unless it holds the newest item (which
-      // always stays).
-      const dropped = new Set(this.items.slice(MAX_ITEMS).map((i) => i.group));
-      dropped.delete(this.items[0]!.group);
-      dropped.delete(undefined);
-      this.items = this.items.filter(
-        (item, index) => index < MAX_ITEMS && !(item.group && dropped.has(item.group)),
-      );
-    }
-    let images = 0;
+  /** The folder whose `.inkspect/` the list shows. */
+  get project(): string {
+    return this.root;
+  }
+
+  private fromMeta(meta: ItemMeta): ContextItem {
+    return itemFromMeta(this.root, meta);
+  }
+
+  /** Items of any project's store, by id (sends that come through the hub). */
+  itemsIn(project: string, ids: readonly string[]): ContextItem[] {
+    // From disk when not in the list yet (just saved by the hub; the watcher catches up later).
+    return ids.flatMap((id) => {
+      const known = project === this.root ? this.get(id) : undefined;
+      if (known) return [known];
+      const meta = readItem(project, id);
+      return meta ? [itemFromMeta(project, meta)] : [];
+    });
+  }
+
+  /** Reads the list from the store again (it changed on disk, or the folder changed). */
+  load(): void {
+    const before = new Set(this.items.map((i) => i.id));
+    this.items = readItems(this.root).map((meta) => this.fromMeta(meta));
     for (const item of this.items) {
-      if (item.image && ++images > MAX_IMAGES && item.file) item.image = undefined;
+      if (!before.has(item.id) && item.mimeType) this.onDidAddImageEmitter.fire(item);
     }
+    this.onDidChangeEmitter.fire();
+  }
+
+  /** Follows the store: the browser and other windows add to it too. */
+  private watch(): void {
+    for (const d of this.watcher ?? []) d.dispose();
+    this.watcher = undefined;
+    if (typeof vscode.workspace.createFileSystemWatcher !== 'function') return;
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(this.root), `${STORE_FOLDER}/items/*/item.json`),
+    );
+    const reload = () => {
+      clearTimeout(this.reloadTimer);
+      this.reloadTimer = setTimeout(() => this.load(), 150);
+    };
+    this.watcher = [
+      watcher,
+      watcher.onDidCreate(reload),
+      watcher.onDidChange(reload),
+      watcher.onDidDelete(reload),
+    ];
+  }
+
+  /**
+   * Adds an item at the top, saved in the store. An item with the same `key` is replaced; with
+   * `quiet`, it keeps its place (so a growing error list doesn't jump above what the user
+   * captured last).
+   */
+  add(input: ContextInput, options: { quiet?: boolean } = {}): ContextItem {
+    const previous = input.key ? this.items.find((i) => i.key === input.key) : undefined;
+    const keep = options.quiet && previous;
+    const meta = writeItem(
+      this.root,
+      {
+        kind: input.kind,
+        title: input.title,
+        detail: input.detail,
+        url: input.url,
+        // A capture sent again (same key) stays in its group.
+        group: input.group ?? previous?.group,
+        groupIndex: previous?.groupIndex,
+        key: input.key,
+        source: 'vscode',
+        text: input.text,
+        media: input.image
+          ? { bytes: input.image.bytes, extension: extensionOf(input.image.mimeType) }
+          : undefined,
+        copyFrom: input.image ? undefined : input.file,
+        time: keep ? previous.time : (this.lastTime = Math.max(Date.now(), this.lastTime + 1)),
+        sentTo: keep ? previous.sentTo : [],
+      },
+      previous ? readItem(this.root, previous.id) : undefined,
+    );
+    const item = this.fromMeta(meta);
+    this.items = [item, ...this.items.filter((i) => i.id !== item.id)].sort(
+      (a, b) => b.time - a.time,
+    );
+    if (item.mimeType) this.onDidAddImageEmitter.fire(item);
+    this.onDidChangeEmitter.fire();
+    return item;
   }
 
   all(): readonly ContextItem[] {
@@ -111,7 +245,7 @@ export class ContextTray implements vscode.Disposable {
     return this.items.find((i) => i.id === id);
   }
 
-  /** The item captured last (updates of kept items don't count). */
+  /** The item captured last. */
   latest(): ContextItem | undefined {
     return [...this.items].sort((a, b) => b.time - a.time)[0];
   }
@@ -120,32 +254,28 @@ export class ContextTray implements vscode.Disposable {
     this.removeMany([id]);
   }
 
+  /** What the last removal took (Clear all, a card, a group), for Undo: kept for a short while. */
+  private removed?: { items: ContextItem[]; timer: ReturnType<typeof setTimeout> };
+
   removeMany(ids: readonly string[]): void {
-    const gone = new Set(ids);
-    this.keepForUndo(this.items.filter((i) => gone.has(i.id)));
+    const gone = new Set(removeItems(this.root, ids));
+    const items = this.items.filter((i) => gone.has(i.id));
     this.items = this.items.filter((i) => !gone.has(i.id));
+    this.keepForUndo(items);
     this.onDidChangeEmitter.fire();
   }
-
-  /**
-   * What the last removal took (Clear all, a card, a group), for Undo: kept for a short while,
-   * then gone (the list is the only place in-memory screenshots live).
-   */
-  private removed?: {
-    items: ContextItem[];
-    before: ContextItem[];
-    timer: ReturnType<typeof setTimeout>;
-  };
 
   private keepForUndo(items: ContextItem[]): void {
     if (this.removed) clearTimeout(this.removed.timer);
     this.removed = undefined;
     if (!items.length) return;
+    const root = this.root;
     const timer = setTimeout(() => {
       this.removed = undefined;
+      emptyTrash(root, TRASH_MS);
       this.onDidChangeEmitter.fire();
-    }, UNDO_MS);
-    this.removed = { items, before: [...this.items], timer };
+    }, TRASH_MS + 1_000);
+    this.removed = { items, timer };
   }
 
   /** "Removed 4 items", while the last removal can be undone. */
@@ -155,25 +285,30 @@ export class ContextTray implements vscode.Disposable {
     return count === 1 ? `Removed "${this.removed!.items[0]!.title}"` : `Removed ${count} items`;
   }
 
-  /** Puts back what the last removal took, where it was (anything captured since stays on top). */
+  /** Puts back what the last removal took (it keeps its time, so its place). */
   undo(): ContextItem[] {
     const removed = this.removed;
     if (!removed) return [];
     clearTimeout(removed.timer);
     this.removed = undefined;
-    const back = new Set(removed.items.map((i) => i.id));
-    const now = new Set(this.items.map((i) => i.id));
-    const before = new Set(removed.before.map((i) => i.id));
-    const added = this.items.filter((i) => !before.has(i.id));
-    this.items = [...added, ...removed.before.filter((i) => back.has(i.id) || now.has(i.id))];
-    this.trim();
-    this.onDidChangeEmitter.fire();
-    return removed.items;
+    const back = new Set(
+      restoreItems(
+        this.root,
+        removed.items.map((i) => i.id),
+      ),
+    );
+    this.load();
+    return this.items.filter((i) => back.has(i.id));
   }
 
-  /** The items of a group, oldest first (the order they were captured in). */
+  /** The items of a group, in the order they were captured. */
   inGroup(group: string): ContextItem[] {
-    return this.items.filter((i) => i.group === group).reverse();
+    return this.items
+      .filter((i) => i.group === group)
+      .sort(
+        (a, b) =>
+          (a.groupIndex ?? 0) - (b.groupIndex ?? 0) || a.time - b.time || (a.id < b.id ? -1 : 1),
+      );
   }
 
   /**
@@ -181,66 +316,81 @@ export class ContextTray implements vscode.Disposable {
    * them is. Returns the group, or undefined for fewer than two items.
    */
   group(ids: readonly string[]): string | undefined {
-    const members = this.items.filter((i) => ids.includes(i.id));
+    const members = this.items
+      .filter((i) => ids.includes(i.id))
+      .sort((a, b) => a.time - b.time || (a.id < b.id ? -1 : 1));
     if (members.length < 2) return undefined;
     const group = randomUUID();
     const newest = Math.max(...members.map((m) => m.time));
-    for (const member of members) {
-      member.group = group;
-      member.time = newest;
-    }
-    // Together in the list, at the newest one's place.
-    const first = this.items.findIndex((i) => members.includes(i));
-    const rest = this.items.filter((i) => !members.includes(i));
-    rest.splice(first, 0, ...members);
-    this.items = rest;
-    this.onDidChangeEmitter.fire();
+    members.forEach((member, index) =>
+      updateItem(this.root, member.id, (meta) => ({
+        ...meta,
+        group,
+        groupIndex: index,
+        time: newest,
+      })),
+    );
+    this.load();
     return group;
   }
 
   ungroup(group: string): void {
-    for (const item of this.items) if (item.group === group) item.group = undefined;
-    this.onDidChangeEmitter.fire();
+    for (const item of this.items) {
+      if (item.group !== group) continue;
+      updateItem(this.root, item.id, (meta) => ({
+        ...meta,
+        group: undefined,
+        groupIndex: undefined,
+      }));
+    }
+    this.load();
   }
 
   clear(): void {
-    this.keepForUndo(this.items);
-    this.items = [];
-    this.onDidChangeEmitter.fire();
+    this.removeMany(this.items.map((i) => i.id));
   }
 
   /** Records that an item went to an agent. */
   markSent(item: ContextItem, agent: string): void {
-    if (!item.sentTo.includes(agent)) item.sentTo.push(agent);
+    const current = (item.project === this.root && this.get(item.id)) || item;
+    if (current.sentTo.includes(agent)) return;
+    current.sentTo = [...current.sentTo, agent];
+    updateItem(item.project, item.id, (meta) => ({ ...meta, sentTo: current.sentTo }));
     this.onDidChangeEmitter.fire();
   }
 
-  /** The item's file, writing its image first when it has none yet. */
+  /** The item's file (images are saved as they are captured). */
   async fileOf(item: ContextItem): Promise<string | undefined> {
-    if (item.file || !item.image) return item.file;
-    const folder = contextFolder(this.globalStorage);
-    await mkdir(folder, { recursive: true });
-    const extension = item.image.mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png';
-    // The id keeps images written in the same millisecond (a group) apart.
-    const path = join(folder, `${item.kind}-${Date.now()}-${item.id.slice(0, 8)}.${extension}`);
-    await writeFile(path, item.image.bytes);
-    item.file = path;
-    this.onDidChangeEmitter.fire();
-    return path;
+    return (this.get(item.id) ?? item).file;
   }
 
   /** Copies an item: its image (or file path), else its text. */
   async copy(item: ContextItem): Promise<void> {
-    if (item.image) {
+    if (item.file && item.mimeType) {
       try {
-        await copyImageBytes(item.image.bytes, item.image.mimeType);
+        await copyImageBytes(new Uint8Array(await readFile(item.file)), item.mimeType);
         return;
       } catch {
         // Types the OS clipboard can't take: copy the file's path instead.
       }
     }
-    const file = await this.fileOf(item);
-    await copyText(item.text ?? (file ? displayPath(file) : item.title));
+    await copyText(item.text ?? (item.file ? displayPath(item.file) : item.title));
+  }
+
+  /** The bytes of an item's thumbnail (its small JPEG, else the image itself). */
+  async thumbnailOf(
+    item: ContextItem,
+  ): Promise<{ data: Uint8Array; mimeType: string } | undefined> {
+    const path = item.thumb ?? (item.mimeType ? item.file : undefined);
+    if (!path) return undefined;
+    try {
+      return {
+        data: new Uint8Array(await readFile(path)),
+        mimeType: item.thumb ? 'image/jpeg' : item.mimeType!,
+      };
+    } catch {
+      return undefined;
+    }
   }
 
   view(item: ContextItem): ContextItemView {
@@ -254,7 +404,7 @@ export class ContextTray implements vscode.Disposable {
         ? ((item.kind === 'element' ? elementSummary(item.text) : undefined) ??
           previewText(item.text))
         : undefined,
-      image: !!item.image,
+      image: !!item.mimeType,
       file: item.file ? displayPath(item.file) : undefined,
       url: item.url,
       time: item.time,
@@ -265,6 +415,8 @@ export class ContextTray implements vscode.Disposable {
 
   dispose(): void {
     if (this.removed) clearTimeout(this.removed.timer);
+    clearTimeout(this.reloadTimer);
+    for (const d of [...(this.watcher ?? []), ...this.disposables]) d.dispose();
     this.onDidChangeEmitter.dispose();
     this.onDidAddImageEmitter.dispose();
   }

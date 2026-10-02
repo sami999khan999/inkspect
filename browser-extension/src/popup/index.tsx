@@ -31,6 +31,21 @@ const STATE: Record<BridgeStatus['state'], { label: string; tone: string }> = {
   offline: { label: 'VS Code not running', tone: 'off' },
 };
 
+/**
+ * Opens the side panel with the projects and their captures. It must open in the click itself
+ * (browsers allow it only as the answer to a user action), so the window id is read beforehand.
+ */
+function openProjects(windowId: number | undefined) {
+  if (__BROWSER__ === 'firefox') {
+    const sidebar = (globalThis as { browser?: { sidebarAction?: { open(): Promise<void> } } })
+      .browser?.sidebarAction;
+    void sidebar?.open();
+  } else if (windowId !== undefined) {
+    void chrome.sidePanel.open({ windowId });
+  }
+  window.close();
+}
+
 /** Opens the full page, on one of its sections. */
 function openPage(section?: string) {
   void chrome.tabs.create({
@@ -44,6 +59,7 @@ function Popup() {
   const [map, setMap] = useState<ShortcutMap>(() => effectiveShortcuts({}, isMac));
   const [toolbarKey, setToolbarKey] = useState<string>();
   const [failed, setFailed] = useState('');
+  const [windowId, setWindowId] = useState<number>();
 
   useEffect(() => {
     const refresh = () =>
@@ -53,6 +69,7 @@ function Popup() {
     refresh();
     const timer = setInterval(refresh, 1500);
     const stop = watchShortcuts((next) => setMap(next));
+    void chrome.windows.getCurrent().then((w) => setWindowId(w.id));
     void chrome.commands
       .getAll()
       // '' when the browser didn't assign the suggested key (it was taken) or the user cleared it.
@@ -156,6 +173,16 @@ function Popup() {
         <Button size="sm" variant="ghost" icon="link-external" onClick={() => openPage()}>
           Open Inkspect
         </Button>
+        {status.via === 'hub' && (
+          <Button
+            size="sm"
+            variant="ghost"
+            icon="layout-sidebar-right"
+            onClick={() => openProjects(windowId)}
+          >
+            Projects
+          </Button>
+        )}
         <IconButton
           icon="keyboard"
           label="Change shortcuts"

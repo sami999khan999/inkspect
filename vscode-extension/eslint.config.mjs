@@ -26,4 +26,14 @@ export default defineConfig(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },
   },
+  {
+    // The hub runs outside VS Code (browsers start it): no VS Code API there.
+    files: ['src/hub/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { paths: [{ name: 'vscode', message: 'src/hub/ runs outside VS Code.' }] },
+      ],
+    },
+  },
 );

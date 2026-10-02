@@ -2,6 +2,7 @@
 // content ↔ page (MAIN world) use DOM events with JSON strings, so nothing depends on how each
 // browser shares objects between worlds.
 import type { CaptureKind, SendTarget, VsCodeWindow } from '@inkspect/shared/bridge';
+import type { CaptureToSave, Project } from '@inkspect/shared/hub';
 import type { DeviceSettings, NetworkPreset } from '@inkspect/shared/devices';
 
 export type BridgeState = 'connected' | 'connecting' | 'unpaired' | 'offline';
@@ -13,6 +14,8 @@ export interface BridgeStatus {
   error?: string;
   /** The open VS Code windows a send can go to, when connected. */
   windows?: VsCodeWindow[];
+  /** How VS Code is reached: the browser helper (native messaging, no pairing) or the WebSocket. */
+  via?: 'hub' | 'ws';
 }
 
 /**
@@ -62,10 +65,32 @@ export type ToBackground =
       captures?: string[];
     }
   | { type: 'openOptions' }
-  | { type: 'pair'; code: string };
+  | { type: 'pair'; code: string }
+  /** The projects the browser helper knows, and the one `url`'s captures most likely go to. */
+  | { type: 'projects'; url?: string }
+  /** Saves captures into a project's `.inkspect/` (through the browser helper). */
+  | {
+      type: 'saveCapture';
+      project: string;
+      url?: string;
+      captures: CaptureToSave[];
+      /** Also send them: a target id, or 'default' for the project's default target. */
+      send?: string;
+    };
 
 export type BackgroundReply =
-  | { ok: true; dataUrl?: string; path?: string; bookmarked?: boolean; status?: BridgeStatus }
+  | {
+      ok: true;
+      dataUrl?: string;
+      path?: string;
+      bookmarked?: boolean;
+      status?: BridgeStatus;
+      projects?: Project[];
+      suggested?: string;
+      ids?: string[];
+      /** The agent a send went to. */
+      sentTo?: string;
+    }
   | { ok: false; error: string };
 
 export type ToContent =

@@ -52,6 +52,19 @@ Webview (React 19 + Vite → dist/webview/)
 - Every tab gets its own browser window target (`Target.createTarget newWindow`) and its own `TabSession`.
 - Chromium is Chrome for Testing, downloaded into globalStorage on first use. Branded Chrome can't load extensions.
 
+**The hub (projects, the browser helper, agentmux)**
+
+```
+Browser extension ──native messaging──► hub.js (shim) ──┐
+VS Code windows ── src/link/hubClient.ts ───────────────┴─► hub.js --serve (one per user, Unix socket)
+                                                              │ tmux paste-buffer ──► agents in agentmux panes
+                  <project>/.inkspect/items/<id>/   ◄── written by the hub (browser captures) and VS Code
+```
+
+- `src/hub/` is a separate program (`dist/hub.js`) that browsers start as their native messaging host. On activation (Linux) VS Code copies it to `$XDG_DATA_HOME/inkspect/hub/` and registers it with every browser found (`src/hub/install.ts`).
+- The daemon (`src/hub/daemon.ts`) lists **projects** (VS Code windows' folders, agentmux threads, projects with captures, pinned ones), saves the browser's captures into `<project>/.inkspect/`, finds agents in tmux panes and pastes sends into them, and forwards the browser link (the bridge protocol, in `link` frames) to one VS Code window, the leader. Browsers on the hub need no pairing; the WebSocket link stays as the fallback.
+- Protocol: `@inkspect/shared/hub` (versioned, validated both ways, like the bridge).
+
 **Where state lives**
 
 - The host is the source of truth for tabs, bookmarks, history, annotations and extensions. The webview is a view that can be rebuilt from host state.
@@ -83,7 +96,9 @@ src/engineHost.ts       starts/stops the shared engine, Chromium download, crash
 src/browser/            Chromium + CDP: BrowserEngine, TabSession, input mapping, page scripts
 src/panel/              BrowserPanel (window with tabs), Tab, inspector, DevTools panel, webview HTML
 src/features/           bookmarks, history, sessions, downloads, screenshots, extensions, zoom...
-src/agent/              agent tools (tools.ts), MCP (mcpProtocol.ts, mcpServer.ts), send-to-chat
+src/agent/              agent tools (tools.ts), MCP (mcpProtocol.ts, mcpServer.ts), send-to-chat, sendParts.ts
+src/hub/                the hub (no vscode): daemon, shim, install, store (.inkspect), projects, tmux, agents
+src/link/               LinkService (what a linked browser does, any transport) and the hub client
 src/sidebar/            Activity Bar views: trees (actions, tabs, bookmarks), Agent Context and Shortcuts webviews
 src/shared/             code shared by host AND webview: protocol, url, devices, elementInfo...
 webview/src/            React UI: App.tsx, components/, drawing/, pages/ (vb:// pages)
@@ -125,6 +140,7 @@ npm run package      # production build + .vsix
   - Put anything used by both sides here, especially message types and pure logic.
 - **`webview/` never imports `vscode` or Node modules.** It talks to the host only through `postToHost()` (`webview/src/vscode.ts`).
 - **Keep `src/agent/tools.ts` and `src/agent/mcpProtocol.ts` free of `vscode`.** This keeps them unit-testable. Reach the browser through the `BrowserAgentApi` interface.
+- **`src/hub/` never imports `vscode`** (an ESLint rule checks it): it runs outside VS Code. Code it shares with the extension (`agentDetect`, `processes`, `sendParts`) stays `vscode`-free too.
 - **Only `src/browser/` talks CDP.**
   - Use `TabSession` methods and add new ones there; don't send CDP from panel or feature code.
   - `BrowserEngine` owns the process and the browser-level session.
@@ -163,7 +179,9 @@ npm run package      # production build + .vsix
 ### Sending to the agent
 
 - Every capture (picked element, screenshot, recording, Copy-for-AI text, report) goes into the Agent Context list with `addContext()`, and every "send to agent" goes through `captureAndSend()` / `sendContextItem()` (`src/agent/chat.ts`), so everything sent also shows in the **Agent Context** view.
+- The Agent Context list is the workspace's **`.inkspect/` store** (`src/hub/store.ts`): one folder per item, written whole and renamed into place, read by VS Code and the hub alike. Never keep capture bytes only in memory; never let an `item.json` name a path outside its folder (`itemFile`).
 - Terminal sends go only to terminals where `AgentTerminals` (`src/features/terminalSend.ts`) found an agent, or that the user picked. Never type into a plain shell by default, and don't focus the terminal. Agent recognition is pure and unit-tested (`src/agent/agentDetect.ts`).
+- Agents in tmux panes (agentmux threads) are targets too (`tmux:<socket>:<pane>`, `src/hub/agents.ts`): only panes where an agent runs, pasted with `paste-buffer -p` through `pasteIntoPane()`, never followed by Enter. Every tmux call is `execFile` with an argument array.
 
 ### Agent tools
 
@@ -183,6 +201,7 @@ npm run package      # production build + .vsix
 - Global data (bookmarks, history) uses `JsonStore` (debounced atomic writes) in globalStorage.
 - Per-workspace session data goes in `workspaceState`, and small preferences in `globalState`. Secrets (the MCP token) go in `context.secrets`.
 - Write into the workspace only through `localWorkspaceFolder()` (`src/features/screenshots.ts`). The extension runs on the UI side, so remote workspaces must fall back to globalStorage.
+- Captures go in the project's `.inkspect/` (see **Sending to the agent**). The hub keeps its own state in `$XDG_STATE_HOME/inkspect/hub.json` and its socket, token and lock in `$XDG_RUNTIME_DIR/inkspect/`.
 
 ### React webview
 
@@ -235,6 +254,7 @@ npm run package      # production build + .vsix
   - The MCP server requires a bearer token (compared in constant time) and checks Host and Origin.
   - Keep all of these checks.
 - No detection-evasion features. Sites that block automated browsers get the "Open in system browser" fallback, not workarounds.
+- **The hub:** its runtime folder is private (0700, owned by the user, not a link), the socket and token 0600, and every connection's first frame carries the token (constant-time compare). Only the Inkspect extension may start it (`allowed_origins` / `allowed_extensions` in the host manifests). It saves into, reads from and sends from known projects only, and pastes only into panes where it found an agent.
 
 ## Shared package (`shared/`, `@inkspect/shared`)
 
@@ -266,10 +286,12 @@ npm run package      # production build + .vsix
   - injecting the toolbar on demand (`activeTab` + `scripting`), including the MAIN-world helper
   - `captureVisibleTab` (queued to Chrome's limit of about 2 per second)
   - the responsive view's emulation (`chrome.debugger`: user agent, touch, network, CPU, media) and its framing rule (`declarativeNetRequest` session rule, see below)
-  - the VS Code link client (`bridge.ts`) and the browser half of bookmark sync (`bookmarks.ts`)
+  - the VS Code link client (`bridge.ts`): the browser helper (native messaging, `connectNative`) first, else the WebSocket; `hubRequest()` asks the helper about projects and captures
+  - the browser half of bookmark sync (`bookmarks.ts`)
 - **Content** (`src/content/`): the toolbar is React in a **closed** shadow root on `<inkspect-toolbar>`. It holds the inspector, drawing, region select, panels, the responsive view (`ResponsiveView.tsx`), and capture and stitching (`capture.ts`).
   - The toolbar is a **full-width bar at the top**, and the page moves down to make room (`pagePush.ts`: the `html` margin, plus fixed and sticky elements anchored at the top). Anything measuring the page (captures) uses `pushOffset()`.
   - The **responsive view** shows the page in a device-sized `<iframe>` of the same tab, centered and scaled to fit. The debugger's device metrics can't do this: they always draw the page at the tab's top-left. While it is open, a session rule drops `X-Frame-Options` and `Content-Security-Policy` for frames of the page's own origin, **in that tab only**, and it is removed when the view closes. The frame is sandboxed without scripted top navigation, so frame-busting scripts can't end the view. Tools that act on the page (picker, drawing, console, page context) don't reach into the frame yet and are disabled while it is open.
+- **Side panel** (`src/sidepanel/`, Chrome `side_panel`, Firefox `sidebar_action`): the projects and their saved captures, through the background (`{ type: 'hub' }` messages, allowed for the extension's own pages only).
 - **MAIN world** (`src/main-world/`): runs in the page's own JS world. It collects element details (framework components are only visible there) and hooks console, errors, `fetch` and XHR.
 
 **Rules:**
@@ -286,7 +308,7 @@ npm run package      # production build + .vsix
   - The open root hides bugs of the real build: from outside a **closed** shadow root, events don't show what they hit inside it (`composedPath()` stops at the host). Judge "inside our UI" from the root (`listenOutside` in `shared/src/ui/popover.tsx`), and keep the real-build tests in `test/e2e/run.mjs` passing: they open the real build through its button (`Extensions.triggerAction`) and click through DevTools-protocol boxes.
   - `globalThis.__inkspectTest` in the background exposes `toggleToolbar`, `reconnect`, `pair`, `bridgeStatus` and `syncState`.
   - Never ship the test build.
-- **Checks:** `npm run test:e2e:browser` must pass. It runs Chrome for Testing with the unpacked extension against a fixture site and a fake VS Code link that uses the real merge code.
+- **Checks:** `npm run test:e2e:browser` must pass. It runs Chrome for Testing with the unpacked extension against a fixture site and a fake VS Code link that uses the real merge code. Its helper test writes a host manifest into its own profile, so Chrome starts the real hub (built from `vscode-extension/src/hub/`), isolated from the machine's tmux (`INKSPECT_TMUX_SOCKETS=`).
 
 ## Housekeeping
 

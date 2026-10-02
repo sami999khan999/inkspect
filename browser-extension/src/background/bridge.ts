@@ -9,7 +9,17 @@ import {
   type ClientMessage,
   type ServerMessage,
 } from '@inkspect/shared/bridge';
+import {
+  encodeHub,
+  HUB_HOST_NAME,
+  parseHubToBrowser,
+  type BrowserToHub,
+  type HubToBrowser,
+} from '@inkspect/shared/hub';
 import type { BridgeStatus } from '../messages';
+
+/** How long to wait before looking for the browser helper again after it wasn't found. */
+const HUB_MISSING_MS = 5 * 60_000;
 
 interface Stored {
   clientId?: string;
@@ -56,6 +66,14 @@ async function listening(port: number): Promise<boolean> {
 export class BridgeClient {
   status: BridgeStatus = { state: 'offline' };
   private socket?: WebSocket;
+  /** The browser helper (native messaging), when it is installed: used instead of the socket. */
+  private hub?: chrome.runtime.Port;
+  /** Until when the helper counts as not installed (the WebSocket is used meanwhile). */
+  private hubMissingUntil = 0;
+  /** The hello went to the VS Code window that answers through the helper. */
+  private hubHello = false;
+  /** Requests to the helper waiting for their answer, by request id. */
+  private readonly hubRequests = new Map<string, (reply: HubToBrowser | undefined) => void>();
   private client?: ClientInfo;
   private token?: string;
   private retry?: ReturnType<typeof setTimeout>;
@@ -97,17 +115,51 @@ export class BridgeClient {
 
   /** Connects now if not connected (called on any wake-up of the background). */
   ensureConnected(): void {
-    if (!this.socket && !this.retry && !this.probing) this.connect();
+    if (!this.hub && !this.socket && !this.retry && !this.probing) this.connect();
   }
 
   send(message: ClientMessage): boolean {
+    if (this.hub) {
+      this.hub.postMessage(JSON.parse(encodeHub({ type: 'link', data: encode(message) })));
+      return true;
+    }
     if (this.socket?.readyState !== WebSocket.OPEN) return false;
     this.socket.send(encode(message));
     return true;
   }
 
+  /** Whether the browser helper is connected (projects and their captures go through it). */
+  get viaHub(): boolean {
+    return !!this.hub;
+  }
+
+  /**
+   * Asks the browser helper something and waits for the answer with the same request id;
+   * undefined if the helper isn't there or doesn't answer in time.
+   */
+  hubRequest<T extends HubToBrowser>(
+    message: Extract<BrowserToHub, { req: string }>,
+    timeoutMs = 30_000,
+  ): Promise<T | undefined> {
+    const hub = this.hub;
+    if (!hub) return Promise.resolve(undefined);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.hubRequests.delete(message.req);
+        resolve(undefined);
+      }, timeoutMs);
+      this.hubRequests.set(message.req, (reply) => {
+        clearTimeout(timer);
+        resolve(reply as T | undefined);
+      });
+      hub.postMessage(JSON.parse(encodeHub(message)));
+    });
+  }
+
   /** Pairs with the code VS Code shows. */
   async pair(code: string): Promise<BridgeStatus> {
+    // Through the helper, the browser is trusted without pairing.
+    if (this.hub) return this.status;
     // Wait for a connection that is still opening (or start one).
     if (!this.socket && !this.probing) this.connect();
     for (
@@ -142,6 +194,9 @@ export class BridgeClient {
     this.token = stored.token;
     this.socket?.close();
     this.socket = undefined;
+    const hub = this.hub;
+    this.hub = undefined;
+    hub?.disconnect();
     this.delay = 1000;
     this.connect();
   }
@@ -161,6 +216,7 @@ export class BridgeClient {
   private connect(port?: number, attempt = 0): void {
     clearTimeout(this.retry);
     this.retry = undefined;
+    if (port === undefined && Date.now() >= this.hubMissingUntil && this.openHub()) return;
     const target = port ?? this.basePort;
     this.setStatus({ ...this.status, state: this.token ? 'connecting' : this.status.state });
     const current = ++this.attempt;
@@ -230,6 +286,79 @@ export class BridgeClient {
     this.delay = Math.min(this.delay * 2, this.token ? 30_000 : 5_000);
   }
 
+  /**
+   * Connects through the browser helper, if it is installed. A helper that isn't installed
+   * disconnects at once; the WebSocket is used then, and the helper looked for again later.
+   */
+  private openHub(): boolean {
+    let port: chrome.runtime.Port;
+    try {
+      port = chrome.runtime.connectNative(HUB_HOST_NAME);
+    } catch {
+      this.hubMissingUntil = Date.now() + HUB_MISSING_MS;
+      return false;
+    }
+    this.hub = port;
+    this.hubHello = false;
+    let answered = false;
+    port.onMessage.addListener((raw: unknown) => {
+      answered = true;
+      const message = parseHubToBrowser(raw);
+      if (!message) return;
+      if ('req' in message) {
+        const waiting = this.hubRequests.get(message.req);
+        this.hubRequests.delete(message.req);
+        waiting?.(message);
+        return;
+      }
+      if (message.type === 'link') {
+        const inner = parseServerMessage(message.data);
+        if (inner) void this.handle(inner);
+      } else if (message.type === 'relink') {
+        this.hubHello = false;
+      } else if (message.type === 'status') {
+        if (!message.vscode) {
+          this.hubHello = false;
+          this.setStatus({
+            state: 'offline',
+            via: 'hub',
+            error: 'VS Code is not running.',
+          });
+        } else if (!this.hubHello && this.client) {
+          this.hubHello = true;
+          this.delay = 1000;
+          this.setStatus({ ...this.status, state: 'connecting', via: 'hub', error: undefined });
+          this.send({ type: 'hello', client: this.client, token: '' });
+        }
+      }
+    });
+    port.onDisconnect.addListener(() => {
+      // Read it, or Chrome logs it as unchecked.
+      const error = chrome.runtime.lastError?.message;
+      if (this.hub !== port) return;
+      this.hub = undefined;
+      clearInterval(this.keepAlive);
+      for (const waiting of this.hubRequests.values()) waiting(undefined);
+      this.hubRequests.clear();
+      if (!answered) {
+        // Not installed (or it failed to start): use the WebSocket for a while.
+        this.hubMissingUntil = Date.now() + HUB_MISSING_MS;
+        if (error) console.info(`Inkspect: browser helper not available (${error}).`);
+        this.connect();
+        return;
+      }
+      this.setStatus({ state: 'offline', via: 'hub' });
+      this.scheduleRetry();
+    });
+    // Keeps the helper (and Chrome's service worker) alive.
+    clearInterval(this.keepAlive);
+    this.keepAlive = setInterval(
+      () => port.postMessage(JSON.parse(encodeHub({ type: 'ping' }))),
+      20_000,
+    );
+    return true;
+  }
+
   private async handle(message: ServerMessage): Promise<void> {
     if (message.type === 'paired') {
       this.token = message.token;
@@ -237,7 +366,7 @@ export class BridgeClient {
       this.pairWaiter?.(message);
     } else if (message.type === 'welcome') {
       this.delay = 1000;
-      this.setStatus({ state: 'connected', peer: message.peer });
+      this.setStatus({ state: 'connected', peer: message.peer, via: this.hub ? 'hub' : 'ws' });
     } else if (message.type === 'windows') {
       if (this.status.state === 'connected') {
         this.setStatus({ ...this.status, windows: message.windows });

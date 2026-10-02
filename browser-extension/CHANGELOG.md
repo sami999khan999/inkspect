@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Projects
+
+- **Links through the browser helper** that VS Code Browser installs: no pairing, and captures can be saved and sent even with VS Code closed. Without it, the WebSocket link works as before.
+- **Save and send to a project:** after a screenshot or a copy, the popup picks the project (it suggests the one the site went to before, or the one whose dev server serves the page) and offers **Send to agent**, **Send to…** and **Save to project**. Captures are kept in the project's `.inkspect/` folder and appear in its VS Code Agent Context; sends go to its agents in agentmux, VS Code terminals or chat.
+- **The Projects side panel** (from the popup): every project with its saved captures, ready to send or remove; pin the ones to keep listed.
+
 ### Fixes
 
 - **New default keys that leave Chrome its own:** the toolbar's modes are Alt+Shift+letter (element picker Alt+Shift+E, draw W, screenshot G, console J, responsive view M), so DevTools keeps Ctrl+Shift+C, J, I and M. Keys you changed stay as they are.

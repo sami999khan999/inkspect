@@ -28,6 +28,7 @@ function writeStatic(browser, outdir) {
   }
   copyFileSync(join(root, 'src', 'options', 'options.html'), join(outdir, 'options.html'));
   copyFileSync(join(root, 'src', 'popup', 'popup.html'), join(outdir, 'popup.html'));
+  copyFileSync(join(root, 'src', 'sidepanel', 'sidepanel.html'), join(outdir, 'sidepanel.html'));
   // The icon font of the settings page and the toolbar.
   const codicons = dirname(require.resolve('@vscode/codicons/dist/codicon.css'));
   copyFileSync(join(codicons, 'codicon.ttf'), join(outdir, 'codicon.ttf'));
@@ -46,6 +47,7 @@ for (const browser of browsers) {
       'main-world': join(root, 'src/main-world/index.ts'),
       options: join(root, 'src/options/index.tsx'),
       popup: join(root, 'src/popup/index.tsx'),
+      sidepanel: join(root, 'src/sidepanel/index.tsx'),
     },
     outdir,
     bundle: true,

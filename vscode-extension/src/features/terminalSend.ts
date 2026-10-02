@@ -1,22 +1,28 @@
-import { execFile } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import * as vscode from 'vscode';
 import {
   agentFromTitle,
   agentUnder,
   matchAgent,
-  parsePs,
-  parseWindowsProcesses,
   type AgentCli,
   type ProcessInfo,
 } from '../agent/agentDetect';
+import { listProcesses } from '../agent/processes';
+import { bracketedPaste, shellPath, typedLine } from '../agent/sendParts';
 import { errorMessage } from '../browser/logger';
+import {
+  chooseDefault,
+  listClients,
+  pairedTarget,
+  paneTargets,
+  readKittyPairs,
+  type PaneTarget,
+} from '../hub/agents';
+import { listPanes } from '../hub/tmux';
 import { getConfig } from '../config';
 import type { AgentTarget } from '../shared/agentContext';
 
-/** A path as a shell argument: quoted when it has spaces or quotes. */
-export function shellPath(path: string): string {
-  return /[\s'"&()]/.test(path) ? `"${path.replace(/"/g, '\\"')}"` : path;
-}
+export { bracketedPaste, shellPath } from '../agent/sendParts';
 
 /** The target id of VS Code chat (terminal agents have `terminal:<n>` ids). */
 export const CHAT_TARGET = 'chat';
@@ -45,6 +51,14 @@ export class AgentTerminals implements vscode.Disposable {
   /** The agent terminal used last, preferred for sends. */
   private preferred?: vscode.Terminal;
   private preferChat = false;
+  /** Agents in agentmux threads (tmux panes) of this workspace's folders, at the last scan. */
+  private panes: PaneTarget[] = [];
+  /** The pane agent in the kitty beside this window (see kitty-pair), if any. */
+  private pairedPane?: string;
+  /** A pane agent picked as the default (or used last). */
+  private chosenPane?: string;
+  /** The preferred terminal was picked or used by the user (not only the first one found). */
+  private chosenTerminal = false;
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(private readonly logger?: vscode.LogOutputChannel) {
@@ -59,7 +73,10 @@ export class AgentTerminals implements vscode.Disposable {
         this.started.delete(terminal);
         this.marked.delete(terminal);
         this.scanned.delete(terminal);
-        if (this.preferred === terminal) this.preferred = undefined;
+        if (this.preferred === terminal) {
+          this.preferred = undefined;
+          this.chosenTerminal = false;
+        }
         this.onDidChangeEmitter.fire();
       }),
       vscode.window.onDidChangeActiveTerminal((terminal) => {
@@ -121,12 +138,13 @@ export class AgentTerminals implements vscode.Disposable {
     );
   }
 
-  /** Every place a send can go: the terminal agents, then VS Code chat. */
+  /** Every place a send can go: agentmux agents, the terminal agents, then VS Code chat. */
   targets(): AgentTarget[] {
     const agents = this.agents();
     const counts = new Map<string, number>();
     for (const { agent } of agents) counts.set(agent.label, (counts.get(agent.label) ?? 0) + 1);
     return [
+      ...this.panes.map(({ id, label, detail }) => ({ id, kind: 'tmux' as const, label, detail })),
       ...agents.map(({ terminal, agent }) => ({
         id: this.idOf(terminal),
         kind: 'terminal' as const,
@@ -137,11 +155,29 @@ export class AgentTerminals implements vscode.Disposable {
     ];
   }
 
-  /** Where sends go unless one is chosen: the preferred agent, else chat if it was chosen. */
+  /**
+   * Where sends go unless one is chosen: the agent picked or used last; else the one in the kitty
+   * beside this window, the terminal agent used last, the agentmux agent used most recently; else
+   * chat if it was chosen.
+   */
   defaultTarget(fallback: 'terminal' | 'chat'): string | undefined {
-    if (this.preferChat || (fallback === 'chat' && !this.preferred)) return CHAT_TARGET;
+    if (this.preferChat || (fallback === 'chat' && !this.preferred && !this.panes.length)) {
+      return CHAT_TARGET;
+    }
     const first = this.agents()[0];
-    return first ? this.idOf(first.terminal) : undefined;
+    const terminal = first ? this.idOf(first.terminal) : undefined;
+    // Only a real choice beats the agent beside this window (kitty-pair).
+    const explicit = this.chosenPane ?? (this.chosenTerminal ? terminal : undefined);
+    return chooseDefault([...this.panes, ...this.targets().filter((t) => t.kind === 'terminal')], {
+      last: explicit,
+      paired: this.pairedPane,
+      preferredTerminal: terminal,
+    });
+  }
+
+  /** An agentmux agent by its target id. */
+  paneById(id: string): PaneTarget | undefined {
+    return this.panes.find((p) => p.id === id);
   }
 
   /** Makes a target the default for sends. */
@@ -151,12 +187,22 @@ export class AgentTerminals implements vscode.Disposable {
       this.onDidChangeEmitter.fire();
       return;
     }
+    if (this.paneById(target)) {
+      this.preferChat = false;
+      if (this.chosenPane === target) return;
+      this.chosenPane = target;
+      this.chosenTerminal = false;
+      this.onDidChangeEmitter.fire();
+      return;
+    }
     const terminal = this.terminalById(target);
     if (terminal) this.setPreferred(terminal);
   }
 
   private setPreferred(terminal: vscode.Terminal): void {
     this.preferChat = false;
+    this.chosenPane = undefined;
+    this.chosenTerminal = true;
     if (this.preferred === terminal) return;
     this.preferred = terminal;
     this.onDidChangeEmitter.fire();
@@ -184,9 +230,11 @@ export class AgentTerminals implements vscode.Disposable {
 
   private async scan(): Promise<void> {
     const terminals = vscode.window.terminals;
-    if (!terminals.length) {
-      if (this.scanned.size) this.onDidChangeEmitter.fire();
+    const sockets = getConfig().agentTmuxSockets;
+    if (!terminals.length && !sockets.length) {
+      if (this.scanned.size || this.panes.length) this.onDidChangeEmitter.fire();
       this.scanned = new Map();
+      this.panes = [];
       return;
     }
     let processes: ProcessInfo[];
@@ -202,12 +250,49 @@ export class AgentTerminals implements vscode.Disposable {
       const agent = pid === undefined ? undefined : agentUnder(processes, pid);
       if (agent) next.set(terminal, agent);
     }
+    const panesChanged = await this.scanPanes(sockets, processes);
     const changed =
+      panesChanged ||
       next.size !== this.scanned.size ||
       [...next].some(([terminal, agent]) => this.scanned.get(terminal)?.id !== agent.id);
     this.scanned = next;
     if (!this.preferred && next.size) this.preferred = next.keys().next().value;
     if (changed) this.onDidChangeEmitter.fire();
+  }
+
+  /** Agents in agentmux threads of this workspace's folders. Returns whether they changed. */
+  private async scanPanes(sockets: string[], processes: ProcessInfo[]): Promise<boolean> {
+    const folders = new Set(
+      (vscode.workspace.workspaceFolders ?? []).flatMap((folder) => {
+        if (folder.uri.scheme !== 'file') return [];
+        try {
+          return [realpathSync(folder.uri.fsPath)];
+        } catch {
+          return [folder.uri.fsPath];
+        }
+      }),
+    );
+    let panes: PaneTarget[] = [];
+    let paired: string | undefined;
+    if (sockets.length && folders.size) {
+      panes = paneTargets(await listPanes(sockets), processes).filter((p) =>
+        folders.has(p.project),
+      );
+      const pairs = readKittyPairs(process.env.XDG_RUNTIME_DIR).filter((p) =>
+        folders.has(p.folder),
+      );
+      if (pairs.length && panes.length) {
+        const clients = await listClients(sockets);
+        for (const folder of folders) {
+          paired ??= pairedTarget(folder, pairs, processes, clients, panes)?.id;
+        }
+      }
+    }
+    const before = JSON.stringify([this.panes.map((p) => [p.id, p.label]), this.pairedPane]);
+    this.panes = panes;
+    this.pairedPane = paired;
+    if (this.chosenPane && !this.paneById(this.chosenPane)) this.chosenPane = undefined;
+    return JSON.stringify([panes.map((p) => [p.id, p.label]), paired]) !== before;
   }
 
   /**
@@ -251,38 +336,6 @@ export class AgentTerminals implements vscode.Disposable {
     clearTimeout(this.scanTimer);
     for (const d of this.disposables) d.dispose();
   }
-}
-
-/** Every process on the machine, with its parent and command line. */
-function listProcesses(): Promise<ProcessInfo[]> {
-  return new Promise((resolve, reject) => {
-    if (process.platform === 'win32') {
-      execFile(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress',
-        ],
-        { windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: 15_000 },
-        (error, stdout) => {
-          if (error) reject(error);
-          else resolve(parseWindowsProcesses(stdout));
-        },
-      );
-      return;
-    }
-    execFile(
-      'ps',
-      ['-A', '-o', 'pid=,ppid=,args='],
-      { maxBuffer: 64 * 1024 * 1024, timeout: 10_000 },
-      (error, stdout) => {
-        if (error) reject(error);
-        else resolve(parsePs(stdout));
-      },
-    );
-  });
 }
 
 let agentTerminals: AgentTerminals | undefined;
@@ -346,18 +399,9 @@ export function pasteIntoTerminal(
   if (acceptsPaste(agent)) {
     for (const part of parts) terminal.sendText(`${bracketedPaste(part)} `, false);
   } else {
-    terminal.sendText(`${parts.join(' ').replace(/[\r\n]+/g, ' ')} `, false);
+    terminal.sendText(`${typedLine(parts)} `, false);
   }
   vscode.window.setStatusBarMessage(`$(check) Sent to ${agent.label}`, 4_000);
-}
-
-const PASTE_START = '\x1b[200~';
-const PASTE_END = '\x1b[201~';
-
-/** Text wrapped as a terminal paste; the end marker is removed from the text so it can't end it early. */
-export function bracketedPaste(text: string): string {
-  const clean = text.split(PASTE_START).join('').split(PASTE_END).join('').replace(/\r\n?/g, '\n');
-  return `${PASTE_START}${clean}${PASTE_END}`;
 }
 
 /** Types text into the agent's terminal (see resolveAgentTerminal). Returns the agent's name. */

@@ -12,7 +12,8 @@ import type {
   ToContent,
 } from '../messages';
 import { applyOps, snapshot, syncRoots } from './bookmarks';
-import { BridgeClient } from './bridge';
+import type { BrowserToHub, CaptureToSave, HubToBrowser } from '@inkspect/shared/hub';
+import { BridgeClient, browserName } from './bridge';
 import { receiveShortcuts, SHORTCUTS_KEY, watchShortcuts } from './shortcutSync';
 
 const bridge = new BridgeClient();
@@ -52,6 +53,27 @@ bridge.onStatus((status) =>
   ),
 );
 
+/** What the side panel may ask the browser helper. */
+type PanelRequest = Extract<
+  BrowserToHub,
+  {
+    type: 'projects.get' | 'items.get' | 'item.thumb' | 'item.remove' | 'item.send' | 'project.pin';
+  }
+>;
+const PANEL_REQUESTS = new Set([
+  'projects.get',
+  'items.get',
+  'item.thumb',
+  'item.remove',
+  'item.send',
+  'project.pin',
+]);
+function isPanelRequest(value: unknown): value is PanelRequest {
+  const type = (value as { type?: unknown } | undefined)?.type;
+  // The helper validates every field; here only the kinds of request a page may make.
+  return typeof type === 'string' && PANEL_REQUESTS.has(type);
+}
+
 // Messages from the options page (pairing).
 chrome.runtime.onMessage.addListener(
   (message: { type?: string; code?: string }, sender, sendResponse) => {
@@ -70,6 +92,15 @@ chrome.runtime.onMessage.addListener(
     if (message.type === 'status') {
       sendResponse(bridge.status satisfies BridgeStatus);
       return false;
+    }
+    // The side panel's questions for the browser helper (projects, their items, sends).
+    if (message.type === 'hub' && isPanelRequest((message as { request?: unknown }).request)) {
+      const request = (message as { request: PanelRequest }).request;
+      // A send can wait for VS Code; the helper gives up after 2 minutes.
+      void bridge
+        .hubRequest(request, request.type === 'item.send' ? 130_000 : 30_000)
+        .then((reply) => sendResponse(reply ?? null));
+      return true;
     }
     if (message.type === 'toggleToolbar') {
       // From the popup: its opening granted activeTab for the tab it was opened on.
@@ -338,7 +369,80 @@ async function handle(
       const status = await bridge.pair(message.code);
       return { ok: true, status };
     }
+    case 'projects': {
+      const reply = await bridge.hubRequest<Extract<HubToBrowser, { type: 'projects' }>>(
+        { type: 'projects.get', req: crypto.randomUUID(), url: message.url?.slice(0, 4096) },
+        10_000,
+      );
+      if (!reply) return { ok: false, error: 'The browser helper is not available.' };
+      return { ok: true, projects: reply.projects, suggested: reply.suggested };
+    }
+    case 'saveCapture':
+      return saveCaptures(message);
   }
+}
+
+/** Native messages to the helper are limited to 64 MiB: big saves go in several. */
+const MAX_SAVE = 40 * 1024 * 1024;
+
+/**
+ * Saves captures into a project through the helper, and sends them with `send`. Several large
+ * screenshots are saved one request at a time, then sent together.
+ */
+async function saveCaptures(
+  message: Extract<ToBackground, { type: 'saveCapture' }>,
+): Promise<BackgroundReply> {
+  const size = (c: CaptureToSave) => (c.image?.length ?? 0) + (c.text?.length ?? 0) + 1000;
+  const batches: CaptureToSave[][] = [];
+  for (const capture of message.captures) {
+    if (size(capture) > MAX_SAVE) {
+      return { ok: false, error: 'That screenshot is too large to save. Download it instead.' };
+    }
+    const last = batches.at(-1);
+    if (last && last.reduce((total, c) => total + size(c), 0) + size(capture) <= MAX_SAVE) {
+      last.push(capture);
+    } else batches.push([capture]);
+  }
+  const ids: string[] = [];
+  let sentTo: string | undefined;
+  for (const [index, captures] of batches.entries()) {
+    const last = index === batches.length - 1;
+    const reply = await bridge.hubRequest<Extract<HubToBrowser, { type: 'capture.saved' }>>(
+      {
+        type: 'capture.save',
+        req: crypto.randomUUID(),
+        project: message.project,
+        url: message.url?.slice(0, 4096),
+        browser: browserName(),
+        captures,
+        // Sent once, all together, with the last part.
+        send: batches.length === 1 ? message.send : undefined,
+      },
+      // A send can wait for VS Code (choosing a terminal); the helper gives up after 2 minutes.
+      130_000,
+    );
+    if (!reply) return { ok: false, error: 'The browser helper did not answer.' };
+    if (!reply.ok) return { ok: false, error: reply.error ?? 'Saving failed.' };
+    ids.push(...(reply.ids ?? []));
+    sentTo = reply.sentTo;
+    if (last && batches.length > 1 && message.send) {
+      const sent = await bridge.hubRequest<Extract<HubToBrowser, { type: 'item.sent' }>>(
+        {
+          type: 'item.send',
+          req: crypto.randomUUID(),
+          project: message.project,
+          ids,
+          target: message.send,
+        },
+        130_000,
+      );
+      if (!sent?.ok) {
+        return { ok: false, error: `Saved, but not sent: ${sent?.error ?? 'no answer.'}` };
+      }
+      sentTo = sent.sentTo;
+    }
+  }
+  return { ok: true, ids, sentTo };
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -9,9 +9,10 @@ import {
   getAgentTerminals,
   pasteIntoTerminal,
   resolveAgentTerminal,
-  shellPath,
 } from '../features/terminalSend';
 import { addContext, contextTray, type ContextInput, type ContextItem } from './contextTray';
+import { pasteIntoPane } from '../hub/send';
+import { fitsInline, shellPath } from './sendParts';
 
 let lastPick: string | undefined;
 let storage = '';
@@ -28,14 +29,6 @@ export function lastPickedElement(): string | undefined {
 /** Where context files go when no workspace folder is open (set on activation). */
 export function initAgentSend(globalStorage: string): void {
   storage = globalStorage;
-}
-
-/** Longer text is pasted as the path of a file holding it. */
-const MAX_PASTE = 20_000;
-
-/** Text typed straight into a terminal must be short and on one line; longer text goes in a file. */
-export function fitsTerminal(text: string): boolean {
-  return !/[\r\n]/.test(text.trim()) && text.length <= 300;
 }
 
 /**
@@ -64,13 +57,36 @@ export async function sendToAgent(
   }
   const trimmed = text.trim();
   if (!trimmed && !files.length) return undefined;
+  if (target?.startsWith('tmux:')) {
+    // An agent in an agentmux thread (a tmux pane): pasted there, as in a VS Code terminal.
+    await agents.refresh();
+    const pane = agents.paneById(target);
+    if (!pane) {
+      void vscode.window.showWarningMessage(
+        'That agent is not running any more. Pick another one in the Agent Context view.',
+      );
+      return undefined;
+    }
+    const parts = files.map(shellPath);
+    if (trimmed) {
+      parts.push(
+        fitsInline(trimmed, true)
+          ? trimmed
+          : shellPath(await saveContext(text, options.label ?? 'context', storage)),
+      );
+    }
+    await pasteIntoPane(pane.socket, pane.paneId, parts);
+    agents.setDefault(target);
+    vscode.window.setStatusBarMessage(`$(check) Sent to ${pane.label} (${pane.session})`, 4_000);
+    return pane.label;
+  }
   const found = await resolveAgentTerminal(target);
   if (!found) return undefined;
   const parts = files.map(shellPath);
   if (trimmed) {
     // Agent CLIs get the text itself as a paste; very long text, or a terminal that only takes
     // typing, gets the path of a file holding it.
-    const inline = acceptsPaste(found.agent) ? trimmed.length <= MAX_PASTE : fitsTerminal(trimmed);
+    const inline = fitsInline(trimmed, acceptsPaste(found.agent));
     parts.push(
       inline ? trimmed : shellPath(await saveContext(text, options.label ?? 'context', storage)),
     );

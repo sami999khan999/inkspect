@@ -37,6 +37,12 @@ try {
     extensionTestsPath: suite,
     extensionTestsEnv: {
       VSCODE_BROWSER_TEST_RESULTS: results,
+      // The browser helper registers itself here, not with the real browsers of this machine.
+      XDG_CONFIG_HOME: join(root, 'out', 'e2e', 'xdg', 'config'),
+      XDG_DATA_HOME: join(root, 'out', 'e2e', 'xdg', 'data'),
+      XDG_STATE_HOME: join(root, 'out', 'e2e', 'xdg', 'state'),
+      INKSPECT_HUB_DIR: join(root, 'out', 'e2e', 'hub'),
+      INKSPECT_HUB_IDLE_MS: '5000',
       ...(chromium ? { VSCODE_BROWSER_CHROMIUM: chromium } : {}),
     },
     launchArgs: [
