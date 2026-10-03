@@ -27,7 +27,7 @@ export function renderWebviewHtml(
   <meta http-equiv="Content-Security-Policy" content="${csp}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${styleUri}">
-  <title>${{ index: 'Browser', shortcuts: 'Shortcuts', context: 'Agent Context' }[entry]}</title>
+  <title>${{ index: 'Browser', shortcuts: 'Shortcuts', context: 'Saved' }[entry]}</title>
 </head>
 <body>
   <div id="root"></div>

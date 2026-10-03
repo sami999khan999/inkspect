@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import type { HubTarget } from '@inkspect/shared/hub';
 import { agentUnder, type ProcessInfo } from '../agent/agentDetect';
 import { descendsFrom } from '../agent/processes';
-import { agentPanes, tmux, TMUX_PANE, TMUX_SOCKET, type TmuxPane } from './tmux';
+import { tmuxTarget } from '@inkspect/shared/targets';
+import { agentPanes, tmux, type TmuxPane } from './tmux';
 
 /** An agent running in a tmux pane. */
 export interface PaneTarget extends HubTarget {
@@ -16,24 +17,6 @@ export interface PaneTarget extends HubTarget {
   session: string;
   /** When its session was last used (seconds since the epoch). */
   activity: number;
-}
-
-export const paneTargetId = (socket: string, pane: string) => `tmux:${socket}:${pane}`;
-
-/** A target id's parts: a tmux pane, or a VS Code window's own target. */
-export function parseTargetId(
-  id: string,
-):
-  | { kind: 'tmux'; socket: string; pane: string }
-  | { kind: 'vscode'; window: string; target: string }
-  | undefined {
-  const tmuxMatch = /^tmux:([^:]+):(%\d+)$/.exec(id);
-  if (tmuxMatch && TMUX_SOCKET.test(tmuxMatch[1]!) && TMUX_PANE.test(tmuxMatch[2]!)) {
-    return { kind: 'tmux', socket: tmuxMatch[1]!, pane: tmuxMatch[2]! };
-  }
-  const vscodeMatch = /^vscode:([\w.-]{1,64}):(.{1,100})$/.exec(id);
-  if (vscodeMatch) return { kind: 'vscode', window: vscodeMatch[1]!, target: vscodeMatch[2]! };
-  return undefined;
 }
 
 /**
@@ -54,7 +37,7 @@ export function paneTargets(
     if (!label) return [];
     return [
       {
-        id: paneTargetId(pane.socket, pane.paneId),
+        id: tmuxTarget(pane.socket, pane.paneId),
         kind: 'tmux',
         label,
         detail: `agentmux · ${pane.session}`,
@@ -142,6 +125,29 @@ export function pairedTarget(
     }
   }
   return undefined;
+}
+
+/**
+ * The projects of the agentmux threads that kitty windows paired with VS Code show (see
+ * pairedTarget), the thread used last first.
+ */
+export function pairedProjects(
+  pairs: readonly KittyPair[],
+  processes: readonly ProcessInfo[],
+  clients: readonly TmuxClient[],
+  panes: readonly TmuxPane[],
+): string[] {
+  const shown = pairs.flatMap((pair) => {
+    const kitty = processes.find((p) => p.commandLine.includes(`kitty-pair-${pair.address}`));
+    if (!kitty) return [];
+    return clients
+      .filter((client) => descendsFrom(processes, client.pid, kitty.pid))
+      .flatMap((client) =>
+        agentPanes(panes).filter((p) => p.socket === client.socket && p.session === client.session),
+      );
+  });
+  shown.sort((a, b) => b.activity - a.activity);
+  return [...new Set(shown.map((p) => p.project!))];
 }
 
 /**

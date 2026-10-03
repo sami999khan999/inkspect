@@ -311,8 +311,17 @@ browser-extension/
 
 - [x] **The browser helper** (native messaging, installed by VS Code Browser): the background connects to it first (`connectNative`) and falls back to the WebSocket link when it isn't installed. Through it, no pairing is needed. The manifest has a public `key`, so the Chrome id is the same everywhere (a unit test checks it against the helper's allow list).
 - [x] **Captures go to projects:** the capture popup picks a project (VS Code windows, agentmux threads, saved and pinned projects; the suggestion comes from the site, its local dev server, or the last one). **Send to agent**, **Send to…** (any agent in that project) and **Save to project** save the capture into `<project>/.inkspect/`; sending pastes it into the agent (an agentmux pane, or a VS Code terminal or chat through its window). Projects where no agent runs only save.
-- [x] **The side panel** (Chrome `side_panel`, Firefox `sidebar_action`; **Projects** in the popup opens it): every project and its saved captures, with thumbnails, Send, Send to… and Remove; projects only saved or pinned show their captures without sending. Projects can be pinned.
+- [x] **The side panel** (Chrome `side_panel`, Firefox `sidebar_action`; **Saved** in the popup opens it, see Phase 9c): every project and its saved captures, with thumbnails, Send, Send to… and Remove; projects only saved or pinned show their captures without sending. Projects can be pinned.
 - [x] End-to-end: Chrome for Testing starts the real helper through a host manifest in its profile; a fake VS Code window answers on the hub's socket.
+
+## Phase 9c: Saved, then sent
+
+- [x] **Every capture is saved at once** (`content/useSendFlow.ts`) into the suggested project, then the shared **send dialog** (`SendModal`) offers the project's agents (number keys, Enter, Shift to open in agentmux), New agentmux thread, Change project (`items.move`), Copy and Download; Esc keeps it. The toast's actions, the project and window pickers and the capture keys are gone; the toast is for notices only.
+- [x] **One path over either link:** `hubRequest()` asks the helper, or VS Code over the WebSocket (`hub.request`, when its `welcome` lists `hub`). The status says whether projects are reachable (`projects`) and what the hub can do (`features`, from its `status`).
+- [x] **The side panel is "Saved":** the tab's project (following the tab) or another, in the shared `SavedList`, with Undo (`item.restore`).
+- [x] **The picker:** click details, Alt+click screenshot, Shift+click add, Enter all; no Ctrl-click sends; one-line hint.
+- [x] **One pairing card** (`ui/PairCard.tsx`, `ui/CodeInput.tsx`) on the settings page, in the popup and in the toolbar's VS Code panel; `LinkGraph` shows the answering window.
+- [x] End-to-end: both links save into a real project store (the fake VS Code runs the real HubCore), sends reach the window's agents, Change project moves a capture to the Inbox, the side panel sends, removes and undoes.
 
 ## Phase 10: Browser coverage
 

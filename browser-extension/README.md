@@ -43,12 +43,16 @@ The extension reaches a page only when you open the toolbar on it (`activeTab`);
 
 Press **Alt+Shift+K** or click the extension's button. A bar slides down across the top of the page, and the page moves down to make room (its fixed and sticky headers too). It has:
 
-- **Select an element** to copy its details for an AI agent (Shift+click for several, Alt+click adds a screenshot)
+- **Select an element** to capture its details for an AI agent (Alt+click: a screenshot of it; Shift+click for several, Enter captures them all)
 - **Draw** on the page, then screenshot just the drawing
 - **Screenshots:** visible area, full page, a region or an element
 - **Responsive view:** the page at a device's size, centered in the tab and scaled to fit, with presets, a custom size, rotate and zoom. In Chrome it also emulates the device's user agent and touch, network and CPU speed, the color scheme and print media (Chrome then shows its "debugging this browser" bar).
 - **Console and network:** copy errors and failed requests for AI
-- **Copy page context**, **Bookmark this page**, and the **VS Code link** (send captures to VS Code chat or a terminal agent)
+- **Copy page context**, **Bookmark this page**, and the **VS Code link**
+
+**After every capture:** it is copied, saved into the page's project (`.inkspect/` in that folder; the Inbox when no project fits), and a dialog in the middle of the page asks where it goes: each agent of the project (agentmux threads, VS Code terminal agents, chat) is one click or a number key away, Enter picks the default, Shift+number also opens the thread in agentmux, and Esc keeps it saved without sending. **Change project** moves it. Without VS Code or the browser helper, the dialog offers Copy and Download.
+
+**The Saved side panel** (the popup's **Saved**): the captures of the tab's project, or of another, ready to send, open in agentmux or remove.
 
 **About the responsive view:**
 

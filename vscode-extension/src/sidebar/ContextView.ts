@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
-import { sendContextItem, sendContextItems } from '../agent/chat';
-import type { ContextItem, ContextTray } from '../agent/contextTray';
+import { sendContextItem, sendContextItems, sendSaved } from '../agent/chat';
+import { inboxPath, type ContextItem, type ContextTray } from '../agent/contextTray';
+import { knownProjects, nameOf } from '../agent/projects';
 import { errorMessage } from '../browser/logger';
 import { getConfig } from '../config';
 import { onDidChangeShortcuts } from '../features/shortcutSettings';
@@ -16,9 +17,9 @@ import { effectiveShortcuts } from '../shared/shortcuts';
 export const CONTEXT_VIEW_ID = 'vscodeBrowser.agentContext';
 
 /**
- * The Agent Context view in the Browser sidebar: everything captured in the browser (elements,
- * screenshots, console errors, reports), each with a button that sends it to an agent running
- * in a terminal, and a picker for which agent when several run.
+ * The Saved view in the Browser sidebar: a project's captures (elements, screenshots, console
+ * errors, reports), each with a button that sends it to the project's agent (agentmux threads,
+ * terminal agents, chat), a picker for which agent, and one for which project it shows.
  */
 export class ContextViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private view?: vscode.WebviewView;
@@ -49,7 +50,7 @@ export class ContextViewProvider implements vscode.WebviewViewProvider, vscode.D
       (message: unknown) => {
         if (!isContextViewMessage(message)) return;
         this.handle(message).catch((error: unknown) =>
-          vscode.window.showErrorMessage(`Agent Context: ${errorMessage(error)}`),
+          vscode.window.showErrorMessage(`Saved: ${errorMessage(error)}`),
         );
       },
       undefined,
@@ -124,6 +125,22 @@ export class ContextViewProvider implements vscode.WebviewViewProvider, vscode.D
       case 'setTarget':
         this.agents.setDefault(message.target);
         return;
+      case 'setProject': {
+        // Only projects this window knows (the list it offered).
+        const known = await knownProjects(this.tray.project);
+        if (!known.some((p) => p.path === message.path)) return;
+        this.tray.setProject(message.path);
+        for (const i of this.tray.all()) this.postThumbnail(i);
+        // Its agents: the agentmux threads of that project.
+        await this.agents.refresh(true);
+        this.postStateSoon();
+        return;
+      }
+      case 'openInAgentmux': {
+        const items = message.ids.flatMap((id) => this.tray.get(id) ?? []);
+        if (items.length) await sendSaved(items, message.target, { open: true });
+        return;
+      }
       case 'chooseTerminal':
         await this.agents.chooseTerminal();
         return;
@@ -141,12 +158,19 @@ export class ContextViewProvider implements vscode.WebviewViewProvider, vscode.D
   }
 
   private postState(): void {
+    void this.sendState();
+  }
+
+  private async sendState(): Promise<void> {
     if (!this.view) return;
     const isMac = process.platform === 'darwin';
     const map = effectiveShortcuts(getConfig().shortcuts, isMac);
     const key = (id: string) => {
       return map[id]?.[0] ?? '';
     };
+    const project = this.tray.project;
+    const projects = await knownProjects(project).catch(() => []);
+    const inbox = project === inboxPath();
     const message: HostToContextView = {
       type: 'state',
       items: this.tray.all().map((i) => this.tray.view(i)),
@@ -154,8 +178,10 @@ export class ContextViewProvider implements vscode.WebviewViewProvider, vscode.D
       target: this.agents.defaultTarget(getConfig().agentSendTarget),
       keys: { show: key('agent.showContext'), sendLatest: key('agent.sendLatest') },
       undo: this.tray.undoLabel(),
+      project: { path: project, name: inbox ? 'Inbox' : nameOf(project), inbox },
+      projects,
     };
-    void this.view.webview.postMessage(message);
+    void this.view?.webview.postMessage(message);
   }
 
   private postThumbnail(item: ContextItem): void {

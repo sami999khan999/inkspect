@@ -8,9 +8,14 @@ import { tmux, TMUX_PANE } from './tmux';
 
 /**
  * What a send of these items pastes: every image or recording path, then their text in one
- * paste (or, when it is too long, the paths of the files holding it).
+ * paste (or, when it is too long for the agent, the paths of the files holding it). A terminal
+ * that isn't a known agent (`acceptsPaste: false`) only gets short one-line text.
  */
-export function partsOf(project: string, items: readonly ItemMeta[]): string[] {
+export function partsOf(
+  project: string,
+  items: readonly ItemMeta[],
+  { acceptsPaste = true }: { acceptsPaste?: boolean } = {},
+): string[] {
   const parts: string[] = [];
   const texts: { text: string; file: string }[] = [];
   for (const item of items) {
@@ -21,7 +26,7 @@ export function partsOf(project: string, items: readonly ItemMeta[]): string[] {
     if (text && textFile) texts.push({ text, file: textFile });
   }
   const joined = texts.map((t) => t.text).join('\n\n');
-  if (joined && fitsInline(joined, true)) parts.push(joined);
+  if (joined && fitsInline(joined, acceptsPaste)) parts.push(joined);
   else for (const t of texts) parts.push(shellPath(t.file));
   return parts;
 }

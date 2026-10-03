@@ -7,34 +7,28 @@ import { cx } from './popover';
 const isMac = typeof navigator !== 'undefined' && navigator.userAgent.includes('Macintosh');
 
 /** What can be done with the elements picked with Shift+click. */
-export type SelectionAction = 'copy' | 'chat' | 'terminal' | 'screenshot' | 'save' | 'clear';
+export type SelectionAction = 'copy' | 'screenshot' | 'clear';
 
-const ACTIONS: { action: SelectionAction; label: string; icon: string; toVsCode?: boolean }[] = [
-  { action: 'copy', label: 'Copy details', icon: 'copy' },
-  { action: 'chat', label: 'Chat agent', icon: 'comment-discussion', toVsCode: true },
-  { action: 'terminal', label: 'Terminal agent', icon: 'terminal', toVsCode: true },
+const ACTIONS: { action: SelectionAction; label: string; icon: string }[] = [
+  { action: 'copy', label: 'Capture', icon: 'inspect' },
   { action: 'screenshot', label: 'Screenshot', icon: 'device-camera' },
-  { action: 'save', label: 'Save', icon: 'save', toVsCode: true },
 ];
 
 /**
  * The bar over the page while elements are selected with Shift+click, shared by VS Code Browser
- * and the browser extension: the same choices as after any capture (copy, send to the chat or a
- * terminal agent, screenshot, save), for all of them at once.
+ * and the browser extension: capture their details (Enter) or screenshots, all at once. Like any
+ * capture, they are saved, then the send dialog offers where they go.
  */
 export function SelectionBar({
   count,
   map,
-  canSend = true,
   onAction,
   className,
   style,
 }: {
   count: number;
-  /** The current keys: Enter (copy) shows its key. */
+  /** The current keys: Enter (capture) shows its key. */
   map: ShortcutMap;
-  /** Whether VS Code can take them (the browser extension: only while linked). */
-  canSend?: boolean;
   onAction: (action: SelectionAction) => void;
   className?: string;
   style?: CSSProperties;
@@ -53,7 +47,7 @@ export function SelectionBar({
         <span className="selection-bar-badge">{count}</span>
         selected
       </span>
-      {ACTIONS.filter((a) => canSend || !a.toVsCode).map(({ action, label, icon }) => (
+      {ACTIONS.map(({ action, label, icon }) => (
         <Button
           key={action}
           size="sm"

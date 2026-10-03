@@ -56,3 +56,11 @@ export function ensurePrivateDir(dir: string): void {
   }
   if ((stat.mode & 0o077) !== 0) chmodSync(dir, 0o700);
 }
+
+/**
+ * The Inbox: the store for captures that belong to no project (yet), shared by the hub and VS
+ * Code windows without a folder.
+ */
+export function inboxFolder(paths: Pick<HubPaths, 'data'> = hubPaths()): string {
+  return join(paths.data, 'inbox');
+}

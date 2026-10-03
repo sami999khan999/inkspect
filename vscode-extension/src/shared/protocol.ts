@@ -6,6 +6,8 @@ import type { DevicePreset, EmulationSettings } from './devices';
 import type { ClearRange, HistoryItem, Suggestion } from './history';
 import type { ShortcutOverrides } from './shortcuts';
 import type { A11yScan, MeasureBox } from './tools';
+import type { HubTarget } from '@inkspect/shared/hub';
+import type { Harness } from '@inkspect/shared/targets';
 
 // Messages exchanged between the extension host (src/panel) and the webview (webview/src).
 // Both sides import this file, so every message type is defined exactly once.
@@ -318,6 +320,16 @@ export type HostToWebview =
   | { type: 'focusViewport' }
   | { type: 'openFind' }
   | { type: 'toast'; message: string }
+  /** A capture was saved: the send dialog shows where it can go. */
+  | { type: 'saved'; offer: SavedOffer }
+  /** How a send from the dialog went; `close` once it is done. */
+  | {
+      type: 'savedStatus';
+      offerId: string;
+      tone: 'busy' | 'ok' | 'error';
+      text: string;
+      close?: boolean;
+    }
   /** The user's shortcut changes (see src/shared/shortcuts.ts). */
   | { type: 'shortcuts'; overrides: ShortcutOverrides }
   /** Settings the webview's modes need. */
@@ -334,10 +346,35 @@ export type HostToWebview =
   /** Design overlay: the chosen image. */
   | { type: 'overlayImage'; tabId: string; data: Uint8Array; mimeType: string; name: string };
 
+/** What the send dialog shows after a capture (see SendModal). */
+export interface SavedOffer {
+  id: string;
+  title: string;
+  project: { path: string; name: string };
+  /** Projects the capture can move to. */
+  projects: { path: string; name: string; detail?: string }[];
+  images: { data: Uint8Array; mimeType: string }[];
+  targets: HubTarget[];
+  defaultTarget?: string;
+  harnesses: Harness[];
+}
+
 /** Messages sent from the webview to the extension host. */
 export type WebviewToHost =
   /** The webview has loaded and is ready to receive messages. */
   | { type: 'ready' }
+  /**
+   * The send dialog's choice: send to a target (`open`: show the agentmux thread too), copy,
+   * reveal the file, move to another project, or close (it stays saved).
+   */
+  | {
+      type: 'savedAction';
+      offerId: string;
+      action: 'send' | 'copy' | 'reveal' | 'project' | 'close';
+      target?: string;
+      open?: boolean;
+      project?: string;
+    }
   /** The webview received keyboard focus (so commands target this browser window). */
   | { type: 'focus' }
   /** Size of the page viewport in CSS pixels, and the webview's device pixel ratio. */
@@ -384,9 +421,9 @@ export type WebviewToHost =
   /** A shortcut's VS Code command (only registry commands are run). */
   | { type: 'command'; command: string }
   /** Copies text for the webview (the host's clipboard handles every platform); `toast` confirms. */
-  /** Copies text; with `kind`, also adds it to the Agent Context list under `label`. */
+  /** Copies text; with `kind`, also adds it to the Saved list under `label`. */
   | { type: 'copyText'; text: string; toast?: string; kind?: ContextKind; label?: string }
-  /** Sends text (measurements, reports, CSS changes) to the agent, through the Agent Context list. */
+  /** Sends text (measurements, reports, CSS changes) to the agent, through the Saved list. */
   | { type: 'sendToAgent'; text: string; label: string; kind?: ContextKind }
   /** Measure mode: the boxes of the element at a point (viewport CSS pixels). */
   | { type: 'measure'; tabId: string; requestId: string; x: number; y: number }
@@ -410,12 +447,10 @@ export type WebviewToHost =
       x: number;
       y: number;
       purpose: InspectPurpose;
-      /** Shift+click: add to the multi-selection instead of copying right away. */
+      /** Shift+click: add to the multi-selection instead of capturing right away. */
       add: boolean;
-      /** Alt+click: also save a screenshot of the element. */
+      /** Alt+click: a screenshot of the element instead of its details. */
       screenshot: boolean;
-      /** Ctrl+click: send the details to the chat agent; Ctrl+Shift+click: a terminal agent. */
-      send?: 'chat' | 'terminal';
     }
   | {
       type: 'inspect';
@@ -427,7 +462,7 @@ export type WebviewToHost =
   | {
       type: 'selectionAction';
       tabId: string;
-      action: 'copy' | 'chat' | 'terminal' | 'screenshot' | 'save' | 'clear';
+      action: 'copy' | 'screenshot' | 'clear';
     }
   | { type: 'annotations'; tabId: string; shapes: Shape[] }
   /** Screenshot for compositing drawings; `rect` in document CSS pixels for `region`. */
@@ -467,7 +502,7 @@ export type WebviewToHost =
       base64: string;
       label: string;
       toAgent?: boolean;
-      /** Screenshots taken together (each drawing separately): one group in Agent Context. */
+      /** Screenshots taken together (each drawing separately): one group in the Saved list. */
       group?: { id: string; index: number; count: number };
     }
   /** Types the last screenshot's path into a terminal (for an agent running there). */
@@ -609,6 +644,13 @@ const isPageContext = shape({
 
 const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
   ready: {},
+  savedAction: {
+    offerId: (v) => typeof v === 'string' && v.length <= 64,
+    action: oneOf('send', 'copy', 'reveal', 'project', 'close'),
+    target: optional((v) => typeof v === 'string' && v.length <= 200),
+    open: optional(isBoolean),
+    project: optional((v) => typeof v === 'string' && v.length <= 4096),
+  },
   focus: {},
   viewport: { width: isNumber, height: isNumber, dpr: isNumber },
   frameAck: { tabId: isString },
@@ -730,11 +772,10 @@ const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
     purpose: optional(oneOf('copy', 'screenshot')),
     add: optional(isBoolean),
     screenshot: optional(isBoolean),
-    send: optional(oneOf('chat', 'terminal')),
   },
   selectionAction: {
     tabId: isString,
-    action: oneOf('copy', 'chat', 'terminal', 'screenshot', 'save', 'clear'),
+    action: oneOf('copy', 'screenshot', 'clear'),
   },
   screenshot: {
     tabId: isString,

@@ -31,7 +31,8 @@ import {
 } from '../shortcuts';
 import { LinkGraph } from '../ui/LinkGraph';
 import linkGraphCss from '../ui/link-graph.css';
-import { CodeInput } from './CodeInput';
+import pairCardCss from '../ui/pair-card.css';
+import { PairCard } from '../ui/PairCard';
 import optionsCss from './options.css';
 
 type Tab = 'vscode' | 'shortcuts' | 'about';
@@ -83,7 +84,6 @@ function Options() {
     history.replaceState(null, '', `#${next}`);
   };
   const view = STATE_VIEW[status.state];
-  const windows = status.state === 'connected' ? (status.windows?.length ?? 1) : 0;
 
   return (
     <div className="page">
@@ -98,7 +98,7 @@ function Options() {
           value={tab}
           onChange={showTab}
           options={[
-            { value: 'vscode', label: 'VS Code', icon: 'vscode', count: windows || undefined },
+            { value: 'vscode', label: 'VS Code', icon: 'vscode' },
             { value: 'shortcuts', label: 'Shortcuts', icon: 'keyboard' },
             { value: 'about', label: 'About', icon: 'info' },
           ]}
@@ -127,7 +127,7 @@ function Options() {
   );
 }
 
-/** The link: where sends go (a branch to each window), pairing, unlinking. */
+/** The link: VS Code, pairing, unlinking. */
 function VsCodeSection({
   status,
   setStatus,
@@ -135,29 +135,13 @@ function VsCodeSection({
   status: BridgeStatus;
   setStatus: (status: BridgeStatus) => void;
 }) {
-  const [code, setCode] = useState('');
-  const [message, setMessage] = useState('');
-  const [pairing, setPairing] = useState(false);
-  // The popup's "Use a code" link opens this page at #vscode-code.
-  const [useCode, setUseCode] = useState(() => location.hash === '#vscode-code');
   const linked = status.state === 'connected';
-  const count = status.windows?.length ?? 1;
-
-  const pair = async (value = code) => {
-    if (value.length !== 6 || pairing) return;
-    setPairing(true);
-    setMessage('');
+  const pair = async (code: string) => {
     const result = (await chrome.runtime
-      .sendMessage({ type: 'pair', code: value })
+      .sendMessage({ type: 'pair', code })
       .catch(() => undefined)) as BridgeStatus | undefined;
-    setPairing(false);
-    if (!result) {
-      setMessage('The extension did not answer. Reload it at chrome://extensions and try again.');
-      return;
-    }
-    setStatus(result);
-    setMessage(result.error ?? '');
-    if (result.state === 'connected') setCode('');
+    if (result) setStatus(result);
+    return result;
   };
 
   return (
@@ -166,7 +150,7 @@ function VsCodeSection({
         <div className="hero-text">
           <h1>
             {linked
-              ? `Linked with ${count} VS Code window${count === 1 ? '' : 's'}`
+              ? `Linked with ${status.peer ?? 'VS Code'}`
               : status.state === 'unpaired'
                 ? 'Pair with VS Code'
                 : status.state === 'connecting'
@@ -175,9 +159,9 @@ function VsCodeSection({
           </h1>
           <p>
             {linked
-              ? 'Screenshots and elements you send from the toolbar go to the window you used last, unless you pick another after a capture. Bookmarks sync both ways.'
+              ? 'Every capture from the toolbar is saved into its project and offered to send to that project’s agents. Bookmarks sync both ways.'
               : status.state === 'unpaired'
-                ? 'VS Code is running. Pair once to send captures to it and keep bookmarks in sync.'
+                ? 'VS Code is running. Pair once to save captures into your projects and keep bookmarks in sync.'
                 : 'Start VS Code with the VS Code Browser extension. This page finds it by itself.'}
           </p>
         </div>
@@ -212,80 +196,13 @@ function VsCodeSection({
             text="The link only talks to VS Code on this computer (127.0.0.1), and only after pairing."
           />
         </div>
-      ) : status.state !== 'unpaired' ? (
-        <div className="card pair-card">
-          <p className="pair-lead">
-            <span className="codicon codicon-loading codicon-modifier-spin" aria-hidden="true" />
-            Open VS Code with the VS Code Browser extension. Then click{' '}
-            <b>Pair Browser Extension</b> in its <b>Browser</b> side panel.
-          </p>
-          <p className="card-foot">
-            <span className="codicon codicon-lock" aria-hidden="true" />
-            The link only talks to VS Code on this computer (127.0.0.1), and only after pairing.
-          </p>
-        </div>
       ) : (
-        <form
-          className="card pair-card"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void pair();
-          }}
-        >
-          <p className="pair-lead">
-            <span className="codicon codicon-plug" aria-hidden="true" />
-            <span>
-              In VS Code, click <b>Pair Browser Extension</b> in the <b>Browser</b> side panel (or{' '}
-              <b>Pair</b> on its notification). No code needed: this page updates by itself.
-            </span>
-          </p>
-          {!useCode ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              icon="key"
-              className="use-code"
-              onClick={() => setUseCode(true)}
-            >
-              Use a code instead
-            </Button>
-          ) : (
-            <>
-              <p className="muted">
-                Run <kbd>Browser: Pair Browser Extension with a Code</kbd> in VS Code, then type the
-                code it shows.
-              </p>
-              <div className="pair-row">
-                <CodeInput
-                  value={code}
-                  onChange={setCode}
-                  disabled={pairing}
-                  onComplete={(value) => void pair(value)}
-                />
-                <Button
-                  type="submit"
-                  variant="primary"
-                  icon="link"
-                  className="pair-button"
-                  loading={pairing}
-                  disabled={code.length !== 6}
-                >
-                  Pair
-                </Button>
-              </div>
-            </>
-          )}
-          {message && (
-            <p className="pair-message" role="alert">
-              <span className="codicon codicon-error" aria-hidden="true" />
-              {message}
-            </p>
-          )}
-          <p className="card-foot">
-            <span className="codicon codicon-lock" aria-hidden="true" />
-            The link only talks to VS Code on this computer (127.0.0.1), and only after pairing.
-          </p>
-        </form>
+        <PairCard
+          status={status}
+          pair={pair}
+          // The popup's "Use a code" opens this page at #vscode-code.
+          startWithCode={location.hash === '#vscode-code'}
+        />
       )}
     </>
   );
@@ -486,7 +403,7 @@ chrome.runtime.onMessage.addListener((message: Partial<ShortcutPressed>) => {
 });
 
 const style = document.createElement('style');
-style.textContent = [codiconCss, themeCss, uiCss, linkGraphCss, optionsCss].join('\n');
+style.textContent = [codiconCss, themeCss, uiCss, linkGraphCss, pairCardCss, optionsCss].join('\n');
 document.head.append(style);
 document.documentElement.classList.add('ink-theme');
 

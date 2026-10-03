@@ -6,18 +6,17 @@ import {
   newerShortcuts,
   type ClientInfo,
   type ClientMessage,
+  type HubReply,
+  type LinkFeature,
   type ServerMessage,
   type ShortcutSettings,
 } from '@inkspect/shared/bridge';
-import { captureAndSend, sendContextItems } from '../agent/chat';
-import { addContext, contextTray } from '../agent/contextTray';
-import { errorMessage } from '../browser/logger';
+import { encodeHub, parseBrowserToHub, parseHubToBrowser } from '@inkspect/shared/hub';
+import { contextTray } from '../agent/contextTray';
 import { getConfig } from '../config';
 import type { BookmarksStore } from '../features/bookmarks';
-import { copyImageBytes } from '../features/clipboard';
-import { saveContext } from '../features/context';
 import { JsonStore } from '../features/jsonStore';
-import { displayPath, saveScreenshot } from '../features/screenshots';
+import type { HubCore } from '../hub/core';
 import {
   isOwnWrite,
   onDidChangeShortcuts,
@@ -25,17 +24,7 @@ import {
   touchShortcuts,
   writeShortcuts,
 } from '../features/shortcutSettings';
-import { CHAT_TARGET } from '../features/terminalSend';
 import { sanitizeOverrides } from '../shared/shortcuts';
-
-export type SendMessage = Extract<ClientMessage, { type: 'send' }>;
-
-/** How a send ended, for the browser. */
-export interface SendResult {
-  ok: boolean;
-  path?: string;
-  error?: string;
-}
 
 /**
  * One linked, authenticated browser, whatever carries its messages (the WebSocket link, or the
@@ -52,7 +41,7 @@ export interface LinkPeer {
 /** Messages a linked browser sends once it is authenticated. */
 export type LinkedMessage = Extract<
   ClientMessage,
-  { type: 'bookmarks.snapshot' | 'bookmarks.applied' | 'send' | 'settings.shortcuts' }
+  { type: 'bookmarks.snapshot' | 'bookmarks.applied' | 'hub.request' | 'settings.shortcuts' }
 >;
 
 /** Whether a message is for the link service (the transport handles hello, pairing and pings). */
@@ -60,15 +49,16 @@ export function isLinkedMessage(message: ClientMessage): message is LinkedMessag
   return (
     message.type === 'bookmarks.snapshot' ||
     message.type === 'bookmarks.applied' ||
-    message.type === 'send' ||
+    message.type === 'hub.request' ||
     message.type === 'settings.shortcuts'
   );
 }
 
 /**
  * What a linked browser does with this window, independent of how it is connected: bookmark
- * sync both ways, the shortcut settings, and sends (captures to the Agent Context list, the
- * chat, an agent or the workspace). Transports register their authenticated browsers as peers.
+ * sync both ways, the shortcut settings, and (over the WebSocket link) projects and their saved
+ * captures, answered by the same HubCore as the browser helper's. Transports register their
+ * authenticated browsers as peers.
  */
 export class LinkService implements vscode.Disposable {
   private readonly peers = new Set<LinkPeer>();
@@ -144,22 +134,21 @@ export class LinkService implements vscode.Disposable {
     for (const peer of this.peers) peer.send(message);
   }
 
-  /** The first messages a browser gets once linked: who we are, and VS Code's shortcuts. */
-  welcome(peer: LinkPeer, peerName: string): void {
+  /**
+   * The first messages a browser gets once linked: who we are (and what we answer), and VS Code's
+   * shortcuts.
+   */
+  welcome(peer: LinkPeer, peerName: string, features: LinkFeature[] = []): void {
     const syncBookmarks = getConfig().bridgeSyncBookmarks;
-    peer.send({ type: 'welcome', peer: peerName, syncBookmarks });
+    peer.send({ type: 'welcome', peer: peerName, syncBookmarks, features });
     peer.send(this.shortcutsMessage());
   }
 
   /**
-   * Handles a message from a linked browser. Sends go to `dispatchSend`, which decides which
-   * window runs them (see `runSend`).
+   * Handles a message from a linked browser. `core` answers its questions about projects and
+   * captures (only the window serving the WebSocket link has one).
    */
-  async handle(
-    peer: LinkPeer,
-    message: LinkedMessage,
-    dispatchSend: (message: SendMessage) => Promise<SendResult>,
-  ): Promise<void> {
+  async handle(peer: LinkPeer, message: LinkedMessage, core?: HubCore): Promise<void> {
     const client = peer.client;
     switch (message.type) {
       case 'bookmarks.snapshot':
@@ -174,9 +163,15 @@ export class LinkService implements vscode.Disposable {
           );
         }
         return;
-      case 'send': {
-        const result = await dispatchSend(message);
-        peer.send({ type: 'send.result', id: message.id, ...result });
+      case 'hub.request': {
+        const request = parseBrowserToHub(message.request);
+        if (!core || !request || !('req' in request)) return;
+        const reply = await core.handle(request);
+        // Captures saved, sent or moved: the Saved view shows them at once.
+        if (request.type !== 'projects.get' && request.type !== 'items.get') contextTray()?.load();
+        // As the helper would send it (with the protocol's version), checked like there.
+        const wire = JSON.parse(encodeHub(reply)) as typeof reply;
+        if (parseHubToBrowser(wire)) peer.send({ type: 'hub.reply', reply: wire as HubReply });
         return;
       }
       case 'settings.shortcuts': {
@@ -320,98 +315,6 @@ export class LinkService implements vscode.Disposable {
     const files = (await readdir(folder)).filter((f) => f.startsWith('bookmarks-')).sort();
     for (const old of files.slice(0, -5)) await rm(join(folder, old), { force: true });
     this.logger.info(`Bookmarks backed up (${reason}) in ${folder}`);
-  }
-
-  /**
-   * Runs a send in this window: added to the Agent Context list (every capture, as it is taken),
-   * saved into the workspace, or sent to the chat or an agent. Sends of one capture share one
-   * Agent Context item (its key).
-   */
-  async runSend(message: SendMessage): Promise<SendResult> {
-    try {
-      const globalStorage = this.context.globalStorageUri.fsPath;
-      const label = message.label || 'From the browser';
-      const key = message.capture ? `browser:${message.capture}` : undefined;
-      const kind = message.kind ?? (message.image ? 'screenshot' : 'text');
-      if (message.target === 'context') {
-        // Only the list: nothing is copied (the browser did), saved or sent.
-        addContext({
-          kind,
-          title: label,
-          detail: message.pageUrl,
-          text: message.image ? undefined : message.text,
-          image: message.image
-            ? { bytes: new Uint8Array(Buffer.from(message.image, 'base64')), mimeType: 'image/png' }
-            : undefined,
-          url: message.pageUrl,
-          key,
-          group: message.group,
-        });
-        return { ok: true };
-      }
-      if (
-        message.captures?.length &&
-        (message.target === 'chat' || message.target === 'terminal')
-      ) {
-        // Several captures, already in the list: one send with all of them.
-        const tray = contextTray();
-        const items = message.captures.flatMap(
-          (capture) => tray?.all().find((i) => i.key === `browser:${capture}`) ?? [],
-        );
-        if (items.length < message.captures.length) {
-          return {
-            ok: false,
-            error: 'Some of those screenshots are not in this VS Code window. Send them again.',
-          };
-        }
-        const sent = await sendContextItems(
-          items,
-          message.target === 'terminal' ? 'terminal' : CHAT_TARGET,
-        );
-        return sent
-          ? { ok: true }
-          : { ok: false, error: 'Nothing was sent: no agent is running in a VS Code terminal.' };
-      }
-      let path: string | undefined;
-      if (message.image) {
-        const bytes = new Uint8Array(Buffer.from(message.image, 'base64'));
-        path = await saveScreenshot(bytes, message.pageUrl ?? '', 'png', globalStorage);
-        // Screenshots are always copied, wherever they come from.
-        await copyImageBytes(bytes, 'image/png').catch((error: unknown) =>
-          this.logger.warn(`Browser link: could not copy the image: ${errorMessage(error)}`),
-        );
-      }
-      if (message.target === 'save') {
-        path ??= message.text ? await saveContext(message.text, label, globalStorage) : undefined;
-        if (path)
-          void vscode.window.showInformationMessage(`${label} saved to ${displayPath(path)}`);
-      } else {
-        // Sends from the browser show in the Agent Context list too.
-        const sent = await captureAndSend(
-          {
-            kind,
-            key,
-            title: label,
-            detail: message.pageUrl,
-            text: message.image ? undefined : message.text,
-            file: path,
-            url: message.pageUrl,
-          },
-          // The browser names the agent: the chat, or an agent in a terminal.
-          message.target === 'terminal' ? 'terminal' : CHAT_TARGET,
-        );
-        if (!sent) {
-          return {
-            ok: false,
-            path: path && displayPath(path),
-            error: 'Nothing was sent: no agent is running in a VS Code terminal.',
-          };
-        }
-      }
-      return { ok: true, path: path && displayPath(path) };
-    } catch (error) {
-      return { ok: false, error: errorMessage(error) };
-    }
   }
 
   dispose(): void {

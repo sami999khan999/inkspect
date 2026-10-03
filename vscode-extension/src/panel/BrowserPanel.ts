@@ -48,6 +48,7 @@ import {
   type Rect,
   type KeyInput,
   type PageContext,
+  type SavedOffer,
   type TabAction,
   type WebviewToHost,
 } from '../shared/protocol';
@@ -71,6 +72,7 @@ import {
 import { editorHost, webviewOptions, type BrowserHost } from './hosts';
 import { captureAndSend } from '../agent/chat';
 import { addContext, type ContextInput } from '../agent/contextTray';
+import { sendFlow } from '../agent/sendFlow';
 import { CONTEXT_KIND_LABELS, type ContextKind } from '../shared/agentContext';
 import { SHORTCUT_ACTIONS } from '../shared/shortcuts';
 import { NATIVE_CLIPBOARD_TYPES } from '../features/imageClipboard';
@@ -737,6 +739,9 @@ export class BrowserPanel implements vscode.Disposable {
         await vscode.commands.executeCommand(message.command);
         return;
       }
+      case 'savedAction':
+        await sendFlow()?.handle(message, (reply) => this.post(reply));
+        return;
       case 'copyText':
         await copyText(message.text);
         if (message.kind) {
@@ -1834,7 +1839,7 @@ export class BrowserPanel implements vscode.Disposable {
     return text;
   }
 
-  /** An Agent Context item for a Copy-for-AI summary (one per page, replaced when redone). */
+  /** A Saved item for a Copy-for-AI summary (one per page, replaced when redone). */
   private devContext(
     tab: Tab,
     action: 'copyErrors' | 'copyFailedRequests' | 'copyContext',
@@ -1852,7 +1857,7 @@ export class BrowserPanel implements vscode.Disposable {
     };
   }
 
-  /** An Agent Context item for text from the webview (measurements, reports, CSS changes). */
+  /** A Saved item for text from the webview (measurements, reports, CSS changes). */
   private textContext(kind: ContextKind, label: string | undefined, text: string): ContextInput {
     const tab = this.activeTab;
     const title = label
@@ -1868,7 +1873,7 @@ export class BrowserPanel implements vscode.Disposable {
   }
 
   /**
-   * Keeps the console errors of a page in the Agent Context list as they happen (one item per
+   * Keeps the console errors of a page in the Saved list as they happen (one item per
    * page, updated in place), so they can be sent without opening the console.
    */
   private collectErrorsSoon(tab: Tab): void {
@@ -2117,7 +2122,7 @@ export class BrowserPanel implements vscode.Disposable {
   }
 
   /** Copies the details of the element at a point (viewport CSS pixels) in the active tab. */
-  async copyElementAt(x: number, y: number): Promise<void> {
+  async copyElementAt(x: number, y: number, screenshot = false): Promise<void> {
     const tab = this.activeTab;
     if (!tab?.session) return;
     await this.inspector.start(tab.id, tab.session);
@@ -2126,7 +2131,8 @@ export class BrowserPanel implements vscode.Disposable {
       y,
       purpose: 'copy',
       add: false,
-      screenshot: false,
+      // A click with Alt held: a screenshot of the element.
+      screenshot,
       url: tab.url,
     });
     await this.inspector.stop(tab.session);
@@ -2251,6 +2257,13 @@ export class BrowserPanel implements vscode.Disposable {
   /** Shows a short message over the page (when the window is visible). */
   toast(message: string): void {
     this.post({ type: 'toast', message });
+  }
+
+  /** Shows the send dialog for a capture, if this browser is on screen. */
+  offerSaved(offer: SavedOffer): boolean {
+    if (!this.host.visible || !this.ready || this.disposed) return false;
+    this.post({ type: 'saved', offer });
+    return true;
   }
 
   private post(message: HostToWebview): void {

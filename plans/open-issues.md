@@ -35,15 +35,15 @@ What is known and not done yet, across both products: found by the review of Sep
 
 - [ ] **One name per action.** "Chat agent" / "Terminal agent" (selection bar), "Send to chat" / "Send to terminal" (popup), "Send to Agent" (notifications), "Send" (Agent Context), "Sent to VS Code chat" (toasts); "Pair" / "Link" / "Unlink"; "Responsive view" vs "Device toolbar". Pick one pair ("Send to chat" / "Send to terminal agent") and one word for linking; use them everywhere, commands included.
 - [ ] **Sentence case** for notification buttons and sidebar tree labels ("Try Again", "Use a Code Instead", "Copy Code", "Send to Agent", "More...", "Reset All", "Start Agent", "Open URL...", "New Private Tab"...), matching the webview's wording exactly.
-- [ ] **Picker hint when not linked (browser):** it still offers Ctrl+click "chat agent" / "terminal agent", Ctrl+click still tries to send, and the error names a button that doesn't exist ("the VS Code button"). Hide those items when unlinked (`canSend`), copy instead, and name the real button ("Link with VS Code").
-- [ ] **Alt+click differs:** VS Code Browser copies the details with a screenshot, the browser extension takes only the screenshot. Align them (or the wording).
-- [ ] **Two confirmations for one action:** a browser Save shows a toast and a VS Code notification; a send shows the webview toast and a status bar message. Keep one.
+- [x] *(The picker no longer sends with Ctrl+click; every capture is saved and the send dialog says what can be done.)* **Picker hint when not linked (browser):** it still offers Ctrl+click "chat agent" / "terminal agent", Ctrl+click still tries to send, and the error names a button that doesn't exist ("the VS Code button"). Hide those items when unlinked (`canSend`), copy instead, and name the real button ("Link with VS Code").
+- [x] *(Both take a screenshot of the element, and only that.)* **Alt+click differs:** VS Code Browser copies the details with a screenshot, the browser extension takes only the screenshot. Align them (or the wording).
+- [x] *(One send dialog after each capture in both products; its status line says where it went.)* **Two confirmations for one action:** a browser Save shows a toast and a VS Code notification; a send shows the webview toast and a status bar message. Keep one.
 - [ ] **The browser's region-select hint has no styling** (`App.tsx` region hint uses `inspect-hint` without `picker-hint`): unreadable on many pages. Also align its words with VS Code's ("Drag to select an area · Esc to cancel").
 - [ ] **Overlays can collide at the bottom of the page:** the capture popup over the picker hint on narrower windows, the hint under the selection bar when it wraps to 3 rows. Stack the hint and the selection bar in one column; keep the popup above; replace the 90/92 px offsets with tokens.
 - [ ] **Menus don't return focus** to the button that opened them, and menu buttons lack `aria-haspopup` / `aria-expanded` (IconButton and Button have no props for them).
 - [ ] **High contrast:** the Agent Context and Shortcuts views don't load the high-contrast rules (they live in the browser panel's `styles.css`; move them to `shared/src/ui/ui.css`). The newer pieces have none either (group rows, selection footer and badge, card count, the selection bar, picker hint, thumbnails, the popup's count), and there is no `forced-colors` block in the browser extension; unchecked items are shown by opacity alone.
 - [ ] **Firefox: the emulation panel's color-scheme control** looks usable but does nothing. Add `disabled` to Segmented.
-- [ ] **The toolbar's panels use hand-styled controls** (close button, pairing code input, Pair/Settings buttons) instead of the kit; the Pair button shows no busy state and its error isn't announced.
+- [x] *(The pairing part: one PairCard from the kit, with a busy Pair button and an announced error; the close button is still the panel's own.)* **The toolbar's panels use hand-styled controls** (close button, pairing code input, Pair/Settings buttons) instead of the kit; the Pair button shows no busy state and its error isn't announced.
 - [ ] **The Agent Context selection footer** doesn't wrap in a narrow sidebar (about 250 px). Wrap it; make Group icon-only when narrow.
 - [ ] **Command titles:** parentheticals such as "(Copy Details for AI)", "(for External Agents)", "(Ignore Cache)" belong in descriptions.
 - [ ] **Agent Context empty states:** an empty filter says "Nothing here yet." (offer "Show all"); the tip hard-codes "Ctrl+click" on macOS.
@@ -60,13 +60,20 @@ What is known and not done yet, across both products: found by the review of Sep
 - [ ] **Firefox** native host and sidebar are untested (Firefox isn't installed on the development machine); the host manifest is written to both `~/.mozilla` and `$XDG_CONFIG_HOME/mozilla`.
 - [ ] **macOS and Windows** don't get the hub yet (the WebSocket link is used there): host manifest locations, the registry on Windows, and named pipes instead of a Unix socket.
 - [ ] **`.inkspect/` shows in the Explorer and in search.** It is git-ignored; adding it to `files.exclude`/`search.exclude` is a user choice.
-- [ ] **The hub's tmux sockets** come from `INKSPECT_TMUX_SOCKETS` or default to `agents` and `default`; VS Code's `agent.tmuxSockets` setting isn't passed to it.
+- [ ] **The hub's tmux sockets** come from `INKSPECT_TMUX_SOCKETS` or default to `agents` and `default`; VS Code's `agent.tmuxSockets` setting isn't passed to it. (VS Code reads `INKSPECT_TMUX_SOCKETS` too, so tests keep off the machine's tmux.)
 - [ ] **Bookmark sync from two transports at once:** a browser uses one (the helper when installed), but `bookmark-links.json` is written by whichever window serves each; check for lost updates when both a WebSocket browser and a helper browser sync.
 - [ ] **A browser on the WebSocket link doesn't switch to the helper** while that link stays up (the helper is looked for when connecting, and again 5 minutes after it wasn't found). Restarting the browser or VS Code switches it.
 - [ ] **Two hubs starting at the same moment after a crash** could still both clear a stale lock (very unlikely; an empty lock being written now is no longer taken for stale).
 - [ ] **The device-emulation integration test** ("emulates a device and turns emulation off again") failed twice on a heavily loaded machine with touch emulation still on after it was turned off (`touch=5`), and passed in the other runs. Possibly a race between clearing touch emulation and the reload.
 
+- [ ] **`hub.json` has two writers** when a browser uses the WebSocket link while the hub runs: the daemon and the serving VS Code window (both run HubCore). The last write wins (site memory, pins, last project); re-read before writing, or let one of them own it.
+- [ ] **The hub's state and the Inbox use XDG folders on every platform** (`~/.local/state`, `~/.local/share`) for the WebSocket link's HubCore, though the Inbox itself stays in global storage outside Linux. Use the platform's folders there.
+- [ ] **New agentmux thread** switches agentmux to the project (`agentmux project <dir>`), which may resume its sessions (`resume-on-open`), and waits up to 15 s for the thread's pane; the agent then gets the paste before its prompt may be ready.
+- [ ] **The send dialog** shows at most 4 thumbnails and can't leave out some of several captures (they are saved together; remove the unwanted ones from the Saved list).
+- [ ] **Open in agentmux** focuses windows on Hyprland only (`hyprctl`); elsewhere it pastes and switches the thread without bringing a window forward.
+
 ## Not verified
 
 - [ ] **Sending several images to VS Code chat at once** (`workbench.action.chat.open` with several `attachFiles`) is covered only through a terminal agent in the tests; check it in a real chat.
-- [ ] **The Agent Context views** (group cards, selection, undo) were checked in the built webview loaded in Chrome with made-up data, not inside VS Code.
+- [ ] **The Saved views** (group cards, selection, undo, the project switcher) were checked by the end-to-end tests through their data, not by looking at them inside VS Code; the send dialog the same.
+- [ ] **Open in agentmux** and **New agentmux thread** were checked against a fake `agentmux` and a private tmux server, not against the real agentmux and Hyprland.

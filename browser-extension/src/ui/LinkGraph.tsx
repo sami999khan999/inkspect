@@ -1,4 +1,3 @@
-import type { VsCodeWindow } from '@inkspect/shared/bridge';
 import type { BridgeStatus } from '../messages';
 
 interface LinkGraphProps {
@@ -9,17 +8,21 @@ interface LinkGraphProps {
 }
 
 /**
- * The link, drawn: this browser on the left (level with the first window), a bus down to a branch
- * for each open VS Code window. Windows keep a stable order (by name), and the lit path runs from
- * the browser down the bus to the window used last, where sends go: switching windows moves the
- * line, not the rows. Unlinked, a single dashed branch leads to VS Code in the state's color.
+ * The link, drawn: this browser on the left, a lit branch to the VS Code window that answers for
+ * it (through the browser helper, or the WebSocket link). Unlinked, a dashed branch leads to VS
+ * Code in the state's color.
  */
 export function LinkGraph({ status, limit = Infinity, size = 'lg' }: LinkGraphProps) {
   const linked = status.state === 'connected';
-  const windows: VsCodeWindow[] = linked
-    ? status.windows?.length
-      ? [...status.windows].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
-      : [{ id: 'peer', name: status.peer ?? 'VS Code', lastUsed: true }]
+  const windows = linked
+    ? [
+        {
+          id: 'peer',
+          name: status.peer ?? 'VS Code',
+          lastUsed: true,
+          tag: status.via === 'hub' ? 'Browser helper' : 'Linked',
+        },
+      ]
     : [];
   const shown = windows.slice(0, limit);
   const hidden = windows.length - shown.length;
@@ -42,7 +45,7 @@ export function LinkGraph({ status, limit = Infinity, size = 'lg' }: LinkGraphPr
                   <span className="codicon codicon-vscode" />
                 </span>
                 <span className="graph-name">{w.name}</span>
-                {w.lastUsed && <span className="graph-tag">Sends go here</span>}
+                {w.lastUsed && <span className="graph-tag">{w.tag}</span>}
               </li>
             ))}
             {hidden > 0 && (

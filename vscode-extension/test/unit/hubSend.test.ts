@@ -6,11 +6,12 @@ import { afterAll, describe, expect, it } from 'vitest';
 import type { ProcessInfo } from '../../src/agent/agentDetect';
 import {
   chooseDefault,
+  pairedProjects,
   pairedTarget,
   paneTargets,
-  parseTargetId,
   readKittyPairs,
 } from '../../src/hub/agents';
+import { parseTargetId } from '@inkspect/shared/targets';
 import { partsOf, pasteIntoPane } from '../../src/hub/send';
 import { writeItem } from '../../src/hub/store';
 import { parsePanes } from '../../src/hub/tmux';
@@ -101,6 +102,9 @@ describe('agents in agentmux threads', () => {
       'tmux:agents:%37',
     );
     expect(pairedTarget('/p/shop', pairs, PROCESSES, clients, targets)).toBeUndefined();
+    // The thread a paired kitty shows, whatever folder VS Code has (none, in a bare window).
+    expect(pairedProjects(pairs, PROCESSES, clients, PANES)).toEqual(['/p/inkspect']);
+    expect(pairedProjects([], PROCESSES, clients, PANES)).toEqual([]);
   });
 
   it('sends to the last target, else the paired agent, a VS Code terminal, the latest agent, chat', () => {

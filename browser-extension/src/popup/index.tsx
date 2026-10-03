@@ -13,6 +13,8 @@ import type { BridgeStatus } from '../messages';
 import { isMac, labelOf, TOOLBAR_ACTIONS, watchShortcuts } from '../shortcuts';
 import { LinkGraph } from '../ui/LinkGraph';
 import linkGraphCss from '../ui/link-graph.css';
+import pairCardCss from '../ui/pair-card.css';
+import { PairCard } from '../ui/PairCard';
 import popupCss from './popup.css';
 
 /** The keys the popup shows; the full page has all of them. */
@@ -32,10 +34,11 @@ const STATE: Record<BridgeStatus['state'], { label: string; tone: string }> = {
 };
 
 /**
- * Opens the side panel with the projects and their captures. It must open in the click itself
- * (browsers allow it only as the answer to a user action), so the window id is read beforehand.
+ * Opens the side panel with the Saved list (the page's project, or another). It must open in the
+ * click itself (browsers allow it only as the answer to a user action), so the window id is read
+ * beforehand.
  */
-function openProjects(windowId: number | undefined) {
+function openSaved(windowId: number | undefined) {
   if (__BROWSER__ === 'firefox') {
     const sidebar = (globalThis as { browser?: { sidebarAction?: { open(): Promise<void> } } })
       .browser?.sidebarAction;
@@ -104,23 +107,17 @@ function Popup() {
       <section className="popup-link" aria-label="VS Code">
         <LinkGraph status={status} size="sm" />
         {!linked && (
-          <div className="popup-unlinked">
-            <p>
-              {status.state === 'unpaired' ? (
-                <>
-                  In VS Code, click <b>Pair Browser Extension</b> in the Browser side panel. No code
-                  needed.
-                </>
-              ) : (
-                'Start VS Code with VS Code Browser to link it.'
-              )}
-            </p>
-            {status.state === 'unpaired' && (
-              <Button size="sm" variant="ghost" icon="key" onClick={() => openPage('vscode-code')}>
-                Use a code
-              </Button>
-            )}
-          </div>
+          <PairCard
+            compact
+            status={status}
+            pair={async (code) => {
+              const result = (await chrome.runtime
+                .sendMessage({ type: 'pair', code })
+                .catch(() => undefined)) as BridgeStatus | undefined;
+              if (result) setStatus(result);
+              return result;
+            }}
+          />
         )}
       </section>
 
@@ -173,14 +170,14 @@ function Popup() {
         <Button size="sm" variant="ghost" icon="link-external" onClick={() => openPage()}>
           Open Inkspect
         </Button>
-        {status.via === 'hub' && (
+        {status.projects && (
           <Button
             size="sm"
             variant="ghost"
             icon="layout-sidebar-right"
-            onClick={() => openProjects(windowId)}
+            onClick={() => openSaved(windowId)}
           >
-            Projects
+            Saved
           </Button>
         )}
         <IconButton
@@ -194,7 +191,7 @@ function Popup() {
 }
 
 const style = document.createElement('style');
-style.textContent = [codiconCss, themeCss, uiCss, linkGraphCss, popupCss].join('\n');
+style.textContent = [codiconCss, themeCss, uiCss, linkGraphCss, pairCardCss, popupCss].join('\n');
 document.head.append(style);
 document.documentElement.classList.add('ink-theme');
 

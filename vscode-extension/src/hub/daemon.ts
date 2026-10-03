@@ -7,17 +7,16 @@ import {
   closeSync,
   openSync,
   readFileSync,
-  statSync as statFile,
   rmSync,
   statSync,
   writeFileSync,
   writeSync,
 } from 'node:fs';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
-import { isAbsolute, join } from 'node:path';
 import { parseClientMessage, type ClientInfo } from '@inkspect/shared/bridge';
 import {
   encodeHub,
+  HUB_FEATURES,
   MAX_FRAME,
   MAX_TO_BROWSER,
   parseBrowserToHub,
@@ -27,38 +26,11 @@ import {
   type HubRole,
   type HubToBrowser,
   type HubToVsCode,
-  type HubTarget,
   type HubWindow,
-  type ItemMeta,
-  type Project,
 } from '@inkspect/shared/hub';
-import type { ProcessInfo } from '../agent/agentDetect';
-import { listProcesses } from '../agent/processes';
-import {
-  chooseDefault,
-  listClients,
-  pairedTarget,
-  paneTargets,
-  parseTargetId,
-  readKittyPairs,
-} from './agents';
-import { listenerFolder, localPort, projectOfFolder } from './devServer';
+import { HubCore } from './core';
 import { frame, FrameDecoder } from './framing';
 import { ensurePrivateDir, type HubPaths } from './paths';
-import { collectProjects, siteOf, suggestProject } from './projects';
-import { readState, writeState, type HubState } from './state';
-import { partsOf, pasteIntoPane } from './send';
-import {
-  emptyTrash,
-  itemFile,
-  readItem,
-  readItems,
-  removeItems,
-  TRASH_MS,
-  updateItem,
-  writeItem,
-} from './store';
-import { listPanes } from './tmux';
 
 export interface DaemonOptions {
   /** Exit after this long without connections. */
@@ -118,9 +90,8 @@ export class HubDaemon {
   private idleTimer?: NodeJS.Timeout;
   private leader?: Connection;
   private stopped = false;
-  private readonly stateFile: string;
-  private state: HubState;
-  private projectsCache?: { at: number; projects: Promise<Project[]> };
+  /** Projects and their captures: what browsers ask about. */
+  private readonly core: HubCore;
   /** Sends handed to VS Code windows, waiting for their answer. */
   private readonly runs = new Map<
     string,
@@ -134,8 +105,15 @@ export class HubDaemon {
     private readonly paths: HubPaths,
     private readonly options: DaemonOptions,
   ) {
-    this.stateFile = join(paths.state, 'hub.json');
-    this.state = readState(this.stateFile);
+    this.core = new HubCore(
+      { paths, tmuxSockets: options.tmuxSockets, procRoot: options.procRoot },
+      {
+        windows: () => this.ofRole('vscode').flatMap((c) => (c.window ? [c.window] : [])),
+        runInWindow: (window, project, ids, target) =>
+          this.runInWindow(window, project, ids, target),
+        log: (line) => this.log(line),
+      },
+    );
   }
 
   /** Starts serving; false if another hub already runs. */
@@ -267,54 +245,8 @@ export class HubDaemon {
       this.sendToBrowser(connection, { type: 'pong' });
       return;
     }
-    if (message.type === 'projects.get') {
-      this.projectsFor(message.url).then(
-        ({ projects, suggested }) =>
-          this.sendToBrowser(connection, {
-            type: 'projects',
-            req: message.req,
-            projects,
-            suggested,
-          }),
-        (error: unknown) => {
-          this.log(`Listing projects failed: ${(error as Error).message}`);
-          this.sendToBrowser(connection, { type: 'projects', req: message.req, projects: [] });
-        },
-      );
-      return;
-    }
-    if (message.type === 'capture.save') {
-      this.saveCaptures(message)
-        .catch((error: unknown) => ({ ok: false, error: (error as Error).message }))
-        .then((reply) =>
-          this.sendToBrowser(connection, { type: 'capture.saved', req: message.req, ...reply }),
-        );
-      return;
-    }
-    if (message.type === 'item.send') {
-      this.sendItems(message.project, message.ids, message.target)
-        .catch((error: unknown) => ({ ok: false, error: (error as Error).message }))
-        .then((reply) =>
-          this.sendToBrowser(connection, { type: 'item.sent', req: message.req, ...reply }),
-        );
-      return;
-    }
-    if (
-      message.type === 'items.get' ||
-      message.type === 'item.thumb' ||
-      message.type === 'item.remove' ||
-      message.type === 'project.pin'
-    ) {
-      this.onPanelRequest(connection, message).catch((error: unknown) => {
-        const text = (error as Error).message;
-        this.log(`${message.type} failed: ${text}`);
-        const { req } = message;
-        if (message.type === 'items.get') {
-          this.sendToBrowser(connection, { type: 'items', req, ok: false, items: [], error: text });
-        } else if (message.type === 'item.thumb') {
-          this.sendToBrowser(connection, { type: 'thumb', req });
-        } else this.sendToBrowser(connection, { type: 'done', req, ok: false, error: text });
-      });
+    if ('req' in message) {
+      void this.core.handle(message).then((reply) => this.sendToBrowser(connection, reply));
       return;
     }
     // The link: checked here too, so the leader only gets what the bridge protocol allows.
@@ -329,201 +261,6 @@ export class HubDaemon {
       return;
     }
     this.sendToVsCode(this.leader, { type: 'link', browser: connection.id, data: message.data });
-  }
-
-  private get tmuxSockets(): string[] {
-    return this.options.tmuxSockets ?? ['agents', 'default'];
-  }
-
-  /**
-   * The projects right now (VS Code windows, agentmux threads, saved and pinned ones), each with
-   * the targets its sends can go to and its default one.
-   */
-  private projects(): Promise<Project[]> {
-    // Requests come in bursts (the side panel polls): look again at most every 1.5 s.
-    if (this.projectsCache && Date.now() - this.projectsCache.at < 1_500) {
-      return this.projectsCache.projects;
-    }
-    const projects = this.findProjects();
-    this.projectsCache = { at: Date.now(), projects };
-    projects.catch(() => (this.projectsCache = undefined));
-    return projects;
-  }
-
-  /** Forgets the projects found last (what they depend on changed). */
-  private projectsChanged(): void {
-    this.projectsCache = undefined;
-  }
-
-  private async findProjects(): Promise<Project[]> {
-    const windows = this.ofRole('vscode').flatMap((c) => (c.window ? [c.window] : []));
-    const [panes, processes] = await Promise.all([
-      listPanes(this.tmuxSockets),
-      this.tmuxSockets.length ? listProcesses().catch(() => [] as ProcessInfo[]) : [],
-    ]);
-    const projects = collectProjects(windows, panes, this.state);
-    const agents = paneTargets(panes, processes);
-    const pairs = readKittyPairs(process.env.XDG_RUNTIME_DIR);
-    const clients = pairs.length ? await listClients(this.tmuxSockets) : [];
-    for (const project of projects) {
-      const own = agents.filter((t) => t.project === project.path);
-      // A window's targets, under ids the hub can route back to it.
-      const inWindows = windows
-        .filter((w) => w.folders.includes(project.path))
-        .sort((a, b) => b.focusedAt - a.focusedAt)
-        .flatMap((w) =>
-          (w.targets ?? []).map((t): HubTarget => ({
-            ...t,
-            id: `vscode:${w.id}:${t.id}`,
-            detail: `${t.detail} · ${w.name}`.slice(0, 300),
-          })),
-        );
-      const targets: HubTarget[] = [
-        ...own.map(({ id, kind, label, detail }) => ({ id, kind, label, detail })),
-        ...inWindows,
-      ];
-      project.targets = targets;
-      project.defaultTarget = chooseDefault([...own, ...inWindows], {
-        last: this.state.lastTarget[project.path],
-        paired: pairedTarget(project.path, pairs, processes, clients, own)?.id,
-        preferredTerminal: inWindows.find((t) => t.kind === 'terminal')?.id,
-      });
-    }
-    return projects;
-  }
-
-  /**
-   * Sends saved items to a target: pasted into an agentmux pane by the hub, or handed to the VS
-   * Code window that owns the target. Records where they went.
-   */
-  private async sendItems(
-    path: string,
-    ids: readonly string[],
-    target: string | undefined,
-  ): Promise<{ ok: boolean; sentTo?: string; error?: string }> {
-    const project = (await this.projects()).find((p) => p.path === path);
-    if (!project) return { ok: false, error: 'That project is not open anywhere any more.' };
-    const id = !target || target === 'default' ? project.defaultTarget : target;
-    const chosen = project.targets?.find((t) => t.id === id);
-    if (!id || !chosen) {
-      return {
-        ok: false,
-        error: `No agent is running for ${project.name}. Start one in agentmux or a VS Code terminal.`,
-      };
-    }
-    const items = ids.flatMap((itemId) => readItem(path, itemId) ?? []);
-    if (!items.length) return { ok: false, error: 'Those captures are gone.' };
-    const parsed = parseTargetId(id);
-    let reply: { ok: boolean; sentTo?: string; error?: string };
-    if (parsed?.kind === 'tmux') {
-      try {
-        await pasteIntoPane(parsed.socket, parsed.pane, partsOf(path, items));
-        reply = { ok: true, sentTo: chosen.label };
-      } catch (error) {
-        reply = {
-          ok: false,
-          error: `Could not paste into ${chosen.detail}: ${(error as Error).message}`,
-        };
-      }
-      // Pasted: a failure to note it doesn't make the send fail.
-      if (reply.ok) {
-        try {
-          this.markSent(path, items, chosen.label);
-        } catch (error) {
-          this.log(`Could not mark items as sent: ${(error as Error).message}`);
-        }
-      }
-    } else if (parsed?.kind === 'vscode') {
-      reply = await this.runInWindow(parsed.window, path, ids, parsed.target);
-    } else {
-      reply = { ok: false, error: 'Unknown target.' };
-    }
-    if (reply.ok) {
-      this.state = { ...this.state, lastTarget: { ...this.state.lastTarget, [path]: id } };
-      writeState(this.stateFile, this.state);
-      this.projectsChanged();
-      this.log(`Sent ${items.length} item(s) of ${path} to ${chosen.label} (${chosen.detail}).`);
-    }
-    return reply;
-  }
-
-  /**
-   * The side panel's requests: a project's items and their thumbnails, removing items, pinning
-   * a project. Only projects the hub knows are read or changed.
-   */
-  private async onPanelRequest(
-    connection: Connection,
-    message: Extract<
-      ReturnType<typeof parseBrowserToHub>,
-      { type: 'items.get' | 'item.thumb' | 'item.remove' | 'project.pin' }
-    >,
-  ): Promise<void> {
-    const known = (await this.projects()).some((p) => p.path === message.project);
-    const { req } = message;
-    if (!known) {
-      const error = 'That project is not open anywhere any more.';
-      if (message.type === 'items.get') {
-        this.sendToBrowser(connection, { type: 'items', req, ok: false, items: [], error });
-      } else if (message.type === 'item.thumb')
-        this.sendToBrowser(connection, { type: 'thumb', req });
-      else this.sendToBrowser(connection, { type: 'done', req, ok: false, error });
-      return;
-    }
-    switch (message.type) {
-      case 'items.get': {
-        emptyTrash(message.project, TRASH_MS);
-        // The newest ones: the side panel pages through no more than this.
-        const items = readItems(message.project).slice(0, 200);
-        this.sendToBrowser(connection, { type: 'items', req, ok: true, items });
-        return;
-      }
-      case 'item.thumb': {
-        const meta = readItem(message.project, message.id);
-        const thumb = meta && itemFile(message.project, meta, 'thumb');
-        const file = meta && itemFile(message.project, meta, 'file');
-        // The small JPEG; else the image itself when it fits a native message.
-        const path =
-          thumb ??
-          (file && /\.(png|jpe?g)$/i.test(file) && statFile(file).size < 600_000
-            ? file
-            : undefined);
-        if (!path) {
-          this.sendToBrowser(connection, { type: 'thumb', req });
-          return;
-        }
-        this.sendToBrowser(connection, {
-          type: 'thumb',
-          req,
-          data: readFileSync(path).toString('base64'),
-          mimeType: /\.png$/i.test(path) ? 'image/png' : 'image/jpeg',
-        });
-        return;
-      }
-      case 'item.remove':
-        removeItems(message.project, message.ids);
-        this.sendToBrowser(connection, { type: 'done', req, ok: true });
-        return;
-      case 'project.pin': {
-        const pinned = this.state.pinned.filter((p) => p !== message.project);
-        this.state = {
-          ...this.state,
-          pinned: message.pinned ? [...pinned, message.project] : pinned,
-        };
-        writeState(this.stateFile, this.state);
-        this.projectsChanged();
-        this.sendToBrowser(connection, { type: 'done', req, ok: true });
-        return;
-      }
-    }
-  }
-
-  private markSent(path: string, items: readonly ItemMeta[], label: string): void {
-    for (const item of items) {
-      updateItem(path, item.id, (meta) => ({
-        ...meta,
-        sentTo: meta.sentTo.includes(label) ? meta.sentTo : [...meta.sentTo, label],
-      }));
-    }
   }
 
   /** Asks a VS Code window to send items to one of its own targets (a terminal agent, chat). */
@@ -552,74 +289,6 @@ export class HubDaemon {
     });
   }
 
-  /** The projects, and the one a capture of `url` most likely goes to. */
-  private async projectsFor(url: string | undefined) {
-    const projects = await this.projects();
-    const paths = projects.map((p) => p.path);
-    const suggested = suggestProject(url, projects, this.state, (pageUrl) => {
-      const port = localPort(pageUrl);
-      const folder = port ? listenerFolder(port, this.options.procRoot) : undefined;
-      return folder ? projectOfFolder(folder, paths) : undefined;
-    });
-    return { projects, suggested };
-  }
-
-  /**
-   * Saves the browser's captures into a project the hub knows (never an arbitrary folder), and
-   * remembers it as this site's project.
-   */
-  private async saveCaptures(
-    message: Extract<ReturnType<typeof parseBrowserToHub>, { type: 'capture.save' }>,
-  ): Promise<{ ok: boolean; ids?: string[]; error?: string; sentTo?: string }> {
-    const project = message.project;
-    const known = (await this.projects()).some((p) => p.path === project);
-    if (!known || !isAbsolute(project)) {
-      return { ok: false, error: 'That project is not open anywhere any more.' };
-    }
-    try {
-      const ids = message.captures.map(
-        (capture) =>
-          writeItem(project, {
-            kind: capture.kind,
-            title: capture.title,
-            detail: capture.detail,
-            url: message.url,
-            group: capture.group,
-            groupIndex: capture.groupIndex,
-            source: 'browser',
-            browser: message.browser,
-            text: capture.text,
-            media: capture.image
-              ? { bytes: Buffer.from(capture.image, 'base64'), extension: 'png' }
-              : undefined,
-            thumb: capture.thumb ? Buffer.from(capture.thumb, 'base64') : undefined,
-          }).id,
-      );
-      const site = siteOf(message.url);
-      this.state = {
-        ...this.state,
-        saved: this.state.saved.includes(project)
-          ? this.state.saved
-          : [...this.state.saved, project],
-        sites: site ? { ...this.state.sites, [site]: project } : this.state.sites,
-        lastProject: project,
-      };
-      writeState(this.stateFile, this.state);
-      this.projectsChanged();
-      this.log(`Saved ${ids.length} capture(s) into ${project}.`);
-      if (message.send) {
-        const sent = await this.sendItems(project, ids, message.send);
-        return sent.ok
-          ? { ok: true, ids, sentTo: sent.sentTo }
-          : { ok: false, ids, error: `Saved, but not sent: ${sent.error}` };
-      }
-      return { ok: true, ids };
-    } catch (error) {
-      this.log(`Saving into ${project} failed: ${(error as Error).message}`);
-      return { ok: false, error: `Could not save into ${project}: ${(error as Error).message}` };
-    }
-  }
-
   private onVsCodeMessage(connection: Connection, value: unknown): void {
     const message = parseVsCodeToHub(value);
     if (!message) return;
@@ -631,7 +300,7 @@ export class HubDaemon {
         const first = !connection.window;
         const { id, name, folders, focusedAt, targets } = message;
         connection.window = { id, name, folders, focusedAt, targets };
-        this.projectsChanged();
+        this.core.projectsChanged();
         if (first) this.sendToVsCode(connection, { type: 'browsers', browsers: this.browsers() });
         this.electLeader();
         return;
@@ -663,7 +332,7 @@ export class HubDaemon {
       this.sendBrowsers();
     } else if (connection.role === 'vscode') {
       this.log(`VS Code window disconnected (${connection.window?.name ?? '?'}).`);
-      this.projectsChanged();
+      this.core.projectsChanged();
       // Its sends won't be answered.
       for (const [req, run] of this.runs) {
         if (run.window !== connection) continue;
@@ -700,9 +369,15 @@ export class HubDaemon {
   }
 
   private statusMessage(): HubToBrowser {
+    const features = [...HUB_FEATURES];
     return this.leader
-      ? { type: 'status', vscode: true, peer: `VS Code (${this.leader.window?.name ?? '?'})` }
-      : { type: 'status', vscode: false };
+      ? {
+          type: 'status',
+          vscode: true,
+          peer: `VS Code (${this.leader.window?.name ?? '?'})`,
+          features,
+        }
+      : { type: 'status', vscode: false, features };
   }
 
   private browsers(): HubBrowser[] {

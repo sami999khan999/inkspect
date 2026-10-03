@@ -50,6 +50,15 @@ interface DebugState {
     group?: string;
   }[];
   agents: { id: string; kind: string; label: string }[];
+  /** The send dialog offered last. */
+  offer?: {
+    id: string;
+    title: string;
+    project: { path: string };
+    targets: { id: string; kind: string; label: string }[];
+    defaultTarget?: string;
+    images: number;
+  };
 }
 
 const state = async () =>
@@ -316,6 +325,17 @@ export async function run(): Promise<void> {
       assert.match(text, /### Element: `h1`/);
       assert.match(text, /- Selector: `h1`/);
       assert.ok(text.includes('```html\n<h1>Page One</h1>'), text);
+      // Alt+click: a screenshot of the element, and only that (no details are saved with it).
+      const taken = Date.now();
+      await exec('vscodeBrowser.debug.copyElementAt', 30, 30, { screenshot: true });
+      const shot = await waitFor('the element screenshot in the Saved list', (s) =>
+        s.context.find((i) => i.time >= taken && i.kind === 'screenshot'),
+      );
+      assert.equal(shot.title, 'Element screenshot');
+      assert.ok(
+        !(await state()).context.some((i) => i.time >= taken && i.kind === 'element'),
+        'details were saved with the screenshot',
+      );
     });
 
     await test('saves viewport and full-page screenshots', async () => {
@@ -328,6 +348,51 @@ export async function run(): Promise<void> {
         assert.ok(existsSync(path as string));
         const header = readFileSync(path as string).subarray(0, 8);
         assert.equal(header.toString('hex'), '89504e470d0a1a0a', 'PNG file');
+      }
+    });
+
+    await test('a capture is saved and offered in the send dialog, whose choice sends it', async () => {
+      let typed = '';
+      const terminal = vscode.window.createTerminal({
+        name: 'codex',
+        pty: {
+          onDidWrite: new vscode.EventEmitter<string>().event,
+          open: () => {},
+          close: () => {},
+          handleInput: (data: string) => (typed += data),
+        },
+      });
+      try {
+        await waitFor('the agent terminal', (s) => s.agents.some((a) => a.label === 'Codex'));
+        // Earlier tests' captures may still be on their way to the dialog: let it settle.
+        let before = (await state()).offer?.id;
+        for (let quiet = 0; quiet < 3;) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          const id = (await state()).offer?.id;
+          quiet = id === before ? quiet + 1 : 0;
+          before = id;
+        }
+        await exec('vscodeBrowser.screenshot.viewport');
+        // Saved first, then the dialog offers it, with its image and the agents to send to.
+        const offer = await waitFor('the send dialog', (s) =>
+          s.offer && s.offer.id !== before ? s.offer : undefined,
+        );
+        assert.equal(offer.images, 1);
+        const codex = offer.targets.find((t) => t.label === 'Codex')!;
+        assert.ok(offer.targets.some((t) => t.kind === 'chat'));
+        const replies = (await exec('vscodeBrowser.debug.savedAction', {
+          offerId: offer.id,
+          action: 'send',
+          target: codex.id,
+        })) as { tone?: string; text?: string }[];
+        assert.ok(
+          replies.some((r) => r.tone === 'ok' && r.text === 'Sent to Codex'),
+          JSON.stringify(replies),
+        );
+        await until('the paste in the terminal', () => typed.includes('capture.png'));
+        assert.ok(!/[\r\n]/.test(typed), 'Enter must not be pressed');
+      } finally {
+        terminal.dispose();
       }
     });
 
@@ -582,7 +647,12 @@ export async function run(): Promise<void> {
         assert.ok((await next('paired')).token);
         const after = (await exec('vscodeBrowser.debug.bridge')) as { offers: string[] };
         assert.ok(!after.offers.includes(client.id), 'the offer stayed after pairing');
-        await next('welcome');
+        // This window answers the browser's questions about projects (`hub`).
+        const welcome = await next('welcome');
+        assert.ok(
+          (welcome.features as string[] | undefined)?.includes('hub'),
+          JSON.stringify(welcome),
+        );
         sendPaired({
           type: 'bookmarks.snapshot',
           tree: [
@@ -601,20 +671,44 @@ export async function run(): Promise<void> {
         // VS Code sends its own bookmarks for the browser to create, if it has any.
         const ops = received.find((m) => m.type === 'bookmarks.ops');
         if (ops) sendPaired({ type: 'bookmarks.applied', created: {}, failed: [] });
-        // A screenshot sent from the browser is saved by VS Code.
+        // Questions about projects, answered like the browser helper answers them.
+        let asked = 0;
+        const ask = async (request: object) => {
+          const req = `q${++asked}`;
+          sendPaired({ type: 'hub.request', request: { v: 1, req, ...request } });
+          for (const deadline = Date.now() + 20_000; Date.now() < deadline;) {
+            const index = received.findIndex(
+              (m) => m.type === 'hub.reply' && (m.reply as { req?: string }).req === req,
+            );
+            if (index !== -1) return received.splice(index, 1)[0]!.reply as Record<string, unknown>;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          throw new Error(`no answer to ${JSON.stringify(request)}`);
+        };
+        const listed = await ask({ type: 'projects.get', url: 'https://x.dev/' });
+        // This window's project: the one its Saved list shows (the Inbox, without a folder).
+        const project = listed.suggested as string;
+        const projects = listed.projects as { path: string; vscode: boolean }[];
+        assert.ok(
+          project && projects.some((p) => p.path === project && p.vscode),
+          JSON.stringify(listed),
+        );
+        // A screenshot from the browser is saved into the project (and shows in the Saved list).
         const png =
           'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-        sendPaired({
-          type: 'send',
-          id: 's1',
-          target: 'save',
-          image: png,
-          label: 'Test shot',
-          pageUrl: 'https://x.dev/',
+        const shot = `Test shot ${Date.now()}`;
+        const savedShot = await ask({
+          type: 'capture.save',
+          project,
+          url: 'https://x.dev/',
+          browser: 'Test Browser',
+          captures: [{ kind: 'screenshot', title: shot, image: png }],
         });
-        const result = await next('send.result');
-        assert.equal(result.ok, true, JSON.stringify(result));
-        assert.ok(existsSync(String(result.path)), String(result.path));
+        assert.equal(savedShot.ok, true, JSON.stringify(savedShot));
+        const shotId = (savedShot.ids as string[])[0]!;
+        await waitFor('the browser capture in the Saved list', (st) =>
+          st.context.find((c) => c.id === shotId && c.title === shot),
+        );
 
         // VS Code sends its shortcuts after linking; newer ones from the browser's sync win.
         const settings = vscode.workspace.getConfiguration('vscodeBrowser');
@@ -652,7 +746,7 @@ export async function run(): Promise<void> {
         await settings.update('shortcuts', undefined, vscode.ConfigurationTarget.Global);
         await settings.update('shortcutsUpdated', undefined, vscode.ConfigurationTarget.Global);
 
-        // Text for the agent is typed into the agent's terminal (without pressing Enter).
+        // Saved captures go to an agent in this window's terminals (pasted, without Enter).
         const typed: string[] = [];
         const output = new vscode.EventEmitter<string>();
         const terminal = vscode.window.createTerminal({
@@ -666,100 +760,70 @@ export async function run(): Promise<void> {
         });
         try {
           terminal.show(true);
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          sendPaired({ type: 'send', id: 's2', target: 'terminal', text: 'Fix the header' });
-          const sent = await next('send.result');
+          const target = await waitFor(
+            'the terminal agent among the project’s targets',
+            async () => {
+              const again = await ask({ type: 'projects.get', url: 'https://x.dev/' });
+              const own = (
+                again.projects as { path: string; targets?: { id: string; kind: string }[] }[]
+              )
+                .find((p) => p.path === project)
+                ?.targets?.find((t) => t.kind === 'terminal');
+              return own?.id;
+            },
+          );
+          const sent = await ask({ type: 'item.send', project, ids: [shotId], target });
           assert.equal(sent.ok, true, JSON.stringify(sent));
-          await until('the text in the terminal', () => typed.join('').includes('Fix the header'));
+          await until('the path in the terminal', () => typed.join('').includes('capture.png'));
           assert.ok(!typed.join('').includes('\r'), 'Enter was pressed');
+          await waitFor('the capture marked as sent', (st) =>
+            st.context.find((c) => c.id === shotId)?.sentTo.length ? true : undefined,
+          );
 
-          // Screenshots taken together: one group in Agent Context, and one send with both.
-          const run = Date.now();
-          for (const n of [1, 2]) {
-            sendPaired({
-              type: 'send',
-              id: `g${n}`,
-              target: 'context',
-              image: png,
-              label: `Drawings ${n} of 2`,
-              capture: `group-${run}-${n}`,
-              group: `group-${run}`,
+          // Screenshots taken together: one group, and one send (to the agent used last) with both.
+          const run = `group-${Date.now()}`;
+          const pair = await ask({
+            type: 'capture.save',
+            project,
+            url: 'https://x.dev/',
+            captures: [1, 2].map((n) => ({
               kind: 'screenshot',
-            });
-            assert.equal((await next('send.result')).ok, true);
-          }
+              title: `Drawings ${n} of 2`,
+              image: png,
+              group: run,
+              groupIndex: n - 1,
+            })),
+          });
+          const ids = pair.ids as string[];
+          assert.equal(ids.length, 2, JSON.stringify(pair));
           const grouped = await waitFor('the grouped captures', (st) => {
-            // Its own group: Agent Context keeps earlier runs' captures (the project's store).
-            const items = st.context.filter((c) => c.group === `group-${run}`);
+            const items = st.context.filter((c) => c.group === run);
             return items.length === 2 ? items : undefined;
           });
           assert.equal(grouped[0]!.group, grouped[1]!.group);
           typed.length = 0;
-          sendPaired({
-            type: 'send',
-            id: 'g3',
-            target: 'terminal',
-            label: '2 screenshots',
-            kind: 'screenshot',
-            captures: [`group-${run}-1`, `group-${run}-2`],
-          });
-          const together = await next('send.result');
+          const together = await ask({ type: 'item.send', project, ids, target: 'default' });
           assert.equal(together.ok, true, JSON.stringify(together));
           // Both paths, pasted together (one after the other in the same send).
           await until(
             'both screenshots in the terminal',
             () => (typed.join('').match(/\.png/g) ?? []).length >= 2,
           );
-          const marked = await waitFor('both marked as sent', (st) => {
-            const items = st.context.filter((c) => c.group === grouped[0]!.group);
-            return items.every((c) => c.sentTo.length) ? items : undefined;
+          // Captures that aren't there are refused.
+          const gone = await ask({
+            type: 'item.send',
+            project,
+            ids: ['20000101-000000-abcdef'],
+            target,
           });
-          assert.equal(marked.length, 2);
-          // Captures not in this window's list are refused (the browser sends them again).
-          sendPaired({
-            type: 'send',
-            id: 'g4',
-            target: 'chat',
-            captures: ['not-here'],
-          });
-          assert.equal((await next('send.result')).ok, false);
-
-          // A capture reaches the Agent Context list by itself ("context"), and a later send of
-          // the same capture reuses that item instead of adding another.
-          const capture = `cap-${Date.now()}`;
-          // Its own title: Agent Context keeps earlier runs' captures.
-          const title = `Element header.site ${capture}`;
-          sendPaired({
-            type: 'send',
-            id: 's3',
-            target: 'context',
-            text: 'The header overlaps the logo',
-            label: title,
-            kind: 'element',
-            capture,
-            pageUrl: 'https://x.dev/',
-          });
-          assert.equal((await next('send.result')).ok, true);
-          const shared = await waitFor('the capture in Agent Context', (st) =>
-            st.context.find((c) => c.title === title),
+          assert.equal(gone.ok, false, JSON.stringify(gone));
+          // Removed, then put back (the side panel's Undo).
+          assert.equal((await ask({ type: 'item.remove', project, ids: [shotId] })).ok, true);
+          await waitFor('the capture removed', (st) =>
+            st.context.some((c) => c.id === shotId) ? undefined : true,
           );
-          assert.equal(shared.kind, 'element');
-          assert.deepEqual(shared.sentTo, []);
-          sendPaired({
-            type: 'send',
-            id: 's4',
-            target: 'terminal',
-            text: 'The header overlaps the logo',
-            label: title,
-            kind: 'element',
-            capture,
-          });
-          assert.equal((await next('send.result')).ok, true);
-          const after = await waitFor('the capture sent', (st) => {
-            const items = st.context.filter((c) => c.title === title);
-            return items.length === 1 && items[0]!.sentTo.length ? items : undefined;
-          });
-          assert.equal(after[0]!.id, shared.id);
+          assert.equal((await ask({ type: 'item.restore', project, ids: [shotId] })).ok, true);
+          await waitFor('the capture back', (st) => st.context.find((c) => c.id === shotId));
         } finally {
           terminal.dispose();
           output.dispose();
@@ -859,7 +923,12 @@ export async function run(): Promise<void> {
         host.stdin.write(frame(JSON.stringify({ v: 1, type: 'link', data: hello })));
         // No token, no pairing: the helper is trusted.
         await until('the welcome', () => received.some((m) => m.type === 'welcome'));
-        assert.ok(received.some((m) => m.type === 'windows'));
+        // The hub answers questions about projects itself (VS Code's windows tell it theirs).
+        host.stdin.write(frame(JSON.stringify({ v: 1, type: 'projects.get', req: 'p1' })));
+        const projects = await waitFor('the projects from the hub', () =>
+          received.find((m) => m.type === 'projects' && m.req === 'p1'),
+        );
+        assert.ok(Array.isArray(projects.projects), JSON.stringify(projects));
         assert.ok(!received.some((m) => m.type === 'error'), JSON.stringify(received));
         for (const deadline = Date.now() + 5_000; Date.now() < deadline;) {
           if ((await hub()).browsers.some((b) => b.name === 'Hub Browser')) break;

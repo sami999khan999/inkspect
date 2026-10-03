@@ -5,12 +5,10 @@ import { cx } from './popover';
 const isMac = typeof navigator !== 'undefined' && navigator.userAgent.includes('Macintosh');
 
 interface PickerHintProps {
-  /** Picking to copy or send (all the actions), or to screenshot one element. */
+  /** Picking to capture (details, a screenshot with Alt), or to screenshot one element. */
   purpose: string;
   /** The current keys, so remapped keys show. */
   map: ShortcutMap;
-  /** What Alt+click does: "screenshot it", "copy with a screenshot". */
-  altLabel: string;
   /** Show the key that lists every picker key (where the picker has that list). */
   helpKey?: boolean;
   className?: string;
@@ -18,15 +16,13 @@ interface PickerHintProps {
 }
 
 /**
- * The element picker's hint, shared by VS Code Browser and the browser extension: what a click
- * does, with each modifier (Ctrl + click sends to the chat agent, Ctrl Shift + click to a terminal
- * agent), on one row; the keys on a second row.
- * Keys come from the shortcut map, so remapped keys show. Drawn over the page, so it has its own
- * dark look.
+ * The element picker's hint, shared by VS Code Browser and the browser extension, on one line:
+ * a click captures the element's details, Alt+click a screenshot of it, Shift+click adds it to a
+ * selection (Enter captures them all). Every capture is saved, then the send dialog offers where
+ * it goes. Keys come from the shortcut map, so remapped keys show. Drawn over the page, so it has
+ * its own dark look.
  */
-export function PickerHint({ purpose, map, altLabel, helpKey, className, style }: PickerHintProps) {
-  const mod = isMac ? '⌘' : 'Ctrl';
-  const shift = isMac ? '⇧' : 'Shift';
+export function PickerHint({ purpose, map, helpKey, className, style }: PickerHintProps) {
   const caps = (id: string) => {
     const binding = map[id]?.[0];
     return binding ? keyParts(binding, isMac) : [];
@@ -42,22 +38,14 @@ export function PickerHint({ purpose, map, altLabel, helpKey, className, style }
   }
   return (
     <div className={cx('picker-hint', className)} style={style} role="status">
-      <span className="picker-hint-group">
-        <span className="picker-hint-item">
-          <span className="picker-hint-lead">Click</span>
-          <span className="picker-hint-label">copy details</span>
-        </span>
-        <Item caps={[mod]} click label="chat agent" />
-        <Item caps={[mod, shift]} click label="terminal agent" />
-        <Item caps={[shift]} click label="select" />
-        <Item caps={[isMac ? '⌥' : 'Alt']} click label={altLabel} />
+      <span className="picker-hint-item">
+        <span className="picker-hint-lead">Click</span>
+        <span className="picker-hint-label">to capture</span>
       </span>
-      <span className="picker-hint-group">
-        <Item caps={[...caps('inspect.parent'), ...caps('inspect.child')]} label="parent / child" />
-        <Item caps={caps('inspect.copy')} label="copy selected" />
-        <Item caps={caps('inspect.exit')} label="stop" />
-        {helpKey && <Item caps={caps('inspect.help')} label="all keys" />}
-      </span>
+      <Item caps={[isMac ? '⌥' : 'Alt']} click label="screenshot" />
+      <Item caps={[isMac ? '⇧' : 'Shift']} click label="to add" />
+      <Item caps={caps('inspect.exit')} label="stop" />
+      {helpKey && <Item caps={caps('inspect.help')} label="keys" />}
     </div>
   );
 }

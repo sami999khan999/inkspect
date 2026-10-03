@@ -2,6 +2,7 @@
 // (client), over a WebSocket. Every message is JSON with the protocol version `v`; both sides
 // validate what they receive with the parsers below and drop anything else.
 import type { FlatNode, RemoteOp } from './bookmarkSync';
+import { parseBrowserToHub, parseHubToBrowser, type BrowserToHub, type HubToBrowser } from './hub';
 import type { Check } from './validate';
 import {
   arrayOf,
@@ -9,7 +10,6 @@ import {
   isNumber,
   isRecord,
   isString,
-  oneOf,
   optional,
   parseMessage,
   shape,
@@ -29,11 +29,7 @@ export interface ClientInfo {
   browser: string;
 }
 
-/** Where a send goes: an agent (chat or terminal), a file in the workspace, or only the Agent
- * Context list (every capture goes there as it is taken). */
-export type SendTarget = 'chat' | 'terminal' | 'save' | 'context';
-
-/** What a capture is, for the Agent Context list. */
+/** What a capture is, for the Saved list. */
 export type CaptureKind = 'screenshot' | 'element' | 'errors' | 'network' | 'page' | 'text';
 
 /**
@@ -60,14 +56,15 @@ export function newerShortcuts(
   return a === b ? 'same' : a > b ? 'local' : 'remote';
 }
 
-/** An open VS Code window a send can go to (VS Code lists them for the browser). */
-export interface VsCodeWindow {
-  id: string;
-  /** Its workspace's name. */
-  name: string;
-  /** Sends that name no window go to this one: the window used last. */
-  lastUsed: boolean;
-}
+/** What VS Code can do for a linked browser beyond the basics (see `welcome`). */
+export type LinkFeature = 'hub';
+
+/**
+ * A question about projects and their saved captures (the browser helper's protocol, see
+ * ./hub.ts), asked over this link when the browser helper isn't there.
+ */
+export type HubRequest = Extract<BrowserToHub, { req: string }>;
+export type HubReply = Extract<HubToBrowser, { req: string }>;
 
 export type ClientMessage =
   | { type: 'pair'; code: string; client: ClientInfo }
@@ -75,45 +72,20 @@ export type ClientMessage =
   | { type: 'ping' }
   | { type: 'bookmarks.snapshot'; tree: FlatNode[] }
   | { type: 'bookmarks.applied'; created: Record<string, string>; failed: string[] }
-  | {
-      type: 'send';
-      id: string;
-      target: SendTarget;
-      /** Text (element details, console summary...) or the prompt that goes with an image. */
-      text?: string;
-      /** PNG as base64 (no data: prefix). */
-      image?: string;
-      label?: string;
-      pageUrl?: string;
-      /** The VS Code window to run it in (`VsCodeWindow.id`); the one used last if unset. */
-      window?: string;
-      /**
-       * The capture it comes from: sends of one capture share one Agent Context item (the
-       * automatic "context" send first, a send to an agent later).
-       */
-      capture?: string;
-      kind?: CaptureKind;
-      /** Captures made together (several screenshots): one group in Agent Context. */
-      group?: string;
-      /**
-       * Sends these captures, already in Agent Context (sent as "context" first), together in one
-       * send (a group, or the checked part of one); no text or image then.
-       */
-      captures?: string[];
-    }
+  /** Projects and saved captures: listed, saved, sent, moved (VS Code answers `hub.reply`). */
+  | { type: 'hub.request'; request: HubRequest }
   /** The shortcuts stored in the browser's sync storage (sent when they are newer). */
   | ({ type: 'settings.shortcuts' } & ShortcutSettings);
 
 export type ServerMessage =
   | { type: 'paired'; token: string; peer: string }
-  | { type: 'welcome'; peer: string; syncBookmarks: boolean }
+  /** `features`: what this VS Code can do beyond the basics (`hub`: answers `hub.request`). */
+  | { type: 'welcome'; peer: string; syncBookmarks: boolean; features?: LinkFeature[] }
   | { type: 'error'; message: string; code?: 'unpaired' | 'bad-code' | 'version' | 'unauthorized' }
   | { type: 'pong' }
   | { type: 'bookmarks.ops'; ops: RemoteOp[] }
   | { type: 'bookmarks.requestSnapshot' }
-  | { type: 'send.result'; id: string; ok: boolean; path?: string; error?: string }
-  /** The open VS Code windows, sent after `welcome` and whenever they change. */
-  | { type: 'windows'; windows: VsCodeWindow[] }
+  | { type: 'hub.reply'; reply: HubReply }
   /** VS Code's shortcuts, sent after `welcome` and whenever they change. */
   | ({ type: 'settings.shortcuts' } & ShortcutSettings);
 
@@ -156,38 +128,18 @@ const CLIENT_MESSAGES: Record<ClientMessage['type'], Record<string, Check>> = {
   ping: {},
   'bookmarks.snapshot': { tree: arrayOf(flatNode) },
   'bookmarks.applied': { created: stringMap, failed: arrayOf(isString) },
-  send: {
-    id: isString,
-    target: oneOf('chat', 'terminal', 'save', 'context'),
-    text: optional(isString),
-    image: optional(isString),
-    label: optional(isString),
-    pageUrl: optional(isString),
-    window: optional(isString),
-    capture: optional(isString),
-    kind: optional(oneOf('screenshot', 'element', 'errors', 'network', 'page', 'text')),
-    group: optional(isString),
-    captures: optional(arrayOf(isString, 60)),
-  },
+  'hub.request': { request: (v) => isRecord(v) && 'req' in v && !!parseBrowserToHub(v) },
   'settings.shortcuts': { shortcuts: shortcutMap, updated: isNumber },
 };
 
-const vsCodeWindow = shape({ id: isString, name: isString, lastUsed: isBoolean });
-
 const SERVER_MESSAGES: Record<ServerMessage['type'], Record<string, Check>> = {
   paired: { token: isString, peer: isString },
-  welcome: { peer: isString, syncBookmarks: isBoolean },
+  welcome: { peer: isString, syncBookmarks: isBoolean, features: optional(arrayOf(isString, 20)) },
   error: { message: isString, code: optional(isString) },
   pong: {},
   'bookmarks.ops': { ops: arrayOf(remoteOp) },
   'bookmarks.requestSnapshot': {},
-  'send.result': {
-    id: isString,
-    ok: isBoolean,
-    path: optional(isString),
-    error: optional(isString),
-  },
-  windows: { windows: arrayOf(vsCodeWindow, 50) },
+  'hub.reply': { reply: (v) => isRecord(v) && 'req' in v && !!parseHubToBrowser(v) },
   'settings.shortcuts': { shortcuts: shortcutMap, updated: isNumber },
 };
 

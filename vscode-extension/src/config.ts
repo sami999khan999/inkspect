@@ -105,9 +105,12 @@ export function getConfig(): BrowserConfig {
     bridgePort: c.get<number>('bridge.port', DEFAULT_BRIDGE_PORT),
     bridgeSyncBookmarks: c.get<boolean>('bridge.syncBookmarks', true),
     hubEnabled: c.get<boolean>('hub.enabled', true),
-    agentTmuxSockets: (c.get<unknown>('agent.tmuxSockets') instanceof Array
-      ? c.get<unknown[]>('agent.tmuxSockets')!
-      : ['agents', 'default']
+    // INKSPECT_TMUX_SOCKETS overrides it (as for the hub): tests keep off this machine's tmux.
+    agentTmuxSockets: (process.env.INKSPECT_TMUX_SOCKETS !== undefined
+      ? process.env.INKSPECT_TMUX_SOCKETS.split(',')
+      : c.get<unknown>('agent.tmuxSockets') instanceof Array
+        ? c.get<unknown[]>('agent.tmuxSockets')!
+        : ['agents', 'default']
     )
       .filter((s): s is string => typeof s === 'string' && /^[\w.-]{1,64}$/.test(s))
       .slice(0, 10),

@@ -5,15 +5,8 @@ import * as vscode from 'vscode';
 import { copyText } from '../features/clipboard';
 import type { TabSession } from '../browser/TabSession';
 import { getConfig } from '../config';
-import {
-  deliverScreenshot,
-  displayPath,
-  localWorkspaceFolder,
-  saveScreenshot,
-} from '../features/screenshots';
+import { deliverScreenshot, localWorkspaceFolder } from '../features/screenshots';
 import { captureAndSend, rememberPick, sendContextItems } from '../agent/chat';
-import { saveContext } from '../features/context';
-import { CHAT_TARGET } from '../features/terminalSend';
 import { addContext, type ContextInput } from '../agent/contextTray';
 import { normalizeSourcePath } from '../features/sourcePaths';
 import { elementLabel, formatDetails, type ElementDetails } from '../shared/elementInfo';
@@ -21,8 +14,8 @@ import type { HostToWebview, InspectPurpose, Rect } from '../shared/protocol';
 
 type Details = ElementDetails & { ancestry: string[]; scroll: { x: number; y: number } };
 
-/** Where picked elements go instead of the clipboard. */
-type SendTo = 'agent' | 'chat' | 'terminal' | 'save';
+/** Picked elements go straight to the default agent (the A key) instead of the send dialog. */
+type SendTo = 'agent';
 
 interface InspectorDeps {
   post: (message: HostToWebview) => void;
@@ -34,14 +27,13 @@ interface InspectorDeps {
 
 /**
  * The element picker for one browser window. Hovering is Chrome's own inspect mode (native
- * highlight and tooltip); this class handles clicks (copy details for AI agents, Shift+click
- * multi-selection, element screenshots) and moving to the parent or child with the arrow keys.
+ * highlight and tooltip); this class handles clicks (capture details for AI agents, Alt+click
+ * element screenshots, Shift+click multi-selection) and moving to the parent or child with the
+ * arrow keys. Every capture is copied and saved, then the send dialog offers where it goes.
  */
 export class Inspector {
   private tabId?: string;
   /** Element reached with the arrow keys, and the pointer position it was reached from. */
-  /** An element screenshot to copy after the details (Alt+click). */
-  private pendingImage?: { bytes: Uint8Array; mimeType: string; path: string };
   private current?: { node: number; from?: { x: number; y: number } };
   private selection: { nodeId: number; details: Details }[] = [];
 
@@ -77,8 +69,8 @@ export class Inspector {
   }
 
   /**
-   * Click: copy the element's details (or capture it, when picking for a screenshot).
-   * Shift adds it to the multi-selection; Alt also saves an element screenshot.
+   * Click: capture the element's details. Alt+click: a screenshot of it instead (also what a
+   * click does when picking for a screenshot). Shift adds it to the multi-selection.
    */
   async pick(
     tabId: string,
@@ -89,7 +81,6 @@ export class Inspector {
       purpose: InspectPurpose;
       add: boolean;
       screenshot: boolean;
-      send?: 'chat' | 'terminal';
       url: string;
     },
   ): Promise<void> {
@@ -97,9 +88,12 @@ export class Inspector {
     const node = await session.inspectAt(options.x, options.y);
     if (node === undefined) return;
     this.current = undefined;
-    if (options.purpose === 'screenshot') {
-      await this.stop(session);
-      this.deps.post({ type: 'setInspect', purpose: null });
+    const shot = options.purpose === 'screenshot';
+    if (shot || (options.screenshot && !options.add)) {
+      if (shot) {
+        await this.stop(session);
+        this.deps.post({ type: 'setInspect', purpose: null });
+      }
       const format = getConfig().screenshotFormat;
       const bytes = await session.screenshot('element', { format, backendNodeId: node });
       await deliverScreenshot({
@@ -112,33 +106,16 @@ export class Inspector {
       });
       return;
     }
-    const config = getConfig();
-    const details = await session.elementDetails(node, config.inspectorMaxHtml);
+    const details = await session.elementDetails(node, getConfig().inspectorMaxHtml);
     if (!details) return;
     workspaceComponentPath(details);
-    if (options.screenshot) {
-      const format = config.screenshotFormat;
-      const bytes = await session.screenshot('element', { format, backendNodeId: node });
-      const path = await saveScreenshot(bytes, options.url, format, this.deps.globalStorage);
-      details.screenshot = displayPath(path);
-      // Screenshots are always copied; the image goes last so it stays on the clipboard.
-      this.pendingImage = {
-        bytes,
-        mimeType: format === 'jpeg' ? 'image/jpeg' : `image/${format}`,
-        path,
-      };
-      await session.highlight(node).catch(() => {});
-    }
     if (options.add) {
-      // The screenshot of an Alt+Shift+click is saved and copied already; it must not be
-      // attached to whatever is copied next.
-      this.pendingImage = undefined;
       if (!this.selection.some((s) => s.nodeId === node))
         this.selection.push({ nodeId: node, details });
       this.postSelection();
       return;
     }
-    await this.copy([details], options.send);
+    await this.copy([details]);
   }
 
   /**
@@ -164,17 +141,16 @@ export class Inspector {
   }
 
   /**
-   * The bar over the multi-selection: copy, send to the chat or a terminal agent, save the
-   * details, or screenshot every selected element. The selection ends with any of them.
+   * The bar over the multi-selection: capture the details, or screenshot every selected element.
+   * The selection ends with either.
    */
   async selectionAction(
     session: TabSession,
-    action: 'copy' | 'chat' | 'terminal' | 'screenshot' | 'save' | 'clear',
+    action: 'copy' | 'screenshot' | 'clear',
     url: string,
   ): Promise<void> {
     const selected = this.selection;
     this.selection = [];
-    this.pendingImage = undefined;
     this.postSelection();
     if (!selected.length || action === 'clear') return;
     if (action === 'screenshot') {
@@ -195,7 +171,7 @@ export class Inspector {
       if (shots.length < selected.length) {
         this.deps.toast(`${selected.length - shots.length} of the elements could not be captured.`);
       }
-      // One group in Agent Context, sent or offered together.
+      // One group in the Saved list, sent or offered together.
       const group = shots.length > 1 ? randomUUID() : undefined;
       for (const [index, { bytes, details }] of shots.entries()) {
         await deliverScreenshot({
@@ -210,10 +186,7 @@ export class Inspector {
       }
       return;
     }
-    await this.copy(
-      selected.map((s) => s.details),
-      action === 'copy' ? undefined : action,
-    );
+    await this.copy(selected.map((s) => s.details));
   }
 
   /** S in the picker: a screenshot of the element under the pointer (or reached with arrows). */
@@ -238,7 +211,6 @@ export class Inspector {
   async stop(session?: TabSession): Promise<void> {
     await session?.stopInspect();
     this.current = undefined;
-    this.pendingImage = undefined;
     this.selection = [];
     if (this.tabId) this.postSelection();
   }
@@ -250,16 +222,16 @@ export class Inspector {
     this.selection = [];
   }
 
-  /** Copies the details, or sends them (`send`) to an agent, or saves them in the workspace. */
+  /**
+   * Copies the details and saves them (one item per element; several share a group), which
+   * offers them in the send dialog. `agent` sends them to the default agent instead.
+   */
   private async copy(elements: Details[], send?: SendTo): Promise<void> {
     const config = getConfig();
     const markdown = formatDetails(elements, 'markdown', config.inspectorFields);
     rememberPick(markdown);
-    const image = this.pendingImage;
-    this.pendingImage = undefined;
     const first = elements[0]!;
     const title = elements.length === 1 ? elementLabel(first) : `${elements.length} elements`;
-    // One item per element; several share a group (one card, a checkbox each, sent together).
     const group = elements.length > 1 ? randomUUID() : undefined;
     const inputs: ContextInput[] = elements.map((element) => ({
       kind: 'element',
@@ -268,33 +240,17 @@ export class Inspector {
       // framework's internals (Next.js' SegmentViewNode); else the page.
       detail: element.component?.file ? element.component.name : pageHost(element.pageUrl),
       text: group ? formatDetails([element], 'markdown', config.inspectorFields) : markdown,
-      // An Alt+click screenshot belongs to a single pick.
-      image: !group && image ? { bytes: image.bytes, mimeType: image.mimeType } : undefined,
-      file: group ? undefined : image?.path,
       url: element.pageUrl,
       group,
     }));
-    if (send === 'save') {
-      for (const input of inputs) addContext(input);
-      const path = await saveContext(markdown, title, this.deps.globalStorage);
-      this.deps.toast(`Saved ${title} to ${displayPath(path)}`);
-    } else if (send) {
-      // The chat agent, a terminal agent, or (the A key) the agent used by default.
-      const target = send === 'chat' ? CHAT_TARGET : send === 'terminal' ? 'terminal' : undefined;
-      const items = inputs.flatMap((input) => addContext(input) ?? []);
-      if (items.length) await sendContextItems(items, target);
-      else await captureAndSend({ ...inputs[0]!, title, text: markdown }, target);
+    if (send) {
+      const items = inputs.flatMap((input) => addContext(input, { silent: true }) ?? []);
+      if (items.length) await sendContextItems(items);
+      else await captureAndSend({ ...inputs[0]!, title, text: markdown });
     } else {
+      await copyText(formatDetails(elements, config.inspectorCopyFormat, config.inspectorFields));
       for (const input of inputs) addContext(input);
-      const text = formatDetails(elements, config.inspectorCopyFormat, config.inspectorFields);
-      await copyText(text);
-      this.deps.toast(
-        elements.length === 1
-          ? `Copied details of ${elementLabel(elements[0]!)}`
-          : `Copied details of ${elements.length} elements`,
-      );
     }
-    if (image) this.deps.copyImage(image.bytes, image.mimeType);
     if (config.inspectorWriteSelectionFile) await this.writeSelectionFile(elements);
   }
 

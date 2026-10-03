@@ -57,7 +57,15 @@ bridge.onStatus((status) =>
 type PanelRequest = Extract<
   BrowserToHub,
   {
-    type: 'projects.get' | 'items.get' | 'item.thumb' | 'item.remove' | 'item.send' | 'project.pin';
+    type:
+      | 'projects.get'
+      | 'items.get'
+      | 'item.thumb'
+      | 'item.remove'
+      | 'item.restore'
+      | 'item.send'
+      | 'items.move'
+      | 'project.pin';
   }
 >;
 const PANEL_REQUESTS = new Set([
@@ -65,7 +73,9 @@ const PANEL_REQUESTS = new Set([
   'items.get',
   'item.thumb',
   'item.remove',
+  'item.restore',
   'item.send',
+  'items.move',
   'project.pin',
 ]);
 function isPanelRequest(value: unknown): value is PanelRequest {
@@ -175,16 +185,6 @@ bridge.onMessage((message) => {
     case 'settings.shortcuts':
       void receiveShortcuts(bridge, message);
       break;
-    case 'send.result': {
-      const resolve = pendingSends.get(message.id);
-      pendingSends.delete(message.id);
-      resolve?.(
-        message.ok
-          ? { ok: true, path: message.path }
-          : { ok: false, error: message.error ?? 'Failed' },
-      );
-      break;
-    }
   }
 });
 
@@ -360,8 +360,6 @@ async function handle(
       return { ok: true };
     case 'bridgeStatus':
       return { ok: true, status: bridge.status };
-    case 'send':
-      return sendToVsCode(message);
     case 'openOptions':
       await chrome.runtime.openOptionsPage();
       return { ok: true };
@@ -374,11 +372,40 @@ async function handle(
         { type: 'projects.get', req: crypto.randomUUID(), url: message.url?.slice(0, 4096) },
         10_000,
       );
-      if (!reply) return { ok: false, error: 'The browser helper is not available.' };
+      if (!reply) return { ok: false, error: 'Not linked with VS Code or the browser helper.' };
       return { ok: true, projects: reply.projects, suggested: reply.suggested };
     }
     case 'saveCapture':
       return saveCaptures(message);
+    case 'sendSaved': {
+      const reply = await bridge.hubRequest<Extract<HubToBrowser, { type: 'item.sent' }>>(
+        {
+          type: 'item.send',
+          req: crypto.randomUUID(),
+          project: message.project,
+          ids: message.ids,
+          target: message.target,
+          open: message.open,
+        },
+        // A send can wait for VS Code (choosing a terminal); the helper gives up after 2 minutes.
+        130_000,
+      );
+      if (!reply) return { ok: false, error: 'The browser helper did not answer.' };
+      return reply.ok
+        ? { ok: true, sentTo: reply.sentTo }
+        : { ok: false, error: reply.error ?? 'Nothing was sent.' };
+    }
+    case 'moveSaved': {
+      const reply = await bridge.hubRequest<Extract<HubToBrowser, { type: 'done' }>>({
+        type: 'items.move',
+        req: crypto.randomUUID(),
+        project: message.project,
+        ids: message.ids,
+        to: message.to,
+      });
+      if (!reply) return { ok: false, error: 'The browser helper did not answer.' };
+      return reply.ok ? { ok: true } : { ok: false, error: reply.error ?? 'Not moved.' };
+    }
   }
 }
 
@@ -594,36 +621,3 @@ chrome.tabs.onRemoved.addListener((tabId) => void endFraming(tabId).catch(() => 
 // ---------------------------------------------------------------------------------------------
 // Sending to VS Code
 // ---------------------------------------------------------------------------------------------
-
-const pendingSends = new Map<string, (reply: BackgroundReply) => void>();
-
-async function sendToVsCode(
-  message: Extract<ToBackground, { type: 'send' }>,
-): Promise<BackgroundReply> {
-  if (!bridge.connected) {
-    return { ok: false, error: 'Not linked with VS Code. Click the VS Code button to pair.' };
-  }
-  const id = crypto.randomUUID();
-  const reply = new Promise<BackgroundReply>((resolve) => {
-    pendingSends.set(id, resolve);
-    // Choosing a terminal happens in VS Code and can take a while.
-    setTimeout(() => {
-      if (pendingSends.delete(id)) resolve({ ok: false, error: 'VS Code did not answer.' });
-    }, 120_000);
-  });
-  bridge.send({
-    type: 'send',
-    id,
-    target: message.target,
-    text: message.text,
-    image: message.image?.replace(/^data:image\/\w+;base64,/, ''),
-    label: message.label,
-    pageUrl: message.pageUrl,
-    window: message.window,
-    capture: message.capture,
-    kind: message.kind,
-    group: message.group,
-    captures: message.captures,
-  });
-  return reply;
-}

@@ -11,6 +11,7 @@ import {
 } from '@inkspect/shared/bridge';
 import {
   encodeHub,
+  HUB_FEATURES,
   HUB_HOST_NAME,
   parseHubToBrowser,
   type BrowserToHub,
@@ -72,7 +73,11 @@ export class BridgeClient {
   private hubMissingUntil = 0;
   /** The hello went to the VS Code window that answers through the helper. */
   private hubHello = false;
-  /** Requests to the helper waiting for their answer, by request id. */
+  /** VS Code answers questions about projects over the WebSocket link (see `welcome`). */
+  private wsProjects = false;
+  /** What the browser helper answers beyond the first version (its `status`). */
+  private hubFeatures: string[] = [];
+  /** Requests to the helper (or VS Code) waiting for their answer, by request id. */
   private readonly hubRequests = new Map<string, (reply: HubToBrowser | undefined) => void>();
   private client?: ClientInfo;
   private token?: string;
@@ -134,15 +139,22 @@ export class BridgeClient {
   }
 
   /**
-   * Asks the browser helper something and waits for the answer with the same request id;
-   * undefined if the helper isn't there or doesn't answer in time.
+   * Asks about projects and their saved captures, and waits for the answer with the same request
+   * id: the browser helper answers, or else the VS Code window serving the WebSocket link (the
+   * same questions, the same answers). Undefined if neither is there or answers in time.
    */
   hubRequest<T extends HubToBrowser>(
     message: Extract<BrowserToHub, { req: string }>,
     timeoutMs = 30_000,
   ): Promise<T | undefined> {
     const hub = this.hub;
-    if (!hub) return Promise.resolve(undefined);
+    const request = JSON.parse(encodeHub(message)) as typeof message;
+    const post = hub
+      ? () => hub.postMessage(request)
+      : this.wsProjects && this.connected
+        ? () => this.send({ type: 'hub.request', request })
+        : undefined;
+    if (!post) return Promise.resolve(undefined);
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.hubRequests.delete(message.req);
@@ -152,8 +164,16 @@ export class BridgeClient {
         clearTimeout(timer);
         resolve(reply as T | undefined);
       });
-      hub.postMessage(JSON.parse(encodeHub(message)));
+      post();
     });
+  }
+
+  /** An answer to a request, from either link. */
+  private answered(message: HubToBrowser): void {
+    if (!('req' in message)) return;
+    const waiting = this.hubRequests.get(message.req);
+    this.hubRequests.delete(message.req);
+    waiting?.(message);
   }
 
   /** Pairs with the code VS Code shows. */
@@ -261,6 +281,9 @@ export class BridgeClient {
       if (this.socket !== socket) return;
       clearInterval(this.keepAlive);
       this.socket = undefined;
+      this.wsProjects = false;
+      for (const waiting of this.hubRequests.values()) waiting(undefined);
+      this.hubRequests.clear();
       this.closed(target, attempt, opened);
     };
   }
@@ -306,9 +329,7 @@ export class BridgeClient {
       const message = parseHubToBrowser(raw);
       if (!message) return;
       if ('req' in message) {
-        const waiting = this.hubRequests.get(message.req);
-        this.hubRequests.delete(message.req);
-        waiting?.(message);
+        this.answered(message);
         return;
       }
       if (message.type === 'link') {
@@ -317,17 +338,28 @@ export class BridgeClient {
       } else if (message.type === 'relink') {
         this.hubHello = false;
       } else if (message.type === 'status') {
+        this.hubFeatures = message.features ?? [];
         if (!message.vscode) {
           this.hubHello = false;
+          // Projects still work: the helper finds agentmux's without VS Code.
           this.setStatus({
             state: 'offline',
             via: 'hub',
+            projects: true,
+            features: this.hubFeatures,
             error: 'VS Code is not running.',
           });
         } else if (!this.hubHello && this.client) {
           this.hubHello = true;
           this.delay = 1000;
-          this.setStatus({ ...this.status, state: 'connecting', via: 'hub', error: undefined });
+          this.setStatus({
+            ...this.status,
+            state: 'connecting',
+            via: 'hub',
+            projects: true,
+            features: this.hubFeatures,
+            error: undefined,
+          });
           this.send({ type: 'hello', client: this.client, token: '' });
         }
       }
@@ -366,11 +398,17 @@ export class BridgeClient {
       this.pairWaiter?.(message);
     } else if (message.type === 'welcome') {
       this.delay = 1000;
-      this.setStatus({ state: 'connected', peer: message.peer, via: this.hub ? 'hub' : 'ws' });
-    } else if (message.type === 'windows') {
-      if (this.status.state === 'connected') {
-        this.setStatus({ ...this.status, windows: message.windows });
-      }
+      this.wsProjects = !this.hub && !!message.features?.includes('hub');
+      this.setStatus({
+        state: 'connected',
+        peer: message.peer,
+        via: this.hub ? 'hub' : 'ws',
+        projects: !!this.hub || this.wsProjects,
+        features: this.hub ? this.hubFeatures : this.wsProjects ? [...HUB_FEATURES] : [],
+      });
+    } else if (message.type === 'hub.reply') {
+      const reply = parseHubToBrowser(message.reply);
+      if (reply) this.answered(reply);
     } else if (message.type === 'error') {
       if (message.code === 'unpaired') {
         this.token = undefined;

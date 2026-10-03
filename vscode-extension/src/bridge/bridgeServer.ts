@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -15,12 +15,17 @@ import {
   type ClientMessage,
   type ServerMessage,
 } from '@inkspect/shared/bridge';
+import { deliverLocal, savedItems } from '../agent/chat';
+import { contextTray, inboxPath } from '../agent/contextTray';
+import { WINDOW_ID, windowInfo } from '../agent/projects';
 import { errorMessage } from '../browser/logger';
 import { getConfig } from '../config';
 import type { BookmarksStore } from '../features/bookmarks';
-import { isLinkedMessage, LinkService, type LinkPeer, type SendMessage } from '../link/linkService';
+import { HubCore } from '../hub/core';
+import { hubPaths } from '../hub/paths';
+import { isLinkedMessage, LinkService, type LinkPeer } from '../link/linkService';
 import { choosePending, parseApproval, type PairingApproval } from './pairing';
-import { WindowRelay } from './windowRelay';
+import { WindowRelay, type RelayResult } from './windowRelay';
 
 const CLIENTS_KEY = 'vscodeBrowser.bridge.clients';
 /** When each unpaired browser's "wants to link" notification was shown (see recentlyOffered). */
@@ -63,8 +68,25 @@ interface SharedLink {
  * (UNLINK_FILE) from any window. A window serving an older level can't act on them.
  */
 const LINK_FEATURES = 2;
-/** Sends relayed from the serving window to the window the user used last. */
+/** The windows' announcements, and sends relayed from the serving window to another window. */
 const SENDS_FOLDER = 'bridge-sends';
+
+/** A send for one window's own agent (a terminal agent, chat), relayed to that window. */
+interface RunRequest {
+  project: string;
+  ids: string[];
+  /** The target as that window knows it (`terminal:3`, `chat`). */
+  target: string;
+}
+
+/** Runs a relayed send here: the items go to this window's own agent. */
+async function runHere(request: RunRequest): Promise<RelayResult> {
+  const items = savedItems(request.project, request.ids);
+  if (!items.length) return { ok: false, error: 'Those captures are gone.' };
+  const sent = await deliverLocal(request.target, request.project, items);
+  contextTray()?.load();
+  return sent.ok ? { ok: true, sentTo: sent.sentTo } : { ok: false, error: sent.error };
+}
 
 interface SharedPairing {
   codeHash: string;
@@ -127,12 +149,12 @@ export class BridgeServer implements vscode.Disposable {
   private readonly statusItem: vscode.StatusBarItem;
   private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChange = this.onDidChangeEmitter.event;
-  /** Runs sends in the VS Code window used last, not only in the one serving the link. */
-  private readonly relay: WindowRelay<SendMessage>;
+  /** The other VS Code windows (their folders and agents), and sends run in them. */
+  private readonly relay: WindowRelay<RunRequest>;
   private relayTimer?: NodeJS.Timeout;
   private relayTicks = 0;
-  /** The window list browsers were sent last. */
-  private lastWindows = '';
+  /** Projects and their saved captures, for browsers on this link (see HubCore). */
+  private readonly core: HubCore;
   /** The status bar item's last text and tooltip ('' when hidden). */
   private lastStatus: string | undefined;
   /** Browsers linked through the local hub (see HubClient), which every window hears about. */
@@ -146,9 +168,26 @@ export class BridgeServer implements vscode.Disposable {
     this.service = new LinkService(context, bookmarks, logger, () => !!this.server);
     this.relay = new WindowRelay(
       join(context.globalStorageUri.fsPath, SENDS_FOLDER),
-      randomUUID(),
-      () => vscode.workspace.name ?? 'No folder',
-      (message) => this.service.runSend(message),
+      WINDOW_ID,
+      windowInfo,
+      runHere,
+    );
+    this.core = new HubCore(
+      {
+        paths: hubPaths(),
+        inbox: inboxPath(),
+        tmuxSockets: getConfig().agentTmuxSockets,
+      },
+      {
+        // This window as it is now; the others as they announced themselves.
+        windows: () => {
+          const others = this.relay.windows().filter((w) => w.id !== WINDOW_ID);
+          return [{ id: WINDOW_ID, focusedAt: this.relay.focused, ...windowInfo() }, ...others];
+        },
+        runInWindow: (window, project, ids, target) =>
+          this.relay.dispatch({ project, ids: [...ids], target }, window),
+        log: (line) => this.logger.info(`Browser link: ${line}`),
+      },
     );
     if (vscode.window.state.focused) this.relay.markFocused();
     else this.relay.announce();
@@ -169,7 +208,6 @@ export class BridgeServer implements vscode.Disposable {
           this.pruneOffers();
         }
       }
-      this.sendWindowsIfChanged();
       if (!this.server) this.updateStatus();
       // The approval file's watcher can miss events too; so could one for unlinking.
       else {
@@ -193,7 +231,6 @@ export class BridgeServer implements vscode.Disposable {
         this.showOffers();
         this.relay.markFocused();
         void this.relay.poll();
-        this.sendWindowsIfChanged();
       }),
     );
     // Sends handed to this window by the one serving the link.
@@ -760,9 +797,7 @@ export class BridgeServer implements vscode.Disposable {
       this.send(connection, { type: 'error', code: 'unauthorized', message: 'Say hello first.' });
       return;
     }
-    if (isLinkedMessage(message)) {
-      await this.service.handle(peer, message, (send) => this.dispatchSend(send));
-    }
+    if (isLinkedMessage(message)) await this.service.handle(peer, message, this.core);
   }
 
   /** The connection is a linked browser from now on. */
@@ -775,8 +810,8 @@ export class BridgeServer implements vscode.Disposable {
   }
 
   private welcome(connection: Connection): void {
-    if (connection.peer) this.service.welcome(connection.peer, this.peerName());
-    this.send(connection, this.windowsMessage());
+    // This window answers the browser's questions about projects and captures (`hub`).
+    if (connection.peer) this.service.welcome(connection.peer, this.peerName(), ['hub']);
     this.updateStatus();
   }
 
@@ -786,30 +821,6 @@ export class BridgeServer implements vscode.Disposable {
     this.hubBrowsers = names;
     this.updateStatus();
     this.onDidChangeEmitter.fire();
-  }
-
-  /** Runs a send from a linked browser in the VS Code window it names, or the one used last. */
-  dispatchSend(message: SendMessage) {
-    return this.relay.dispatch(message, message.window);
-  }
-
-  /** The open VS Code windows, for the browser to offer as places to send to. */
-  windowsMessage(): ServerMessage {
-    const windows = this.relay.windows();
-    return {
-      type: 'windows',
-      windows: windows.map((w, index) => ({ id: w.id, name: w.name, lastUsed: index === 0 })),
-    };
-  }
-
-  /** Tells this window's linked browsers when windows open, close or take focus. */
-  private sendWindowsIfChanged(): void {
-    if (!this.service.hasPeers) return;
-    const message = this.windowsMessage();
-    const json = JSON.stringify(message);
-    if (json === this.lastWindows) return;
-    this.lastWindows = json;
-    this.service.broadcast(message);
   }
 
   private peerName(): string {
