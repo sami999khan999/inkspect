@@ -96,6 +96,7 @@
 .panel-dock,
 .toast,
 .menu,
+.ink-modal-backdrop,
 /* Popups (select lists, color pickers) are portaled to the shadow root, outside .inkspect. */
 [data-ink-popup],
 .select-list,
@@ -114,6 +115,7 @@
 .inkspect.sampling .draw-host,
 .inkspect.sampling .panel-dock,
 .inkspect.sampling .toast,
+.inkspect.sampling .ink-modal-backdrop,
 .inkspect.sampling .menu {
   opacity: 0 !important;
 }
@@ -237,69 +239,13 @@
   padding: 14px 10px 14px 14px;
 }
 
-/* The captured image, cropped to its top: what was captured, at a glance. */
-.toast-thumb {
-  flex-shrink: 0;
-  width: 104px;
-  height: 68px;
-  border: 1px solid var(--ink-border-subtle);
-  border-radius: var(--ink-radius);
-  background: var(--vscode-editor-background);
-  object-fit: cover;
-  object-position: top center;
-}
-
-/* Several images: stacked like cards, with their number. */
-.toast-thumbs {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.toast-thumbs.many {
-  width: 118px;
-  height: 80px;
-}
-
-.toast-thumbs.many .toast-thumb {
-  position: absolute;
-  top: 0;
-  left: 0;
-  box-shadow: var(--ink-shadow-sm);
-}
-
-.toast-thumbs.many .toast-thumb:nth-child(2) {
-  top: 6px;
-  left: 7px;
-}
-
-.toast-thumbs.many .toast-thumb:nth-child(3) {
-  top: 12px;
-  left: 14px;
-}
-
-.toast-count {
-  position: absolute;
-  right: -2px;
-  bottom: -2px;
-  min-width: 22px;
-  padding: 0 6px;
-  border-radius: var(--ink-radius-pill);
-  background: var(--vscode-badge-background);
-  color: var(--vscode-badge-foreground);
-  font-size: var(--ink-font-xs);
-  font-weight: 700;
-  line-height: 20px;
-  text-align: center;
-}
-
 .toast-icon {
   flex-shrink: 0;
   margin-top: 1px;
   font-size: 18px !important;
 }
 
-.tone-success .toast-icon,
-.toast-check {
+.tone-success .toast-icon {
   color: var(--vscode-testing-iconPassed);
 }
 
@@ -326,10 +272,6 @@
   overflow-wrap: anywhere;
 }
 
-.toast-check {
-  font-size: 16px !important;
-}
-
 .toast-detail {
   color: var(--ink-muted);
   overflow-wrap: anywhere;
@@ -338,70 +280,6 @@
 .toast-close {
   flex-shrink: 0;
   margin-top: -2px;
-}
-
-/* Where it goes: the window, then the actions. */
-.toast-bottom {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px 14px 14px;
-  border-top: 1px solid var(--ink-border-subtle);
-  background: color-mix(
-    in srgb,
-    var(--vscode-foreground) 3%,
-    var(--vscode-editorWidget-background)
-  );
-}
-
-.toast-target {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.toast-target-label {
-  flex-shrink: 0;
-  color: var(--ink-muted);
-  font-size: var(--ink-font-sm);
-}
-
-.toast-window {
-  flex: 1;
-  min-width: 0;
-}
-
-.toast-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-/* The buttons' shared modifiers ("Alt Shift +"), then each button's own key after its label. */
-.toast-keys {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--ink-muted);
-  font-size: var(--ink-font-xs);
-}
-
-.toast-actions .button-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.toast-actions .button.primary .keycap {
-  border-color: color-mix(in srgb, var(--vscode-button-foreground) 35%, transparent);
-  background: color-mix(in srgb, var(--vscode-button-foreground) 16%, transparent);
-  color: var(--vscode-button-foreground);
-}
-
-/* Download (stays in the browser): set apart at the end. */
-.toast-actions .toast-local {
-  margin-left: auto;
 }
 
 @keyframes toast-in {
@@ -461,8 +339,7 @@
 }
 
 .field select,
-.field input,
-.code-input {
+.field input {
   height: 26px;
   padding: 0 6px;
   border: 1px solid var(--vscode-input-border);
@@ -471,13 +348,6 @@
   color: var(--vscode-input-foreground);
   font: inherit;
   font-size: 13px;
-}
-
-.code-input {
-  flex: 1;
-  font-family: var(--vscode-editor-font-family);
-  font-size: 16px;
-  letter-spacing: 4px;
 }
 
 .check {
@@ -995,25 +865,4 @@
   left: 50%;
   bottom: 92px;
   transform: translateX(-50%);
-}
-
-/* Several screenshots: their count where a single one shows its thumbnail, and the picker. */
-.toast-count-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: var(--ink-radius-pill);
-  background: var(--ink-accent);
-  color: var(--vscode-button-foreground);
-  font-size: var(--ink-font-xs);
-  font-weight: 700;
-}
-
-.toast-picker {
-  max-height: 188px;
-  overflow-y: auto;
-  padding: 0 16px 4px;
 }

@@ -10,19 +10,29 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import type { HubTarget } from '@inkspect/shared/hub';
 
 /** What a send produces, whichever window runs it. */
 export interface RelayResult {
   ok: boolean;
-  path?: string;
+  /** The agent it went to. */
+  sentTo?: string;
   error?: string;
 }
 
-/** An open VS Code window, as the others see it. */
-export interface RelayWindow {
-  id: string;
+/** What a window tells the others about itself. */
+export interface RelayInfo {
   /** What the user knows it by: its workspace's name. */
   name: string;
+  /** Its local folders: projects. */
+  folders: string[];
+  /** Its own agents (terminals, chat), under ids local to it. */
+  targets: HubTarget[];
+}
+
+/** An open VS Code window, as the others see it. */
+export interface RelayWindow extends RelayInfo {
+  id: string;
   /** When it last had focus (0: not yet). */
   focusedAt: number;
 }
@@ -60,15 +70,15 @@ const DEFAULT_TIMINGS: RelayTimings = {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Runs browser sends in the VS Code window the user chose, or else in the one used last. Only
- * one window serves the browser link (it owns the port), so the windows meet in a shared folder:
+ * Lets the window serving the browser link (it owns the port) know the other VS Code windows and
+ * run sends in them (for their own agents: terminals, chat). The windows meet in a shared folder:
  *
- * - `<window>.window` announces a window (its name, when it last had focus), refreshed by a
- *   heartbeat (`announce`), so the others can list the open windows.
+ * - `<window>.window` announces a window (its name, folders, agents, when it last had focus),
+ *   refreshed by a heartbeat (`announce`), so the others can list the open windows.
  * - `<id>.json` is a send for one window; renaming it to `<id>.taken.json` claims it (renames are
  *   atomic, so exactly one window runs it), and `<id>.result.json` carries the outcome back.
  *
- * A send nobody takes in time (its window closed) runs in the serving window.
+ * A send for a window that is closed, or doesn't take it in time, fails.
  */
 export class WindowRelay<T> {
   private readonly running = new Set<string>();
@@ -78,8 +88,8 @@ export class WindowRelay<T> {
     private readonly dir: string,
     /** This window's id (new for every window session). */
     readonly windowId: string,
-    /** This window's name, read at every announcement (the workspace can change). */
-    private readonly name: () => string,
+    /** This window's name, folders and agents, read at every announcement (they change). */
+    private readonly info: () => RelayInfo,
     private readonly run: (message: T) => Promise<RelayResult>,
     private readonly timings: RelayTimings = DEFAULT_TIMINGS,
   ) {
@@ -90,7 +100,12 @@ export class WindowRelay<T> {
     return Date.now();
   }
 
-  /** This window has focus: sends go here unless the user picks another. */
+  /** When this window last had focus (0: not yet). */
+  get focused(): number {
+    return this.focusedAt;
+  }
+
+  /** This window has focus (its folder is the likeliest project for a capture). */
   markFocused(): void {
     this.focusedAt = this.now();
     this.announce();
@@ -100,7 +115,7 @@ export class WindowRelay<T> {
   announce(): void {
     const presence: Presence = {
       id: this.windowId,
-      name: this.name(),
+      ...this.info(),
       focusedAt: this.focusedAt,
       seen: this.now(),
     };
@@ -131,6 +146,10 @@ export class WindowRelay<T> {
       alive.push({
         id: presence.id,
         name: typeof presence.name === 'string' ? presence.name : 'VS Code',
+        folders: Array.isArray(presence.folders)
+          ? presence.folders.filter((f) => typeof f === 'string')
+          : [],
+        targets: Array.isArray(presence.targets) ? presence.targets.filter(isTarget) : [],
         focusedAt: typeof presence.focusedAt === 'number' ? presence.focusedAt : 0,
       });
     }
@@ -143,13 +162,13 @@ export class WindowRelay<T> {
   }
 
   /**
-   * Runs a send in window `to` when it is open, else in the window used last: here, or relayed
-   * to it.
+   * Runs a send in window `to` (here, or relayed to it). It fails when that window is closed:
+   * the send names one of its own agents.
    */
-  async dispatch(message: T, to?: string): Promise<RelayResult> {
-    const open = this.windows();
-    const target = (to && open.find((w) => w.id === to)?.id) ?? open[0]?.id;
-    if (!target || target === this.windowId) return this.run(message);
+  async dispatch(message: T, to: string): Promise<RelayResult> {
+    if (to === this.windowId) return this.run(message);
+    const target = this.windows().find((w) => w.id === to)?.id;
+    if (!target) return { ok: false, error: 'That VS Code window is closed.' };
     const id = randomUUID();
     const request: Request<T> = { id, to: target, at: this.now(), message };
     this.write(`${id}.json`, request);
@@ -158,11 +177,10 @@ export class WindowRelay<T> {
       await sleep(this.timings.pollMs);
       if (!existsSync(this.path(`${id}.json`))) return this.awaitResult(id);
     }
-    // Nobody took it (that window closed or hangs): run it here, unless the other window
-    // claims it at this very moment.
+    // Nobody took it (that window hangs): give up, unless it claims it at this very moment.
     if (!this.claim(id)) return this.awaitResult(id);
     this.remove(`${id}.taken.json`);
-    return this.run(message);
+    return { ok: false, error: 'That VS Code window did not answer.' };
   }
 
   /** Takes and runs the sends addressed to this window (call when the folder changes). */
@@ -271,4 +289,15 @@ export class WindowRelay<T> {
   private remove(name: string): void {
     rmSync(this.path(name), { force: true });
   }
+}
+
+function isTarget(value: unknown): value is HubTarget {
+  const t = value as Partial<HubTarget> | null;
+  return (
+    !!t &&
+    typeof t.id === 'string' &&
+    typeof t.label === 'string' &&
+    typeof t.detail === 'string' &&
+    (t.kind === 'terminal' || t.kind === 'chat' || t.kind === 'tmux')
+  );
 }

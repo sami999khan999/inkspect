@@ -6,6 +6,7 @@ import {
   parseClientMessage,
   parseServerMessage,
 } from '../src/bridge';
+import { encodeHub } from '../src/hub';
 
 describe('bridge protocol', () => {
   it('round-trips valid messages', () => {
@@ -29,30 +30,40 @@ describe('bridge protocol', () => {
       expect(parseClientMessage(JSON.stringify({ v: 1, type }))).toBeUndefined();
   });
 
-  it('sends captures made together as a group, and several of them in one send', () => {
-    const grouped = { type: 'send' as const, id: '1', target: 'context' as const, group: 'g' };
-    expect(parseClientMessage(encode(grouped))).toEqual(grouped);
-    const together = {
-      type: 'send' as const,
-      id: '2',
-      target: 'chat' as const,
-      captures: ['a', 'b'],
+  it('carries questions about projects and their answers, checked like the helper does', () => {
+    const request = {
+      type: 'hub.request' as const,
+      request: JSON.parse(encodeHub({ type: 'projects.get', req: 'r1', url: 'https://a.dev/' })),
     };
-    expect(parseClientMessage(encode(together))).toEqual(together);
-    const bad = (extra: object) =>
-      parseClientMessage(JSON.stringify({ v: 1, type: 'send', id: '3', target: 'chat', ...extra }));
-    expect(bad({ captures: 'a' })).toBeUndefined();
-    expect(bad({ captures: [1] })).toBeUndefined();
-    expect(bad({ captures: Array(61).fill('a') })).toBeUndefined();
-    expect(bad({ group: 5 })).toBeUndefined();
+    expect(parseClientMessage(encode(request))).toEqual(request);
+    const reply = {
+      type: 'hub.reply' as const,
+      reply: JSON.parse(encodeHub({ type: 'done', req: 'r1', ok: true })),
+    };
+    expect(parseServerMessage(encode(reply))).toEqual(reply);
+    // Only requests (they carry `req`), valid as the helper's protocol sees them.
+    const bad = (inner: object) =>
+      parseClientMessage(JSON.stringify({ v: 1, type: 'hub.request', request: inner }));
+    expect(bad({ v: 1, type: 'ping' })).toBeUndefined();
+    expect(bad({ v: 1, type: 'item.remove', req: 'r', project: '/p', ids: 'x' })).toBeUndefined();
+    expect(bad({ type: 'projects.get', req: 'r' })).toBeUndefined();
+    // VS Code says it answers them.
+    const welcome = {
+      type: 'welcome' as const,
+      peer: 'VS Code',
+      syncBookmarks: true,
+      features: ['hub' as const],
+    };
+    expect(parseServerMessage(encode(welcome))).toEqual(welcome);
   });
 
   it('rejects malformed, unknown and other-version messages', () => {
     expect(parseClientMessage('not json')).toBeUndefined();
     expect(parseClientMessage(JSON.stringify({ v: 1, type: 'nope' }))).toBeUndefined();
     expect(parseClientMessage(JSON.stringify({ v: 2, type: 'ping' }))).toBeUndefined();
+    // Sends of older versions: questions about projects took their place.
     expect(
-      parseClientMessage(JSON.stringify({ v: 1, type: 'send', id: '1', target: 'shell' })),
+      parseClientMessage(JSON.stringify({ v: 1, type: 'send', id: '1', target: 'chat' })),
     ).toBeUndefined();
     expect(
       parseServerMessage(
@@ -76,23 +87,6 @@ describe('bridge protocol', () => {
     expect(bad({ 'mode.draw': 5 })).toBeUndefined();
     expect(bad({ 'mode.draw': 'x'.repeat(41) })).toBeUndefined();
     expect(bad(['ctrl+k'])).toBeUndefined();
-  });
-
-  it('lists VS Code windows, and sends can name one', () => {
-    const windows = {
-      type: 'windows' as const,
-      windows: [
-        { id: 'w1', name: 'shop', lastUsed: true },
-        { id: 'w2', name: 'api', lastUsed: false },
-      ],
-    };
-    expect(parseServerMessage(encode(windows))).toEqual(windows);
-    expect(
-      parseServerMessage(encode({ ...windows, windows: [{ id: 'w1', name: 1 }] } as never)),
-    ).toBeUndefined();
-    const send = { type: 'send' as const, id: 's1', target: 'save' as const, window: 'w2' };
-    expect(parseClientMessage(encode(send))).toEqual(send);
-    expect(parseClientMessage(encode({ ...send, window: 5 } as never))).toBeUndefined();
   });
 
   it('keeps the shortcut settings changed last', () => {

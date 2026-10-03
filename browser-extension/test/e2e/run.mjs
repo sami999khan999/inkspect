@@ -14,7 +14,7 @@ import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   Browser,
   computeExecutablePath,
@@ -54,6 +54,20 @@ const { outputFiles: hubFiles } = await esbuild.build({
 const hub = await import(
   `data:text/javascript;base64,${Buffer.from(hubFiles[0].text).toString('base64')}`
 );
+// VS Code's answers about projects and their saved captures (the same code as the extension's).
+const coreDir = mkdtempSync(join(tmpdir(), 'ink-core-'));
+await esbuild.build({
+  entryPoints: [join(root, '..', 'vscode-extension', 'src', 'hub', 'core.ts')],
+  outfile: join(coreDir, 'core.mjs'),
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  banner: {
+    js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+  },
+  logLevel: 'warning',
+});
+const { HubCore } = await import(pathToFileURL(join(coreDir, 'core.mjs')).href);
 
 /** Chrome for Testing: the copy VS Code Browser downloaded, else download one into .cache. */
 async function chromePath() {
@@ -110,6 +124,11 @@ const url = `http://127.0.0.1:${site.address().port}/`;
 // Fake VS Code link (same protocol and merge as the real one)
 // ---------------------------------------------------------------------------------------------
 
+/** The fake VS Code window's project: captures over the link are saved here. */
+const fakeProject = join(coreDir, 'shop');
+mkdirSync(fakeProject);
+const WELCOME = { type: 'welcome', peer: 'Fake VS Code', syncBookmarks: true, features: ['hub'] };
+
 const fake = {
   code: '424242',
   local: [
@@ -123,23 +142,46 @@ const fake = {
   ],
   state: undefined,
   snapshots: [],
-  sends: [],
-  windows: [
-    { id: 'w1', name: 'shop', lastUsed: true },
-    { id: 'w2', name: 'api', lastUsed: false },
-  ],
+  /** Sends the window ran for its own agents (a terminal agent, chat). */
+  runs: [],
   socket: undefined,
   /** A Pair click in VS Code: pairs the browser waiting on the open connection, without a code. */
   approve() {
     for (const message of [
       { type: 'paired', token: 'test-token', peer: 'Fake VS Code' },
-      { type: 'welcome', peer: 'Fake VS Code', syncBookmarks: true },
-      { type: 'windows', windows: fake.windows },
+      WELCOME,
     ]) {
       fake.socket.send(shared.encode(message));
     }
   },
 };
+const core = new HubCore(
+  { paths: { state: join(coreDir, 'state'), data: join(coreDir, 'data') }, tmuxSockets: [] },
+  {
+    windows: () => [
+      {
+        id: 'w1',
+        name: 'shop',
+        folders: [fakeProject],
+        focusedAt: 1,
+        targets: [
+          {
+            id: 'terminal:1',
+            kind: 'terminal',
+            label: 'Terminal agent',
+            detail: 'VS Code terminal',
+          },
+          { id: 'chat', kind: 'chat', label: 'Chat', detail: 'VS Code chat' },
+        ],
+      },
+    ],
+    runInWindow: async (window, project, ids, target) => {
+      fake.runs.push({ window, project, ids: [...ids], target });
+      return { ok: true, sentTo: target === 'chat' ? 'Chat' : 'Terminal agent' };
+    },
+    log: () => {},
+  },
+);
 // Like VS Code's server, answers plain requests (the extension probes the port first).
 const linkServer = createServer((_request, response) => response.writeHead(404).end());
 const wss = new WebSocketServer({ server: linkServer, path: shared.BRIDGE_PATH });
@@ -155,19 +197,19 @@ wss.on('connection', (socket, request) => {
       if (message.code !== fake.code)
         return send({ type: 'error', code: 'bad-code', message: 'Wrong code' });
       send({ type: 'paired', token: 'test-token', peer: 'Fake VS Code' });
-      send({ type: 'welcome', peer: 'Fake VS Code', syncBookmarks: true });
-      send({ type: 'windows', windows: fake.windows });
+      send(WELCOME);
     } else if (message.type === 'hello') {
       // Like VS Code: only the paired token gets in; an unpaired browser stays connected.
       if (message.token !== 'test-token')
         send({ type: 'error', code: 'unpaired', message: 'Not paired' });
-      else {
-        send({ type: 'welcome', peer: 'Fake VS Code', syncBookmarks: true });
-        send({ type: 'windows', windows: fake.windows });
+      else send(WELCOME);
+    } else if (message.type === 'hub.request') {
+      const request = hub.parseBrowserToHub(message.request);
+      if (request) {
+        void core
+          .handle(request)
+          .then((reply) => send({ type: 'hub.reply', reply: JSON.parse(hub.encodeHub(reply)) }));
       }
-    } else if (message.type === 'send') {
-      fake.sends.push(message);
-      send({ type: 'send.result', id: message.id, ok: true, path: 'shots/fake.png' });
     } else if (message.type === 'ping') {
       send({ type: 'pong' });
     } else if (message.type === 'bookmarks.snapshot') {
@@ -271,6 +313,22 @@ const clickButton = (label) =>
     return !!button;
   }, label);
 const toastText = () => inToolbar((shadow) => shadow.querySelector('.toast')?.textContent ?? '');
+/** The send dialog's text (shown after every capture), or undefined while it is closed. */
+const dialogText = () => inToolbar((shadow) => shadow.querySelector('.ink-modal')?.textContent);
+/** Waits for the send dialog to show `text`, then closes it with Esc (the capture stays). */
+const closeDialog = async (text = '') => {
+  const shown = await until(
+    `the send dialog${text ? ` for "${text}"` : ''}`,
+    async () => {
+      const t = await dialogText();
+      return t?.includes(text) ? t : undefined;
+    },
+    20_000,
+  );
+  await tab.keyboard.press('Escape');
+  await until('the send dialog closed', async () => (await dialogText()) === undefined);
+  return shown;
+};
 const clipboardText = () => tab.evaluate(() => navigator.clipboard.readText());
 const clipboardImage = () =>
   tab.evaluate(async () => {
@@ -391,16 +449,24 @@ await test('the element selector highlights with a Chrome-style tooltip and copi
   });
   assert(text.includes('button.primary') || text.includes('Sign in'), text);
   assert((await tab.title()) === 'Fixture', 'the click reached the page');
+  // Every capture opens the send dialog (nothing is linked yet: it says so).
+  const offered = await closeDialog('Element');
+  assert(offered.includes('Not linked'), offered);
   // Alt+click is a screenshot of the element, and only that (no details copied).
   await clearClipboard();
+  await tab.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await tab.keyboard.down('Alt');
   await tab.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await tab.keyboard.up('Alt');
   const shot = await until('element screenshot', clipboardImage, 20_000);
   assert(shot.width > 20 && shot.height > 10, `element image ${shot.width}x${shot.height}`);
-  await until('screenshot popup', async () => (await toastText()).includes('Element screenshot'));
-  assert(!(await toastText()).includes('Copied details'), await toastText());
+  await closeDialog('Element screenshot');
+  // The picker is still on; Esc leaves it.
   await tab.keyboard.press('Escape');
+  await until(
+    'picker off',
+    async () => !(await inToolbar((s) => !!s.querySelector('.inspect-hint'))),
+  );
 });
 
 await test('viewport and full-page screenshots are copied as images', async () => {
@@ -430,7 +496,8 @@ await test('viewport and full-page screenshots are copied as images', async () =
       assert(image.height >= pageHeight - 2, `full page ${image.height} < ${pageHeight}`);
     else
       assert(image.height <= 800 && image.width >= 1100, `viewport ${image.width}x${image.height}`);
-    await until('toast', async () => (await toastText()).includes('copied'));
+    const offered = await closeDialog('creenshot');
+    assert(offered.includes('Copied'), offered);
   }
 });
 
@@ -467,6 +534,8 @@ await test('drawing, then "screenshot drawing area" captures just the drawing', 
     image.width > 250 && image.width < 320 && image.height > 110 && image.height < 170,
     `area ${image.width}x${image.height}`,
   );
+  await closeDialog('Drawing');
+  // Drawing is still on; Esc leaves it.
   await tab.keyboard.press('Escape');
 });
 
@@ -483,6 +552,7 @@ await test('console errors and failed requests are captured and copied for AI', 
     return t.includes('boom from fixture') ? t : undefined;
   });
   assert(text.includes('Console errors'), text);
+  await closeDialog('Console errors');
   await clearClipboard();
   await clickButton('Copy failed requests');
   const failed = await until('copied failed requests', async () => {
@@ -494,6 +564,7 @@ await test('console errors and failed requests are captured and copied for AI', 
     throw error;
   });
   assert(failed.includes('404'), failed);
+  await closeDialog('Failed requests');
   await clickButton('Close');
 });
 
@@ -524,20 +595,15 @@ await test('pairs with VS Code and syncs bookmarks both ways', async () => {
       document.querySelector('.status-chip')?.textContent?.startsWith('Linked'),
     ),
   );
-  // The windows keep a stable order (by name); the lit path runs down the bus to the one used last.
+  // The link, drawn: a lit branch to the VS Code window that answers.
   const graph = await options.evaluate(() =>
     [...document.querySelectorAll('.graph-target')].map((row) => ({
       name: row.querySelector('.graph-name')?.textContent,
       lit: row.classList.contains('lit'),
-      onPath: row.classList.contains('on-path'),
     })),
   );
   assert(
-    JSON.stringify(graph) ===
-      JSON.stringify([
-        { name: 'api', lit: false, onPath: true },
-        { name: 'shop', lit: true, onPath: false },
-      ]),
+    JSON.stringify(graph) === JSON.stringify([{ name: 'Fake VS Code', lit: true }]),
     JSON.stringify(graph),
   );
   // Unlink (it takes a second click: the first only arms it), then pair the fallback way: a
@@ -822,8 +888,8 @@ await test('shortcuts: changed in the toolbar, they reach VS Code and work; VS C
   );
 });
 
-await test('sends go to the VS Code window picked in the popup, else the one used last', async () => {
-  // Linked by the previous test; the fake VS Code has two windows open.
+await test('over the link, captures are saved into the window’s project and the dialog sends them', async () => {
+  // Linked by the previous test.
   if (!(await inToolbar((shadow) => !!shadow.querySelector('.bar')))) {
     await worker.evaluate((id) => globalThis.__inkspectTest.toggleToolbar(id), tabId);
   }
@@ -850,57 +916,78 @@ await test('sends go to the VS Code window picked in the popup, else the one use
     const point = await until(`${selector} "${text}"`, () => pointOf(selector, text));
     await tab.mouse.click(point.x, point.y);
   };
-  const screenshotThenSave = async (pick) => {
+  const shoot = async () => {
     await clickAt('button', 'Screenshot');
     await clickAt('.menu-item', 'Visible area');
-    await until('popup', () => pointOf('.toast button', 'Save'), 20_000);
-    if (pick) {
-      await clickAt('.toast-window', 'VS Code window');
-      await clickAt('.select-option', pick);
-    }
-    const before = fake.sends.length;
-    await clickAt('.toast button', 'Save');
-    return until('send', () => fake.sends[before]);
+    let last;
+    return until(
+      'the send dialog',
+      async () => {
+        const text = (last = await dialogText());
+        return text?.includes('Terminal agent') && !text.includes('Saving') ? text : undefined;
+      },
+      20_000,
+    ).catch((error) => {
+      console.log('    dialog:', JSON.stringify(last));
+      throw error;
+    });
   };
-  const picked = await screenshotThenSave('api');
-  assert(picked.target === 'save' && picked.window === 'w2', JSON.stringify(picked.window));
-  // The capture reached VS Code's Agent Context list by itself, as the same capture.
-  const shared = fake.sends.find((m) => m.target === 'context' && m.capture === picked.capture);
-  assert(picked.capture && shared?.image && shared.kind === 'screenshot', 'not shared as context');
-  const unpicked = await screenshotThenSave();
-  assert(unpicked.window === undefined, `unpicked went to ${unpicked.window}`);
-  // The popup's buttons have keys (shown on them): Alt+Shift+C sends to chat.
+  const closed = () => until('the dialog closed', async () => (await dialogText()) === undefined);
+
+  const itemsDir = join(fakeProject, '.inkspect', 'items');
+  const saved = () => {
+    try {
+      return readdirSync(itemsDir)
+        .filter((name) => !name.startsWith('.'))
+        .map((id) => JSON.parse(readFileSync(join(itemsDir, id, 'item.json'), 'utf8')));
+    } catch {
+      return [];
+    }
+  };
+
+  // Taken: saved into the window's project at once, then offered with its agents.
+  let before = saved().length;
+  const offered = await shoot();
+  assert(offered.includes('shop') && offered.includes('Chat'), offered);
+  assert(saved().length === before + 1, 'not saved into the project');
+  // Enter sends it to the default agent (the terminal one), run in its window.
+  let runs = fake.runs.length;
+  await tab.keyboard.press('Enter');
+  const sent = await until('the send', () => fake.runs[runs]);
+  assert(
+    sent.window === 'w1' && sent.target === 'terminal:1' && sent.ids.length === 1,
+    JSON.stringify(sent),
+  );
+  await closed();
+  // A number key picks an agent: 2 is the chat.
+  await shoot();
+  runs = fake.runs.length;
+  await tab.keyboard.press('2');
+  const toChat = await until('the chat send', () => fake.runs[runs]);
+  assert(toChat.target === 'chat', JSON.stringify(toChat));
+  await closed();
+  // Esc keeps it saved without sending.
+  before = saved().length;
+  await shoot();
+  runs = fake.runs.length;
+  await tab.keyboard.press('Escape');
+  await closed();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert(fake.runs.length === runs && saved().length === before + 1, 'Esc sent it, or lost it');
+  // Even while it says "Saving…".
+  before = saved().length;
   await clickAt('button', 'Screenshot');
   await clickAt('.menu-item', 'Visible area');
-  await until('popup', () => pointOf('.toast button', 'Send to chat'), 20_000);
-  const shown = await inToolbar((shadow) => ({
-    prefix: shadow.querySelector('.toast-keys')?.textContent,
-    chat: [...shadow.querySelectorAll('.toast button')].find((b) =>
-      b.textContent.startsWith('Send to chat'),
-    )?.textContent,
-  }));
-  assert(
-    /Shift/.test(shown.prefix ?? '') && /Alt/.test(shown.prefix ?? '') && shown.chat?.endsWith('C'),
-    JSON.stringify(shown),
-  );
-  const beforeKey = fake.sends.length;
-  await tab.keyboard.down('Alt');
-  await tab.keyboard.down('Shift');
-  await tab.keyboard.press('KeyC');
-  await tab.keyboard.up('Shift');
-  await tab.keyboard.up('Alt');
-  const byKey = await until('send by key', () =>
-    fake.sends.slice(beforeKey).find((m) => m.target === 'chat'),
-  );
-  assert(byKey.kind === 'screenshot', JSON.stringify(byKey.kind));
-  // The capture popup closed (a "sent" toast may follow it).
-  await until(
-    'the capture popup closed',
-    async () => !(await inToolbar((shadow) => !!shadow.querySelector('.toast-keys'))),
-  );
-  // The element picker: Shift+click selects several; the bar over them acts on all of them.
+  await until('the dialog', async () => (await dialogText()) !== undefined, 20_000);
+  await tab.keyboard.press('Escape');
+  await closed();
+  await until('saved anyway', () => saved().length === before + 1);
+
+  // The element picker: Shift+click selects several; the bar over them captures all of them.
   await clickAt('button', 'Select an element');
   await until('picker on', () => inToolbar((shadow) => !!shadow.querySelector('.inspect-hint')));
+  const hint = await inToolbar((shadow) => shadow.querySelector('.inspect-hint')?.textContent);
+  assert(/to capture/.test(hint) && /screenshot/.test(hint) && /to add/.test(hint), hint);
   const centerOf = async (selector) => {
     const b = await (await tab.$(selector)).boundingBox();
     return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
@@ -917,71 +1004,53 @@ await test('sends go to the VS Code window picked in the popup, else the one use
   const bar = await until('the selection bar', () =>
     inToolbar((shadow) => shadow.querySelector('.selection-bar')?.textContent),
   );
-  assert(/2\s*selected/.test(bar) && bar.includes('Terminal agent'), bar);
-  let before2 = fake.sends.length;
-  await clickAt('.selection-bar button', 'Terminal agent');
-  const both = await until('selection sent', () =>
-    fake.sends.slice(before2).find((m) => m.target === 'terminal'),
+  assert(/2\s*selected/.test(bar) && bar.includes('Capture') && bar.includes('Screenshot'), bar);
+  before = saved().length;
+  await clickAt('.selection-bar button', 'Capture');
+  await until('the dialog for both', async () =>
+    (await dialogText())?.includes('2 elements') ? true : undefined,
   );
-  assert(both.kind === 'element' && /2 elements/.test(both.label), JSON.stringify(both.label));
+  const elements = await until('both saved', () => {
+    const items = saved();
+    return items.length === before + 2 ? items.filter((i) => i.kind === 'element') : undefined;
+  });
+  const group = elements.find((i) => i.group)?.group;
+  assert(group && elements.filter((i) => i.group === group).length === 2, 'not saved as a group');
   assert(!(await inToolbar((shadow) => !!shadow.querySelector('.selection-bar'))), 'bar stayed');
-  // Ctrl+click: the chat agent; Ctrl+Shift+click: a terminal agent.
-  before2 = fake.sends.length;
-  await modClick('button.primary', 'Control');
-  const toChat = await until('Ctrl+click send', () =>
-    fake.sends.slice(before2).find((m) => m.kind === 'element'),
-  );
-  assert(toChat.target === 'chat', toChat.target);
-  before2 = fake.sends.length;
-  await modClick('button.primary', 'Control', 'Shift');
-  const toTerminal = await until('Ctrl+Shift+click send', () =>
-    fake.sends.slice(before2).find((m) => m.kind === 'element'),
-  );
-  assert(toTerminal.target === 'terminal', toTerminal.target);
-  // Screenshots of several: one group; the popup's checkboxes pick which go, in one send.
+  runs = fake.runs.length;
+  await clickAt('.ink-modal-send', 'Chat');
+  const both = await until('the group send', () => fake.runs[runs]);
+  assert(both.target === 'chat' && both.ids.length === 2, JSON.stringify(both));
+  await closed();
+  // Screenshots of several: one group, offered together.
   await modClick('#login h2', 'Shift');
   await modClick('button.primary', 'Shift');
   await until('the selection bar again', () =>
     inToolbar((shadow) => !!shadow.querySelector('.selection-bar')),
   );
-  before2 = fake.sends.length;
+  before = saved().length;
   await clickAt('.selection-bar button', 'Screenshot');
-  await until('the picker in the popup', async () =>
-    (await inToolbar(
-      (shadow) => shadow.querySelectorAll('.toast .thumb-picker-item.on').length,
-    )) === 2
+  await until('two images in the dialog', async () =>
+    (await inToolbar((shadow) => shadow.querySelectorAll('.ink-modal-thumbs img').length)) === 2
       ? true
       : undefined,
   );
-  const shared2 = fake.sends.slice(before2).filter((m) => m.target === 'context' && m.group);
-  assert(shared2.length === 2 && shared2[0].group === shared2[1].group, 'not shared as a group');
-  await clickAt('.toast .thumb-picker-check', 'Include Screenshot 2 of 2');
-  await until('the partial label', () => pointOf('.toast button', 'Send 1 to terminal'));
-  before2 = fake.sends.length;
-  await clickAt('.toast button', 'Send 1 to terminal');
-  const one = await until('the group send', () =>
-    fake.sends.slice(before2).find((m) => m.target === 'terminal'),
-  );
-  assert(
-    !one.image && one.captures?.length === 1 && one.captures[0] === shared2[0].capture,
-    JSON.stringify({ image: !!one.image, captures: one.captures }),
-  );
+  await until('both screenshots saved', () => saved().length === before + 2);
+  await tab.keyboard.press('Escape');
+  await closed();
   await tab.keyboard.press('Escape');
   await until(
     'picker off',
     async () => !(await inToolbar((s) => !!s.querySelector('.inspect-hint'))),
   );
 
-  // The console panel has its own picker for sending the page context.
+  // The console panel's page context is a capture like the others.
   await clickAt('button', 'Console and network');
-  await clickAt('.panel-group .select', 'VS Code window');
-  await clickAt('.select-option', 'api');
-  const before = fake.sends.length;
-  await clickAt('.panel-group button', 'Send to chat');
-  const context = await until('page context send', () => fake.sends[before]);
+  await clickAt('.panel-group button', 'Copy page context');
+  await closeDialog('Page context');
   assert(
-    context.target === 'chat' && context.window === 'w2' && /page/i.test(context.label ?? ''),
-    JSON.stringify({ target: context.target, window: context.window, label: context.label }),
+    saved().some((i) => i.kind === 'page'),
+    'page context not saved',
   );
   await clickAt('button', 'Console and network');
 });
@@ -1095,11 +1164,10 @@ await test('real build: opens from its button, and its menus and lists take real
   // A menu item: the screenshot is taken and copied.
   await clickNode(byLabel('Screenshot'), 'screenshot button');
   await clickNode(withText('Visible area'), 'menu item');
-  await until(
-    'screenshot toast',
-    () => findNode((_a, own) => own.includes('Screenshot copied')),
-    20_000,
-  );
+  // The send dialog, closed with a real click on its button (it stays saved).
+  await until('the send dialog', () => findNode((a) => a.role === 'dialog'), 20_000);
+  await clickNode(byLabel('Close (it stays saved)'), 'dialog close');
+  await until('the dialog closed', async () => !(await findNode((a) => a.role === 'dialog')));
   // A select list in the responsive view: the device changes.
   await clickNode(byLabel('Responsive view'), 'responsive button');
   await clickNode((a) => a.role === 'combobox' && a['aria-label'] === 'Device', 'device list');
@@ -1153,7 +1221,8 @@ await test('links through the browser helper, without pairing', async () => {
   const launcher = join(home, 'inkspect-hub');
   writeFileSync(
     launcher,
-    `#!/bin/sh\nINKSPECT_HUB_DIR='${hubDir}' INKSPECT_HUB_IDLE_MS=3000 INKSPECT_TMUX_SOCKETS= exec '${process.execPath}' '${hubScript}' "$@"\n`,
+    // Its own state and data too: the machine's hub state (last project, sites) must not leak in.
+    `#!/bin/sh\nINKSPECT_HUB_DIR='${hubDir}' XDG_STATE_HOME='${home}/state' XDG_DATA_HOME='${home}/data' INKSPECT_HUB_IDLE_MS=3000 INKSPECT_TMUX_SOCKETS= exec '${process.execPath}' '${hubScript}' "$@"\n`,
     { mode: 0o755 },
   );
   // Chrome reads user-level hosts from the profile's NativeMessagingHosts folder.
@@ -1226,7 +1295,6 @@ await test('links through the browser helper, without pairing', async () => {
         const reply = (m) =>
           vscode.write(frame({ type: 'link', browser: message.browser, data: shared.encode(m) }));
         reply({ type: 'welcome', peer: 'VS Code (hub test)', syncBookmarks: false });
-        reply({ type: 'windows', windows: [{ id: 'w1', name: 'hub test', lastUsed: true }] });
       }
     });
     const token = readFileSync(join(hubDir, 'hub.token'), 'utf8');
@@ -1291,21 +1359,22 @@ await test('links through the browser helper, without pairing', async () => {
       return r && { x: r.x + r.width / 2, y: r.y + r.height / 2 };
     });
     await page.mouse.click(point.x, point.y);
-    // The popup offers the project (the window's folder) and saves into it.
-    await until(
-      'the project picker',
-      () =>
-        shadowCall((shadow) => shadow.querySelector('.toast-target')?.textContent.includes('shop')),
+    // Saved at once into the suggested project (the window's folder); the dialog says so and
+    // lists the project's agent.
+    const dialog = () => shadowCall((shadow) => shadow.querySelector('.ink-modal')?.textContent);
+    let lastDialog;
+    const offered = await until(
+      'the send dialog',
+      async () => {
+        const text = (lastDialog = await dialog());
+        return text?.includes('Claude Code') && !text.includes('Saving') ? text : undefined;
+      },
       20_000,
-    );
-    await shadowCall((shadow) =>
-      [...shadow.querySelectorAll('.toast button')]
-        .find((b) => b.textContent.startsWith('Save to project'))
-        ?.click(),
-    );
-    await until('the saved toast', () =>
-      shadowCall((shadow) => shadow.querySelector('.toast')?.textContent.includes('Saved to shop')),
-    );
+    ).catch((error) => {
+      console.log('    dialog:', JSON.stringify(lastDialog));
+      throw error;
+    });
+    assert(offered.includes('shop'), offered);
     const items = join(project, '.inkspect', 'items');
     const saved = await until('the capture in the project', () => {
       try {
@@ -1319,8 +1388,12 @@ await test('links through the browser helper, without pairing', async () => {
       JSON.stringify(saved) === JSON.stringify(['capture.png', 'item.json', 'thumb.jpg']),
       JSON.stringify(saved),
     );
+    // Esc: it stays saved, nothing is sent.
+    await page.keyboard.press('Escape');
+    await until('the dialog closed', async () => (await dialog()) === undefined);
+    assert(runs.length === 0, JSON.stringify(runs));
 
-    // Copied element details, sent to the project's agent: saved, then handed to the window.
+    // Element details: saved, then Enter hands them to the window's agent.
     const pickPoint = await page.evaluate(() => {
       const r = document.querySelector('#login h2').getBoundingClientRect();
       return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
@@ -1332,36 +1405,33 @@ await test('links through the browser helper, without pairing', async () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 300));
     await page.mouse.click(pickPoint.x, pickPoint.y);
-    await until('the agent in the popup', () =>
-      shadowCall((shadow) =>
-        shadow.querySelector('.toast-agent')?.textContent.includes('Claude Code'),
-      ),
-    );
-    await shadowCall((shadow) =>
-      [...shadow.querySelectorAll('.toast button')]
-        .find((b) => b.textContent.startsWith('Send to agent'))
-        ?.click(),
-    );
-    await until('the sent toast', () =>
-      shadowCall((shadow) =>
-        shadow.querySelector('.toast')?.textContent.includes('Sent to Claude Code'),
-      ),
-    );
+    await until('the element in the dialog', async () => {
+      const text = await dialog();
+      return text?.includes('Element') && !text.includes('Saving') ? text : undefined;
+    });
+    await page.keyboard.press('Enter');
+    await until('the sent status', async () => (await dialog())?.includes('Sent to Claude Code'));
     assert(runs.length === 1 && runs[0].target === 'terminal:1', JSON.stringify(runs));
     assert(runs[0].project === project && runs[0].ids.length === 1, JSON.stringify(runs));
+    await until('the dialog closed after sending', async () => (await dialog()) === undefined);
+    await page.keyboard.press('Escape');
 
-    // The side panel: the project, its two captures, and their actions.
+    // The side panel: the page's project, its two captures, and their actions.
     const panel = await helperBrowser.newPage();
     await panel.goto(`chrome-extension://${id}/sidepanel.html`);
     await until('the project in the side panel', () =>
-      panel.evaluate(() => document.querySelector('.sp-project-name')?.textContent === 'shop'),
+      panel.evaluate(() =>
+        document.querySelector('.sp-project .select')?.textContent.includes('shop'),
+      ),
     );
-    const cards = await until('its captures', () =>
-      panel.evaluate(() => {
-        const titles = [...document.querySelectorAll('.sp-item-title')].map((e) => e.textContent);
-        return titles.length === 2 ? titles : undefined;
-      }),
-    );
+    const titlesIn = () =>
+      panel.evaluate(() =>
+        [...document.querySelectorAll('.saved-card-title')].map((e) => e.textContent),
+      );
+    const cards = await until('its captures', async () => {
+      const titles = await titlesIn();
+      return titles.length === 2 ? titles : undefined;
+    });
     assert(
       cards.some((t) => t.startsWith('Element')),
       JSON.stringify(cards),
@@ -1372,13 +1442,18 @@ await test('links through the browser helper, without pairing', async () => {
       ),
       'no default agent shown',
     );
+    const cardWith = (title, selector) =>
+      panel.evaluate(
+        (title, selector) =>
+          [...document.querySelectorAll('.saved-card')]
+            .find((li) => li.querySelector('.saved-card-title').textContent.startsWith(title))
+            ?.querySelector(selector)
+            ?.click(),
+        title,
+        selector,
+      );
     // Send the screenshot from the panel: the window's agent gets it.
-    await panel.evaluate(() =>
-      [...document.querySelectorAll('.sp-item')]
-        .find((li) => li.querySelector('.sp-item-title').textContent.startsWith('Screenshot'))
-        .querySelector('button.btn, button')
-        ?.click(),
-    );
+    await cardWith('Screenshot', '.saved-send button');
     await until('the send from the panel', () => runs.length === 2);
     assert(runs[1].ids.length === 1 && runs[1].target === 'terminal:1', JSON.stringify(runs[1]));
     await until('the sent note', () =>
@@ -1386,16 +1461,61 @@ await test('links through the browser helper, without pairing', async () => {
         document.querySelector('.sp-note')?.textContent.includes('Sent to Claude Code'),
       ),
     );
-    // Remove the element capture.
+    // Remove the element capture, then take it back.
+    await cardWith('Element', '[aria-label="Remove"]');
+    await until('one capture left', async () => (await titlesIn()).length === 1);
     await panel.evaluate(() =>
-      [...document.querySelectorAll('.sp-item')]
-        .find((li) => li.querySelector('.sp-item-title').textContent.startsWith('Element'))
-        .querySelector('[aria-label="Remove"]')
+      [...document.querySelectorAll('.saved-undo button')]
+        .find((b) => b.textContent.includes('Undo'))
         ?.click(),
     );
-    await until('one capture left', () =>
-      panel.evaluate(() => document.querySelectorAll('.sp-item').length === 1),
+    await until('the capture back', async () => (await titlesIn()).length === 2);
+
+    // Change project in the dialog: the capture moves (here to the Inbox).
+    await page.bringToFront();
+    await shadowCall((shadow) =>
+      [...shadow.querySelectorAll('button')]
+        .find((b) => (b.getAttribute('aria-label') ?? '').startsWith('Screenshot'))
+        ?.click(),
     );
+    await until('menu again', () =>
+      shadowCall((shadow) => shadow.querySelectorAll('.menu-item').length),
+    );
+    await shadowCall((shadow) =>
+      [...shadow.querySelectorAll('.menu-item')]
+        .find((b) => b.textContent.includes('Visible area'))
+        ?.click(),
+    );
+    await until('the third dialog', async () => {
+      const text = await dialog();
+      return text?.includes('shop') && !text.includes('Saving') ? text : undefined;
+    });
+    const before = new Set(readdirSync(items));
+    const third = readdirSync(items).length;
+    assert(third === 3, `${third} items in shop`);
+    await shadowCall((shadow) => shadow.querySelector('.ink-modal-project .select')?.click());
+    await until('the project list', () =>
+      shadowCall((shadow) =>
+        [...shadow.querySelectorAll('.select-option')].some((o) => o.textContent.includes('Inbox')),
+      ),
+    );
+    await shadowCall((shadow) =>
+      [...shadow.querySelectorAll('.select-option')]
+        .find((o) => o.textContent.includes('Inbox'))
+        ?.click(),
+    );
+    await until('the dialog on the Inbox', async () => (await dialog())?.includes('Inbox'));
+    const inboxItems = join(home, 'data', 'inkspect', 'inbox', '.inkspect', 'items');
+    const moved = await until('the capture in the Inbox', () => {
+      try {
+        const ids = readdirSync(inboxItems);
+        return ids.length === 1 ? ids[0] : undefined;
+      } catch {
+        return undefined;
+      }
+    });
+    assert(before.has(moved) && !existsSync(join(items, moved)), 'not moved');
+    await page.keyboard.press('Escape');
   } finally {
     vscode?.destroy();
     await helperBrowser.close();
@@ -1406,6 +1526,7 @@ await test('links through the browser helper, without pairing', async () => {
 site.close();
 linkServer.close();
 wss.close();
+rmSync(coreDir, { recursive: true, force: true });
 const failed = results.filter((r) => !r).length;
 console.log(`\n${results.length - failed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

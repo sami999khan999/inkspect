@@ -5,6 +5,7 @@
 //
 // The browser link (./bridge) travels inside `link` frames: the browser extension speaks the same
 // protocol to VS Code as over the WebSocket, and the hub forwards it to the leader window.
+import { HARNESSES, type Harness } from './targets';
 import type { Check } from './validate';
 import {
   isBoolean,
@@ -19,6 +20,13 @@ import {
 } from './validate';
 
 export const HUB_VERSION = 1;
+
+/**
+ * What a hub answers beyond the first version, in its `status` (a newer browser build may meet
+ * an older hub until VS Code replaces it): moving and restoring items, sends that show the
+ * agentmux thread, new agentmux threads.
+ */
+export const HUB_FEATURES = ['items.move', 'item.restore', 'send.open', 'agentmux.new'] as const;
 /** The native messaging host's name, as browsers know it. */
 export const HUB_HOST_NAME = 'dev.inkspect.hub';
 /**
@@ -59,7 +67,7 @@ export interface HubWindow {
   targets?: HubTarget[];
 }
 
-/** What an item in a project's `.inkspect/` is (the Agent Context kinds). */
+/** What an item in a project's `.inkspect/` is (the Saved list's kinds). */
 export type ItemKind =
   | 'element'
   | 'screenshot'
@@ -159,6 +167,10 @@ export interface Project {
   targets?: HubTarget[];
   /** Where Send goes: the target used last, else the agent beside its VS Code window... */
   defaultTarget?: string;
+  /** Agents a new agentmux thread can run here (only for projects open in agentmux). */
+  harnesses?: Harness[];
+  /** The Inbox: where captures go when no project fits (they can be moved later). */
+  inbox?: boolean;
 }
 
 /** Something in the project can receive a send (a VS Code window or an agent is there). */
@@ -206,14 +218,28 @@ export type BrowserToHub =
       /** A target id, or 'default' for the project's default target. */
       send?: string;
     }
-  /** Sends saved items of a project to a target ('default' or unset: its default target). */
-  | { type: 'item.send'; req: string; project: string; ids: string[]; target?: string }
+  /**
+   * Sends saved items of a project to a target ('default' or unset: its default target);
+   * `open` also shows the agentmux thread and brings it to the front.
+   */
+  | {
+      type: 'item.send';
+      req: string;
+      project: string;
+      ids: string[];
+      target?: string;
+      open?: boolean;
+    }
+  /** Moves saved items to another project (the capture was saved in the wrong one). */
+  | { type: 'items.move'; req: string; project: string; ids: string[]; to: string }
   /** A project's saved items, newest first (the side panel). */
   | { type: 'items.get'; req: string; project: string }
   /** An item's thumbnail (its small JPEG, else a small enough image). */
   | { type: 'item.thumb'; req: string; project: string; id: string }
   /** Moves items to the project's trash. */
   | { type: 'item.remove'; req: string; project: string; ids: string[] }
+  /** Puts back items removed a moment ago (they wait in the store's trash). */
+  | { type: 'item.restore'; req: string; project: string; ids: string[] }
   /** Keeps a project in the list even when nothing is open there. */
   | { type: 'project.pin'; req: string; project: string; pinned: boolean };
 
@@ -221,7 +247,8 @@ export type HubToBrowser =
   /** A bridge ServerMessage from VS Code. */
   | { type: 'link'; data: string }
   /** Whether a VS Code window answers for the link; `peer` names it. */
-  | { type: 'status'; vscode: boolean; peer?: string }
+  /** `features`: what this hub answers beyond the first version (see HUB_FEATURES). */
+  | { type: 'status'; vscode: boolean; peer?: string; features?: string[] }
   /** The window answering for the link changed: say hello again. */
   | { type: 'relink' }
   | { type: 'pong' }
@@ -239,7 +266,7 @@ export type HubToBrowser =
   | { type: 'items'; req: string; ok: boolean; items: ItemMeta[]; error?: string }
   /** `data`: base64, or missing when the item has no picture small enough. */
   | { type: 'thumb'; req: string; data?: string; mimeType?: string }
-  /** The answer to `item.remove` and `project.pin`. */
+  /** The answer to `item.remove`, `item.restore`, `items.move` and `project.pin`. */
   | { type: 'done'; req: string; ok: boolean; error?: string };
 
 export type VsCodeToHub =
@@ -322,10 +349,18 @@ const BROWSER_TO_HUB: Record<BrowserToHub['type'], Record<string, Check>> = {
     captures: arrayOf(captureToSave, 60),
     send: optional(shortString(200)),
   },
-  'item.send': { req, project: projectPath, ids: itemIds, target: optional(shortString(200)) },
+  'item.send': {
+    req,
+    project: projectPath,
+    ids: itemIds,
+    target: optional(shortString(200)),
+    open: optional(isBoolean),
+  },
+  'items.move': { req, project: projectPath, ids: itemIds, to: projectPath },
   'items.get': { req, project: projectPath },
   'item.thumb': { req, project: projectPath, id: matches(ITEM_ID) },
   'item.remove': { req, project: projectPath, ids: itemIds },
+  'item.restore': { req, project: projectPath, ids: itemIds },
   'project.pin': { req, project: projectPath, pinned: isBoolean },
 };
 
@@ -338,6 +373,8 @@ const project = shape({
   pinned: isBoolean,
   targets: optional(arrayOf(hubTarget, 50)),
   defaultTarget: optional(shortString(200)),
+  harnesses: optional(arrayOf(oneOf(...HARNESSES), 10)),
+  inbox: optional(isBoolean),
 });
 
 /** Validates an `item.json` read from disk (anything else in `.inkspect/` is ignored). */
@@ -365,7 +402,11 @@ export const isItemMeta: Check = shape({
 
 const HUB_TO_BROWSER: Record<HubToBrowser['type'], Record<string, Check>> = {
   link: { data },
-  status: { vscode: isBoolean, peer: optional(shortString(200)) },
+  status: {
+    vscode: isBoolean,
+    peer: optional(shortString(200)),
+    features: optional(arrayOf(shortString(40), 50)),
+  },
   relink: {},
   pong: {},
   projects: { req, projects: arrayOf(project, 500), suggested: optional(projectPath) },

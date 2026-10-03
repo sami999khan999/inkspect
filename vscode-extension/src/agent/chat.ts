@@ -1,21 +1,27 @@
 import * as vscode from 'vscode';
+import type { ItemMeta } from '@inkspect/shared/hub';
 import { getConfig } from '../config';
 import { copyText } from '../features/clipboard';
-import { saveContext } from '../features/context';
 import { displayPath } from '../features/screenshots';
 import {
-  CHAT_TARGET,
   acceptsPaste,
+  askForAgent,
+  CHAT_TARGET,
   getAgentTerminals,
   pasteIntoTerminal,
-  resolveAgentTerminal,
 } from '../features/terminalSend';
+import { chooseDefault, paneTargets } from '../hub/agents';
+import { availableHarnesses } from '../hub/agentmux';
+import { readProjectState } from '../hub/projectState';
+import { sendItems, type SendContext, type SendOptions, type SendResult } from '../hub/router';
+import { agentPanes, listPanes } from '../hub/tmux';
+import { listProcesses } from './processes';
+import { partsOf } from '../hub/send';
+import { itemFile, readItem, readItemText } from '../hub/store';
 import { addContext, contextTray, type ContextInput, type ContextItem } from './contextTray';
-import { pasteIntoPane } from '../hub/send';
-import { fitsInline, shellPath } from './sendParts';
+import { currentProject, globalTarget, localTarget } from './projects';
 
 let lastPick: string | undefined;
-let storage = '';
 
 /** Remembers the element details the user last picked, for the `browser_get_selection` tool. */
 export function rememberPick(markdown: string): void {
@@ -26,121 +32,156 @@ export function lastPickedElement(): string | undefined {
   return lastPick;
 }
 
-/** Where context files go when no workspace folder is open (set on activation). */
-export function initAgentSend(globalStorage: string): void {
-  storage = globalStorage;
+/**
+ * What a send of these items puts into a chat: their text (or, without text, their files' names)
+ * and the files to attach, the ones the text doesn't already name.
+ */
+function chatContentOf(project: string, items: readonly ItemMeta[]) {
+  const texts: string[] = [];
+  const files: string[] = [];
+  for (const item of items) {
+    const text = readItemText(project, item)?.trim() ?? '';
+    if (text) texts.push(text);
+    const file = itemFile(project, item, 'file');
+    if (file && !text.includes(displayPath(file))) files.push(file);
+  }
+  return { text: texts.join('\n\n') || files.map(displayPath).join('\n'), files };
 }
 
 /**
- * Sends something to the agent, without pressing Enter: to an agent CLI in a terminal (each
- * file's path and the text, each pasted separately), or to VS Code chat. `target` is a target id from the Agent Context view (`terminal:<n>` or `chat`), or
- * `terminal`/`chat`; by default, the agent used last (see `vscodeBrowser.agent.sendTarget`).
- * Returns the name of the agent it went to, or undefined if nothing was sent.
+ * Puts saved items into one of this window's own targets: an agent in a VS Code terminal (each
+ * file's path and the text, pasted, never Enter, no focus) or VS Code chat (text in the input,
+ * files attached). The router (and the hub, for the browser's sends) records where they went.
  */
-export async function sendToAgent(
-  text: string,
-  options: { files?: string[]; label?: string; target?: string } = {},
-): Promise<string | undefined> {
-  const files = options.files ?? [];
-  const agents = getAgentTerminals();
-  let target = options.target;
-  if (!target || target === 'terminal') {
-    await agents.refresh();
-    target = target === 'terminal' ? undefined : agents.defaultTarget(getConfig().agentSendTarget);
-  }
-  if (target === CHAT_TARGET) {
+export async function deliverLocal(
+  target: string,
+  project: string,
+  items: readonly ItemMeta[],
+): Promise<SendResult> {
+  const id = localTarget(target);
+  if (id === CHAT_TARGET) {
+    const { text, files } = chatContentOf(project, items);
     await sendToChat(
-      text.trim() ? text : files.map(displayPath).join('\n'),
+      text,
       files.map((f) => vscode.Uri.file(f)),
     );
-    return 'VS Code chat';
+    return { ok: true, sentTo: 'VS Code chat' };
   }
-  const trimmed = text.trim();
-  if (!trimmed && !files.length) return undefined;
-  if (target?.startsWith('tmux:')) {
-    // An agent in an agentmux thread (a tmux pane): pasted there, as in a VS Code terminal.
-    await agents.refresh();
-    const pane = agents.paneById(target);
-    if (!pane) {
-      void vscode.window.showWarningMessage(
-        'That agent is not running any more. Pick another one in the Agent Context view.',
-      );
-      return undefined;
-    }
-    const parts = files.map(shellPath);
-    if (trimmed) {
-      parts.push(
-        fitsInline(trimmed, true)
-          ? trimmed
-          : shellPath(await saveContext(text, options.label ?? 'context', storage)),
-      );
-    }
-    await pasteIntoPane(pane.socket, pane.paneId, parts);
-    agents.setDefault(target);
-    vscode.window.setStatusBarMessage(`$(check) Sent to ${pane.label} (${pane.session})`, 4_000);
-    return pane.label;
-  }
-  const found = await resolveAgentTerminal(target);
-  if (!found) return undefined;
-  const parts = files.map(shellPath);
-  if (trimmed) {
-    // Agent CLIs get the text itself as a paste; very long text, or a terminal that only takes
-    // typing, gets the path of a file holding it.
-    const inline = fitsInline(trimmed, acceptsPaste(found.agent));
-    parts.push(
-      inline ? trimmed : shellPath(await saveContext(text, options.label ?? 'context', storage)),
-    );
-  }
-  pasteIntoTerminal(found.terminal, found.agent, parts);
-  return found.agent.label;
+  const agents = getAgentTerminals();
+  const terminal = agents.terminalById(id);
+  if (!terminal) return { ok: false, error: 'That terminal is closed.' };
+  const agent = agents.agentFor(terminal) ?? { id: 'custom', label: terminal.name };
+  pasteIntoTerminal(
+    terminal,
+    agent,
+    partsOf(project, items, { acceptsPaste: acceptsPaste(agent) }),
+  );
+  return { ok: true, sentTo: agent.label };
 }
 
-/** Sends an item of the Agent Context list, and records where it went. */
+/**
+ * Sends saved items, without pressing Enter: to `target` (a target id from the Saved view, a
+ * tmux pane, `agentmux:new:<agent>`), else the project's default agent. With no agent at all,
+ * asks to start or pick one. Returns the agent's name, or undefined if nothing was sent.
+ */
+export async function sendSaved(
+  items: readonly ContextItem[],
+  target?: string,
+  options: SendOptions = {},
+): Promise<string | undefined> {
+  const project = items[0]?.project;
+  if (!project) return undefined;
+  const ids = items.filter((i) => i.project === project).map((i) => i.id);
+  const send = async (to: string | undefined) =>
+    sendItems(await sendContextFor(project), project, ids, to ?? 'default', options);
+  let result = await send(target);
+  if (
+    !result.ok &&
+    project === currentProject() &&
+    (!target || target === 'default' || target === 'terminal')
+  ) {
+    const picked = await askForAgent();
+    if (!picked) return undefined;
+    await getAgentTerminals().refresh(true);
+    result = await send(picked);
+  }
+  if (!result.ok) {
+    void vscode.window.showWarningMessage(result.error);
+    return undefined;
+  }
+  vscode.window.setStatusBarMessage(`$(check) Sent to ${result.sentTo}`, 4_000);
+  contextTray()?.load();
+  return result.sentTo;
+}
+
+/**
+ * Where a project's sends can go from this window: for its own project, its terminal agents,
+ * its chat and the project's agentmux agents; for another project, that project's agentmux
+ * agents.
+ */
+export async function sendContextFor(project: string): Promise<SendContext> {
+  const sockets = getConfig().agentTmuxSockets;
+  const agents = getAgentTerminals();
+  if (project === currentProject()) {
+    await agents.refresh();
+    return {
+      targets: agents.sendTargets(),
+      defaultTarget: agents.defaultTarget(getConfig().agentSendTarget),
+      sockets,
+      harnesses: agents.harnesses(),
+      deliver: deliverLocal,
+      globalId: globalTarget,
+    };
+  }
+  const [panes, processes] = await Promise.all([
+    listPanes(sockets),
+    listProcesses().catch(() => []),
+  ]);
+  const targets = paneTargets(panes, processes).filter((t) => t.project === project);
+  const open = agentPanes(panes).some((p) => p.project === project);
+  return {
+    targets,
+    defaultTarget: chooseDefault(targets, { last: readProjectState(project).lastTarget }),
+    sockets,
+    harnesses: open ? availableHarnesses() : [],
+    globalId: globalTarget,
+  };
+}
+
+/** Sends an item of the Saved list. */
 export async function sendContextItem(
   item: ContextItem,
   target?: string,
 ): Promise<string | undefined> {
-  return sendContextItems([item], target);
+  return sendSaved([item], target);
 }
 
 /**
- * Sends several items of the Agent Context list together, in one send: the chat gets every
- * image attached at once, an agent in a terminal every path in one paste. For a group, or the
- * checked part of one.
+ * Sends several items of the Saved list together, in one send: the chat gets every image
+ * attached at once, an agent every path in one paste. For a group, or the checked part of one.
  */
 export async function sendContextItems(
   items: readonly ContextItem[],
   target?: string,
 ): Promise<string | undefined> {
-  if (!items.length) return undefined;
-  const tray = contextTray();
-  const texts: string[] = [];
-  const files: string[] = [];
-  for (const item of items) {
-    const file = tray ? await tray.fileOf(item) : item.file;
-    // Images are sent as their file; the text of an element with a screenshot already names it.
-    const text = item.text ?? '';
-    if (text) texts.push(text);
-    if (file && !text.includes(displayPath(file))) files.push(file);
-  }
-  const label = items.length === 1 ? items[0]!.title : `${items.length} items`;
-  const sent = await sendToAgent(texts.join('\n\n'), { files, label, target });
-  if (sent) for (const item of items) tray?.markSent(item, sent);
-  return sent;
+  return sendSaved(items, target);
 }
 
 /**
- * Adds a capture to the Agent Context list and sends it to the agent: the one path for every
- * "send to agent" action, so everything sent also shows in the list.
+ * Saves a capture in the Saved list and sends it to the agent: the one path for every "send to
+ * agent" action, so everything sent is also saved.
  */
 export async function captureAndSend(
   input: ContextInput,
   target?: string,
 ): Promise<string | undefined> {
-  const item = addContext(input);
-  if (item) return sendContextItem(item, target);
-  const files = input.file ? [input.file] : [];
-  return sendToAgent(input.text ?? '', { files, label: input.title, target });
+  const item = addContext(input, { silent: true });
+  return item ? sendSaved([item], target) : undefined;
+}
+
+/** The saved items of a project, by id (sends that come through the hub). */
+export function savedItems(project: string, ids: readonly string[]): ItemMeta[] {
+  return ids.flatMap((id) => readItem(project, id) ?? []);
 }
 
 /**

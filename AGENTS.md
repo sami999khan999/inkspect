@@ -62,8 +62,9 @@ VS Code windows ── src/link/hubClient.ts ───────────�
 ```
 
 - `src/hub/` is a separate program (`dist/hub.js`) that browsers start as their native messaging host. On activation (Linux) VS Code copies it to `$XDG_DATA_HOME/inkspect/hub/` and registers it with every browser found (`src/hub/install.ts`).
-- The daemon (`src/hub/daemon.ts`) lists **projects** (VS Code windows' folders, agentmux threads, projects with captures, pinned ones), saves the browser's captures into `<project>/.inkspect/`, finds agents in tmux panes and pastes sends into them, and forwards the browser link (the bridge protocol, in `link` frames) to one VS Code window, the leader. Browsers on the hub need no pairing; the WebSocket link stays as the fallback.
-- Protocol: `@inkspect/shared/hub` (versioned, validated both ways, like the bridge).
+- The daemon (`src/hub/daemon.ts`) forwards the browser link (the bridge protocol, in `link` frames) to one VS Code window, the leader, and answers the browser's questions about **projects** with **`HubCore`** (`src/hub/core.ts`): it lists projects (VS Code windows' folders, agentmux threads, projects with captures, pinned ones, the Inbox), suggests the page's project, saves the browser's captures into `<project>/.inkspect/`, and sends, moves and removes them. Browsers on the hub need no pairing.
+- **The WebSocket link is the same path:** the VS Code window serving it runs its own `HubCore` and answers bridge `hub.request` messages with `hub.reply` (its `welcome` lists the `hub` feature). The browser's `hubRequest()` asks whichever link it has. VS Code windows tell each other their folders and agents through the window relay (`src/bridge/windowRelay.ts`), which also runs a send in the window whose agent it names.
+- Protocol: `@inkspect/shared/hub` (versioned, validated both ways, like the bridge). New requests are listed in the hub's `status.features` (`HUB_FEATURES`), so a newer browser build only offers what the hub answers.
 
 **Where state lives**
 
@@ -99,7 +100,7 @@ src/features/           bookmarks, history, sessions, downloads, screenshots, ex
 src/agent/              agent tools (tools.ts), MCP (mcpProtocol.ts, mcpServer.ts), send-to-chat, sendParts.ts
 src/hub/                the hub (no vscode): daemon, shim, install, store (.inkspect), projects, tmux, agents
 src/link/               LinkService (what a linked browser does, any transport) and the hub client
-src/sidebar/            Activity Bar views: trees (actions, tabs, bookmarks), Agent Context and Shortcuts webviews
+src/sidebar/            Activity Bar views: trees (actions, tabs, bookmarks), Saved and Shortcuts webviews
 src/shared/             code shared by host AND webview: protocol, url, devices, elementInfo...
 webview/src/            React UI: App.tsx, components/, drawing/, pages/ (vb:// pages)
 test/unit/              Vitest unit tests (vscode module aliased to test/unit/stubs/vscode.ts)
@@ -167,9 +168,10 @@ npm run package      # production build + .vsix
   - Don't add browser keys to `contributes.keybindings`. The only exceptions are actions marked `everywhere` (they must also work outside the browser); inside it, the webview consumes the key first, so they run once. A unit test checks that the keybindings match the `everywhere` actions, that ids are unique, that host commands exist, and that the defaults don't conflict.
   - Actions with a `command` run it through the host (the `command` message, allowed only for registry commands). Other actions are handled in the webview (`webview/src/actions.ts`, or a mode component registering its handlers).
   - Modes that take over the page use plain keys; modes that leave the page usable (console, device, overlay, record) use Alt+ keys.
+  - The send dialog's keys are the `send` scope (Enter, N, P, C, D, Esc); its number keys pick an agent and aren't actions. While it is open, the webview dispatcher and the toolbar's key listener leave keys to it.
   - Show keys with `shortcutLabel()` / `withShortcut()`, never hard-coded, so remapped keys show everywhere.
 - Commands that tests call return useful values: `screenshot()` returns the saved path, and `runDevAction()` returns the copied text.
-- Hidden test hooks live under `vscodeBrowser.debug.*`: `state`, `copyElementAt`, `setAnnotations`, `crashEngine`, `mcp`, `bridge` (its `approve` option stands in for a Pair click). They are not declared in `package.json`.
+- Hidden test hooks live under `vscodeBrowser.debug.*`: `state` (its `offer` is the send dialog offered last), `copyElementAt`, `setAnnotations`, `crashEngine`, `mcp`, `bridge` (its `approve` option stands in for a Pair click), `savedAction` (a choice in the send dialog). They are not declared in `package.json`.
 
 ### Settings
 
@@ -178,10 +180,12 @@ npm run package      # production build + .vsix
 
 ### Sending to the agent
 
-- Every capture (picked element, screenshot, recording, Copy-for-AI text, report) goes into the Agent Context list with `addContext()`, and every "send to agent" goes through `captureAndSend()` / `sendContextItem()` (`src/agent/chat.ts`), so everything sent also shows in the **Agent Context** view.
-- The Agent Context list is the workspace's **`.inkspect/` store** (`src/hub/store.ts`): one folder per item, written whole and renamed into place, read by VS Code and the hub alike. Never keep capture bytes only in memory; never let an `item.json` name a path outside its folder (`itemFile`).
+- **Saved, then sent.** Every capture (picked element, screenshot, recording, Copy-for-AI text, report) is saved into the **Saved** list with `addContext()` (no question asked), and the send dialog (`@inkspect/shared/ui/SendModal`) offers where it goes: in VS Code, `src/agent/sendFlow.ts` gathers captures (`tray.onDidCapture`) and posts `saved` to the browser panel, which answers `savedAction`; in the browser extension, `content/useSendFlow.ts`. Captures that are sent at once (a mode's "send to agent", `captureAndSend()`) are added `silent` and offer nothing.
+- **One router for every send:** `sendItems()` (`src/hub/router.ts`) resolves `default`, pastes into agentmux panes, hands `vscode:<window>:…` targets to their window (VS Code: `deliverLocal()` in `src/agent/chat.ts`), starts new agentmux threads, marks items sent and remembers the project's last target in `<project>/.inkspect/state.json` (shared by VS Code and the hub). In VS Code, sends go through `sendSaved()` / `sendContextItems()`; target ids follow `@inkspect/shared/targets`. Never send the literal `terminal` or `chat` to the router: use target ids or `default`.
+- The Saved list is a project's **`.inkspect/` store** (`src/hub/store.ts`): one folder per item, written whole and renamed into place, read by VS Code and the hub alike. Never keep capture bytes only in memory; never let an `item.json` name a path outside its folder (`itemFile`). VS Code shows one project at a time (`ContextTray.setProject()`; without a folder, the **Inbox**, `inboxPath()`); that project counts as the window's own (`windowInfo()` in `src/agent/projects.ts`).
 - Terminal sends go only to terminals where `AgentTerminals` (`src/features/terminalSend.ts`) found an agent, or that the user picked. Never type into a plain shell by default, and don't focus the terminal. Agent recognition is pure and unit-tested (`src/agent/agentDetect.ts`).
-- Agents in tmux panes (agentmux threads) are targets too (`tmux:<socket>:<pane>`, `src/hub/agents.ts`): only panes where an agent runs, pasted with `paste-buffer -p` through `pasteIntoPane()`, never followed by Enter. Every tmux call is `execFile` with an argument array.
+- Agents in tmux panes (agentmux threads) are targets too (`tmux:<socket>:<pane>`, `src/hub/agents.ts`): only panes where an agent runs, pasted with `paste-buffer -p` through `pasteIntoPane()`, never followed by Enter. Every tmux call is `execFile` with an argument array. agentmux's own actions (**Open in agentmux**, **New agentmux thread**: `src/hub/agentmux.ts`) are offered only for projects agentmux has open, and window focus goes through `hyprctl` only on Hyprland.
+- Tests never touch the machine's tmux: `INKSPECT_TMUX_SOCKETS=` (empty) keeps both the hub and VS Code (`getConfig().agentTmuxSockets`) off it, and the integration tests set it.
 
 ### Agent tools
 
@@ -261,8 +265,9 @@ npm run package      # production build + .vsix
 - **What it holds:**
   - element details and selectors (`elementInfo`, `collect`)
   - drawing (`annotations`, `drawing/render`, `drawing/composite`, `ui/DrawingLayer`, `ui/DrawToolbar`)
+  - capturing and sending: the target ids (`targets`), the send dialog (`sendModal`, `ui/SendModal`), the Saved list (`saved`, `ui/SavedList`), the picker's hint and selection bar (`ui/PickerHint`, `ui/SelectionBar`)
   - `devices`, Copy-for-AI formats (`devtools`), `color`
-  - the bookmark merge (`bookmarkSync`) and the link protocol (`bridge`)
+  - the bookmark merge (`bookmarkSync`), the link protocol (`bridge`) and the hub protocol (`hub`)
   - the UI kit: components (`ui/Button`, `ui/Select`, `ui/TextField`...), tokens and styles (`ui/ui.css`), and theme variables for non-VS Code hosts (`ui/theme.css`)
 - **Imports:** `@inkspect/shared/<module>` or `@inkspect/shared/ui/<Component>`. The package exports TypeScript source; each product's bundler compiles it.
 - **No `vscode` or `chrome` imports, no Node-only APIs.** DOM APIs are fine, since both products run the code in pages or webviews.
@@ -288,10 +293,11 @@ npm run package      # production build + .vsix
   - the responsive view's emulation (`chrome.debugger`: user agent, touch, network, CPU, media) and its framing rule (`declarativeNetRequest` session rule, see below)
   - the VS Code link client (`bridge.ts`): the browser helper (native messaging, `connectNative`) first, else the WebSocket; `hubRequest()` asks the helper about projects and captures
   - the browser half of bookmark sync (`bookmarks.ts`)
-- **Content** (`src/content/`): the toolbar is React in a **closed** shadow root on `<inkspect-toolbar>`. It holds the inspector, drawing, region select, panels, the responsive view (`ResponsiveView.tsx`), and capture and stitching (`capture.ts`).
+- **Content** (`src/content/`): the toolbar is React in a **closed** shadow root on `<inkspect-toolbar>`. It holds the inspector, drawing, region select, panels, the responsive view (`ResponsiveView.tsx`), capture and stitching (`capture.ts`), and the capture flow (`useSendFlow.ts`: save into the page's project, then the send dialog, which takes the keys while it is open).
   - The toolbar is a **full-width bar at the top**, and the page moves down to make room (`pagePush.ts`: the `html` margin, plus fixed and sticky elements anchored at the top). Anything measuring the page (captures) uses `pushOffset()`.
   - The **responsive view** shows the page in a device-sized `<iframe>` of the same tab, centered and scaled to fit. The debugger's device metrics can't do this: they always draw the page at the tab's top-left. While it is open, a session rule drops `X-Frame-Options` and `Content-Security-Policy` for frames of the page's own origin, **in that tab only**, and it is removed when the view closes. The frame is sandboxed without scripted top navigation, so frame-busting scripts can't end the view. Tools that act on the page (picker, drawing, console, page context) don't reach into the frame yet and are disabled while it is open.
-- **Side panel** (`src/sidepanel/`, Chrome `side_panel`, Firefox `sidebar_action`): the projects and their saved captures, through the background (`{ type: 'hub' }` messages, allowed for the extension's own pages only).
+- **Side panel** (`src/sidepanel/`, Chrome `side_panel`, Firefox `sidebar_action`): the Saved list (`SavedList`) of the tab's project or another, through the background (`{ type: 'hub' }` messages, allowed for the extension's own pages only), over either link.
+- **Pairing** looks the same everywhere: `ui/PairCard.tsx` on the settings page, in the popup and in the toolbar's VS Code panel.
 - **MAIN world** (`src/main-world/`): runs in the page's own JS world. It collects element details (framework components are only visible there) and hooks console, errors, `fetch` and XHR.
 
 **Rules:**

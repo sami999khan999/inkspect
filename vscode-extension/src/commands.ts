@@ -1,7 +1,9 @@
 import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
-import { sendContextItem, sendContextItems } from './agent/chat';
-import { contextTray } from './agent/contextTray';
+import { agentmuxNewTarget, HARNESS_LABELS } from '@inkspect/shared/targets';
+import { sendContextItem, sendContextItems, sendSaved } from './agent/chat';
+import { contextTray, type ContextItem } from './agent/contextTray';
+import { sendFlow } from './agent/sendFlow';
 import { getAgentTerminals } from './features/terminalSend';
 import { getConfig } from './config';
 import { BrowserPanel, type Services } from './panel/BrowserPanel';
@@ -170,9 +172,9 @@ export function registerCommands(services: Services): vscode.Disposable {
     // Not contributed to the command palette; used by integration tests and for debugging.
     vscode.commands.registerCommand(
       'vscodeBrowser.debug.copyElementAt',
-      (x: unknown, y: unknown) =>
+      (x: unknown, y: unknown, options?: { screenshot?: unknown }) =>
         typeof x === 'number' && typeof y === 'number'
-          ? BrowserPanel.active()?.copyElementAt(x, y)
+          ? BrowserPanel.active()?.copyElementAt(x, y, options?.screenshot === true)
           : undefined,
     ),
     vscode.commands.registerCommand('vscodeBrowser.debug.setAnnotations', (shapes: unknown) =>
@@ -181,6 +183,15 @@ export function registerCommands(services: Services): vscode.Disposable {
     vscode.commands.registerCommand('vscodeBrowser.debug.crashEngine', () =>
       services.engineHost.current?.simulateCrash(),
     ),
+    // The send dialog's choice, as if clicked (integration tests).
+    vscode.commands.registerCommand('vscodeBrowser.debug.savedAction', async (action: unknown) => {
+      const replies: unknown[] = [];
+      await sendFlow()?.handle(
+        { type: 'savedAction', ...(action as { offerId: string; action: 'send' }) },
+        (reply) => replies.push(reply),
+      );
+      return replies;
+    }),
     vscode.commands.registerCommand('vscodeBrowser.debug.state', () => ({
       engine: { ...services.engineHost.getState(), launches: services.engineHost.launches },
       bookmarks: services.bookmarks.list(),
@@ -192,6 +203,10 @@ export function registerCommands(services: Services): vscode.Disposable {
           ?.all()
           .map((item) => contextTray()!.view(item)) ?? [],
       agents: getAgentTerminals().targets(),
+      offer: sendFlow()?.lastOffer && {
+        ...sendFlow()!.lastOffer!,
+        images: sendFlow()!.lastOffer!.images.length,
+      },
     })),
     vscode.commands.registerCommand(
       'vscodeBrowser.nextTab',
@@ -246,6 +261,49 @@ export function registerCommands(services: Services): vscode.Disposable {
       if (sent) BrowserPanel.active()?.toast(`Sent ${what} to ${sent}`);
       return sent;
     }),
+    // agentmux: paste a saved capture into a thread of this project and show it.
+    vscode.commands.registerCommand('vscodeBrowser.openInAgentmux', async (itemId?: unknown) => {
+      const items = savedFor(itemId);
+      if (!items) return undefined;
+      const agents = getAgentTerminals();
+      await agents.refresh(true);
+      const panes = agents.sendTargets().filter((t) => t.kind === 'tmux');
+      if (!panes.length) {
+        void vscode.window.showInformationMessage('No agent runs in agentmux for this project.');
+        return undefined;
+      }
+      // One thread: that one. Several: ask, the default first.
+      const preferred = agents.defaultTarget('terminal');
+      const ordered = [...panes].sort(
+        (a, b) => Number(b.id === preferred) - Number(a.id === preferred),
+      );
+      const pane =
+        ordered.length === 1
+          ? ordered[0]
+          : (
+              await vscode.window.showQuickPick(
+                ordered.map((p) => ({ label: p.label, description: p.detail, target: p })),
+                { title: 'Open in agentmux', placeHolder: 'Which thread gets it?' },
+              )
+            )?.target;
+      return pane && sendSaved(items, pane.id, { open: true });
+    }),
+    vscode.commands.registerCommand('vscodeBrowser.newAgentmuxThread', async (itemId?: unknown) => {
+      const items = savedFor(itemId);
+      if (!items) return undefined;
+      const agents = getAgentTerminals();
+      await agents.refresh(true);
+      const harnesses = agents.harnesses();
+      if (!harnesses.length) {
+        void vscode.window.showInformationMessage('agentmux does not have this project open.');
+        return undefined;
+      }
+      const pick = await vscode.window.showQuickPick(
+        harnesses.map((harness) => ({ label: HARNESS_LABELS[harness], harness })),
+        { title: 'New agentmux thread', placeHolder: 'Which agent should it run?' },
+      );
+      return pick && sendSaved(items, agentmuxNewTarget(pick.harness));
+    }),
     vscode.commands.registerCommand('vscodeBrowser.chooseAgentTerminal', async () => {
       await getAgentTerminals().chooseTerminal();
     }),
@@ -289,4 +347,20 @@ export function registerCommands(services: Services): vscode.Disposable {
       ),
     ),
   );
+}
+
+/**
+ * The saved items a command acts on: the one with this id, else the latest capture, with the
+ * rest of its group. Undefined (and a message) when there is nothing.
+ */
+function savedFor(itemId: unknown): ContextItem[] | undefined {
+  const tray = contextTray();
+  const item = typeof itemId === 'string' ? tray?.get(itemId) : tray?.latest();
+  if (!item || !tray) {
+    void vscode.window.showInformationMessage(
+      'Nothing saved yet. Pick an element, take a screenshot or copy the console errors first.',
+    );
+    return undefined;
+  }
+  return item.group ? tray.inGroup(item.group) : [item];
 }

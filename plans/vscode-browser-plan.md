@@ -631,6 +631,30 @@ The browser, VS Code and agents in tmux (agentmux threads) meet in **projects** 
 - [x] The Agent Context view lists agentmux agents next to terminal agents and chat.
 - [ ] Not done yet: macOS and Windows for the hub (the WebSocket link is used there); Firefox's native host and sidebar untested (Firefox isn't installed on the development machine).
 
+## Phase 14: Saved, then sent (one flow for every capture)
+
+Whatever is captured is saved at once, then one centered dialog says where it goes; the Saved list shows one project at a time; agentmux is reachable from every entry point.
+
+**One send core**
+- [x] `@inkspect/shared/targets`: one target id grammar for everything (`tmux:<socket>:<pane>`, `vscode:<window>:<terminal:n|chat>`, local `terminal:n`/`chat`, `agentmux:new:<harness>`, `default`).
+- [x] `src/hub/router.ts`: every send (VS Code's and the browser's) resolves the default, pastes into agentmux panes, hands VS Code targets to their window, starts new agentmux threads, marks items sent and remembers the project's last target in `<project>/.inkspect/state.json` (shared by VS Code and the hub).
+- [x] `src/hub/agentmux.ts`: **Open in agentmux** (paste, then `agentmux show <session>` and focus the paired kitty or the agentmux window through `hyprctl`), **New agentmux thread** (`agentmux project <dir>`, `agentmux new-thread <harness>`, wait for its pane, paste). Offered only where agentmux has the project open. Commands `vscodeBrowser.openInAgentmux`, `vscodeBrowser.newAgentmuxThread`.
+- [x] `src/hub/core.ts` (HubCore): the browser's questions about projects and captures, answered the same by the hub daemon and by the VS Code window serving the WebSocket link (bridge `hub.request` / `hub.reply`; `welcome.features` says so). Bridge `send`, `send.result` and `windows` are gone, and with them `LinkService.runSend` and the window picker. The window relay carries each window's folders and agents, and runs sends for its own agents.
+
+**The send dialog** (`@inkspect/shared/ui/SendModal`, keys in the `send` scope)
+- [x] VS Code: the browser panel shows it after every capture (`saved` / `savedAction` messages, `src/agent/sendFlow.ts`); without a panel, a notification leads to a quick pick. Agents one click or number each (Shift: send and open in agentmux), Enter the default, New agentmux thread, Change project (moves the items), Copy, Reveal, Esc keeps it.
+- [x] The capture notifications' "Send to Agent / More…" buttons are gone (`offerActions`, `moreActions`).
+
+**The Saved list** (`@inkspect/shared/ui/SavedList`, `@inkspect/shared/saved`)
+- [x] The Agent Context view is "Saved" (ids unchanged): one project, with a project switcher (`ContextTray.setProject`, remembered per workspace), cards with Send, Send to…, Open in agentmux, Copy, Open, Remove, Undo.
+- [x] The Inbox: `$XDG_DATA_HOME/inkspect/inbox` on Linux (shared with the hub; the old global-storage inbox moves there), global storage elsewhere. A window's Saved project counts as its project (its agents get that project's captures).
+- [x] The hub suggests a page's project: site memory, dev server, the VS Code window focused last, the agentmux thread in the kitty beside VS Code, the last project, the busiest agentmux thread, the Inbox.
+
+**The picker** (both products)
+- [x] Click captures details, Alt+click captures an element screenshot (only that), Shift+click adds, Enter captures all; Ctrl/Ctrl+Shift+click sends removed. `PickerHint` on one line; `SelectionBar`: Capture, Screenshot, ×.
+
+- [ ] Not done yet: the send dialog shows at most 4 thumbnails, and can't leave out some of several captures (remove them from the Saved list instead); the hub's `hub.json` can be written by the daemon and a WebSocket-serving window at once (last writer wins).
+
 ---
 
 ## Milestones

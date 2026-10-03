@@ -43,6 +43,8 @@ try {
       XDG_STATE_HOME: join(root, 'out', 'e2e', 'xdg', 'state'),
       INKSPECT_HUB_DIR: join(root, 'out', 'e2e', 'hub'),
       INKSPECT_HUB_IDLE_MS: '5000',
+      // Never this machine's agentmux agents: tests send to their own terminals only.
+      INKSPECT_TMUX_SOCKETS: '',
       ...(chromium ? { VSCODE_BROWSER_CHROMIUM: chromium } : {}),
     },
     launchArgs: [

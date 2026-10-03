@@ -28,7 +28,7 @@ describe('Agent Context, kept in the project', () => {
   it("saves each capture in the project's .inkspect, with its image on disk", () => {
     const { tray: t, root } = tray();
     const item = t.add(shot('A'));
-    expect(item.file).toMatch(/\.inkspect\/items\/.+\/capture\.png$/);
+    expect(item.file).toMatch(/\.inkspect[\\/]items[\\/].+[\\/]capture\.png$/);
     expect(item.mimeType).toBe('image/png');
     expect(readItems(root).map((i) => i.title)).toEqual(['A']);
     // Another window (or VS Code next time) sees the same list.

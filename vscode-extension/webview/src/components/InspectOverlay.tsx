@@ -34,7 +34,6 @@ export function InspectOverlay({
         }}
         purpose={purpose}
         map={map}
-        altLabel="with screenshot"
         helpKey
       />
       {selection.length > 0 && (

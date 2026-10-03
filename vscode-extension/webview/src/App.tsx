@@ -23,8 +23,10 @@ import type {
   InternalPage,
   PageData,
   Rect,
+  SavedOffer,
   WindowState,
 } from '@shared/protocol';
+import { SendModal } from '@inkspect/shared/ui/SendModal';
 import { BookmarkBar } from './components/BookmarkBar';
 import { BookmarkEditor } from './components/BookmarkEditor';
 import { DevDrawer } from './components/DevDrawer';
@@ -204,7 +206,24 @@ export function App() {
     [],
   );
   // Re-render when the user changes a shortcut, so labels and tooltips show the new keys.
-  useShortcutMap();
+  const shortcutMap = useShortcutMap();
+  // The send dialog after a capture (see SendFlow on the host): its offer and thumbnails.
+  const [saved, setSaved] = useState<{
+    offer: SavedOffer;
+    images: string[];
+    status?: { tone: 'busy' | 'ok' | 'error'; text: string };
+  } | null>(null);
+  const closeSaved = useCallback((notify: boolean) => {
+    setSaved((current) => {
+      if (current) {
+        for (const url of current.images) URL.revokeObjectURL(url);
+        if (notify) {
+          postToHost({ type: 'savedAction', offerId: current.offer.id, action: 'close' });
+        }
+      }
+      return null;
+    });
+  }, []);
   const [findTabId, setFindTabId] = useState<string | null>(null);
   const [findFocus, setFindFocus] = useState(0);
   const [findResult, setFindResult] = useState<{
@@ -542,6 +561,27 @@ export function App() {
         case 'toast':
           showToast(message.message);
           break;
+        case 'saved': {
+          const images = message.offer.images.map((image) =>
+            URL.createObjectURL(
+              new Blob([image.data as Uint8Array<ArrayBuffer>], { type: image.mimeType }),
+            ),
+          );
+          setSaved((current) => {
+            for (const url of current?.images ?? []) URL.revokeObjectURL(url);
+            return { offer: message.offer, images };
+          });
+          break;
+        }
+        case 'savedStatus':
+          setSaved((current) =>
+            current?.offer.id === message.offerId
+              ? { ...current, status: { tone: message.tone, text: message.text } }
+              : current,
+          );
+          // Sent: the dialog shows it a moment, then closes.
+          if (message.close) setTimeout(() => closeSaved(false), 900);
+          break;
         case 'shortcuts':
           setShortcutOverrides(message.overrides);
           break;
@@ -581,7 +621,15 @@ export function App() {
       unsubscribe();
       window.removeEventListener('focus', onFocus);
     };
-  }, [openMenu, showToast, editActiveBookmark, toggleDeviceToolbar, changeTool, captureDrawing]);
+  }, [
+    openMenu,
+    showToast,
+    editActiveBookmark,
+    toggleDeviceToolbar,
+    changeTool,
+    captureDrawing,
+    closeSaved,
+  ]);
 
   // Chrome's inspect mode runs in the page while the element picker is on (per tab).
   const inspectTabId = tool?.kind === 'inspect' && activeTab ? activeTab.id : undefined;
@@ -1035,6 +1083,47 @@ export function App() {
           />
         )}
         {activeTab?.crashed && !activeTab.internalPage && <CrashedOverlay tabId={activeTab.id} />}
+        {saved && (
+          <SendModal
+            title={saved.offer.title}
+            images={saved.images}
+            project={saved.offer.project}
+            projects={saved.offer.projects}
+            onProject={(project) =>
+              postToHost({
+                type: 'savedAction',
+                offerId: saved.offer.id,
+                action: 'project',
+                project,
+              })
+            }
+            targets={saved.offer.targets}
+            defaultTarget={saved.offer.defaultTarget}
+            harnesses={saved.offer.harnesses}
+            onSend={(target, { open }) =>
+              postToHost({
+                type: 'savedAction',
+                offerId: saved.offer.id,
+                action: 'send',
+                target,
+                open,
+              })
+            }
+            onCopy={() =>
+              postToHost({ type: 'savedAction', offerId: saved.offer.id, action: 'copy' })
+            }
+            onDownload={() =>
+              postToHost({ type: 'savedAction', offerId: saved.offer.id, action: 'reveal' })
+            }
+            downloadLabel="Reveal"
+            status={saved.status}
+            map={shortcutMap}
+            onClose={() => {
+              closeSaved(true);
+              setViewportFocus((n) => n + 1);
+            }}
+          />
+        )}
         {activeTab?.dialog && (
           <DialogOverlay
             key={`${activeTab.id}:${activeTab.dialog.type}:${activeTab.dialog.message}`}

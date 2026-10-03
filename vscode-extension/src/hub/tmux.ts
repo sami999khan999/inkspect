@@ -1,6 +1,9 @@
 // tmux panes on the hub's configured sockets, with the session options agentmux sets
 // (`@project`, `@kind`, `@harness`). Node only. Parsing is pure and unit-tested.
 import { execFile } from 'node:child_process';
+import { TMUX_PANE, TMUX_SOCKET } from '@inkspect/shared/targets';
+
+export { TMUX_PANE, TMUX_SOCKET };
 
 export interface TmuxPane {
   /** The tmux server (`tmux -L <socket>`). */
@@ -21,11 +24,6 @@ export interface TmuxPane {
   activity: number;
   attached: boolean;
 }
-
-/** tmux socket names: plain names only (they become an argument). */
-export const TMUX_SOCKET = /^[\w.-]{1,64}$/;
-/** tmux pane ids. */
-export const TMUX_PANE = /^%\d{1,9}$/;
 
 export const PANE_FORMAT = [
   '#{session_name}',

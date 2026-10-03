@@ -6,6 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   linkSync,
   lstatSync,
@@ -250,6 +251,31 @@ export function removeItems(project: string, ids: readonly string[]): string[] {
     }
     // A rename keeps the folder's time: the trash counts from now (see emptyTrash).
     utimesSync(join(trash, id), now, now);
+    moved.push(id);
+  }
+  return moved;
+}
+
+/**
+ * Moves items to another project's store (a capture saved in the wrong project). Copied when
+ * the projects are on different disks. Returns the ids moved.
+ */
+export function moveItems(from: string, to: string, ids: readonly string[]): string[] {
+  if (!storeFolder(from, 'items')) return [];
+  ensureStore(to);
+  const target = storeFolder(to, 'items');
+  if (!target) return [];
+  const moved: string[] = [];
+  for (const id of ids) {
+    const dir = itemDir(from, id);
+    if (!dir || !existsSync(dir) || existsSync(join(target, id))) continue;
+    try {
+      renameSync(dir, join(target, id));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+      cpSync(dir, join(target, id), { recursive: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
     moved.push(id);
   }
   return moved;

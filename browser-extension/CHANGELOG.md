@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Saved, then sent: one flow for every capture
+
+- **Every capture is saved at once** into the page's project, without a question, then a **send dialog** opens in the middle of the page (the popup's buttons in the corner are gone): the project's agents, one click or number key each (agentmux threads, VS Code terminal agents, chat), **Enter** for the default, **Shift+number** (or the ↗ button) to send and open the thread in agentmux, **New agentmux thread** (where agentmux has the project open), **Change project** (moves the capture there, and the site's next captures too), **Copy** and **Download**. **Esc** keeps it saved without sending.
+- **The same with or without the browser helper:** over the WebSocket link, VS Code answers like the helper, so captures are saved into projects, and the side panel works, without it.
+- **The side panel is "Saved":** the project of the tab in front (it follows the tab), or another picked from the list (with the Inbox for captures without a project), with the same cards as VS Code's Saved view: groups with a thumbnail each, **Send**, **Send to…**, **Open in agentmux**, **Remove** and **Undo**. Projects where nothing runs keep their captures but can't send. The popup's button is **Saved**.
+- **The element picker, simpler:** a click captures the element's details; **Alt+click** a screenshot of it; Shift+click adds to a selection and Enter captures them all. Ctrl+click and Ctrl+Shift+click no longer send. One-line hint; the selection bar has Capture, Screenshot and ×.
+- **One pairing card** on the settings page, in the popup and in the toolbar's VS Code panel: the one-click way first, a code as the fallback, and what works without VS Code when the helper links the browser.
+- The console panel's "Send page context to VS Code" is gone: **Copy page context** saves it and opens the send dialog like any capture.
+
 ### Projects
 
 - **Links through the browser helper** that VS Code Browser installs: no pairing, and captures can be saved and sent even with VS Code closed. Without it, the WebSocket link works as before.

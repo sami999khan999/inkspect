@@ -1,7 +1,6 @@
 // Messages between the extension's parts. Content ↔ background use `chrome.runtime` messaging;
 // content ↔ page (MAIN world) use DOM events with JSON strings, so nothing depends on how each
 // browser shares objects between worlds.
-import type { CaptureKind, SendTarget, VsCodeWindow } from '@inkspect/shared/bridge';
 import type { CaptureToSave, Project } from '@inkspect/shared/hub';
 import type { DeviceSettings, NetworkPreset } from '@inkspect/shared/devices';
 
@@ -12,8 +11,16 @@ export interface BridgeStatus {
   /** VS Code window / workspace name when connected. */
   peer?: string;
   error?: string;
-  /** The open VS Code windows a send can go to, when connected. */
-  windows?: VsCodeWindow[];
+  /**
+   * Projects and their saved captures can be reached: through the browser helper, or a VS Code
+   * window that answers for them over the WebSocket link.
+   */
+  projects?: boolean;
+  /**
+   * What the answering side can do beyond the first version (the hub's `features`; VS Code over
+   * the WebSocket link runs the same code, so all of them).
+   */
+  features?: string[];
   /** How VS Code is reached: the browser helper (native messaging, no pairing) or the WebSocket. */
   via?: 'hub' | 'ws';
 }
@@ -32,7 +39,7 @@ export interface EmulationRequest {
   print: boolean;
 }
 
-export type { CaptureKind, SendTarget } from '@inkspect/shared/bridge';
+export type { CaptureKind } from '@inkspect/shared/bridge';
 
 export type ToBackground =
   | { type: 'capture' }
@@ -45,28 +52,12 @@ export type ToBackground =
   | { type: 'allowFraming'; url: string }
   | { type: 'endFraming' }
   | { type: 'bridgeStatus' }
-  | {
-      type: 'send';
-      target: SendTarget;
-      /** Text for chat, or the prompt that goes with an image. */
-      text?: string;
-      /** PNG data URL (screenshots). */
-      image?: string;
-      label?: string;
-      pageUrl?: string;
-      /** The VS Code window to send to; the one used last if unset. */
-      window?: string;
-      /** The capture it comes from (sends of one capture share one Agent Context item). */
-      capture?: string;
-      kind?: CaptureKind;
-      /** Captures made together: one group in Agent Context. */
-      group?: string;
-      /** Captures already shared as context, sent together in one send. */
-      captures?: string[];
-    }
   | { type: 'openOptions' }
   | { type: 'pair'; code: string }
-  /** The projects the browser helper knows, and the one `url`'s captures most likely go to. */
+  /**
+   * The projects (from the browser helper, or VS Code over the link), and the one `url`'s
+   * captures most likely go to.
+   */
   | { type: 'projects'; url?: string }
   /** Saves captures into a project's `.inkspect/` (through the browser helper). */
   | {
@@ -76,7 +67,11 @@ export type ToBackground =
       captures: CaptureToSave[];
       /** Also send them: a target id, or 'default' for the project's default target. */
       send?: string;
-    };
+    }
+  /** Sends saved captures of a project (`open`: also show the agentmux thread). */
+  | { type: 'sendSaved'; project: string; ids: string[]; target: string; open?: boolean }
+  /** Moves saved captures to another project. */
+  | { type: 'moveSaved'; project: string; to: string; ids: string[] };
 
 export type BackgroundReply =
   | {

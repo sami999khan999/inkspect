@@ -92,6 +92,8 @@ export function useShortcutDispatch(
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229 || MODIFIER_KEYS.has(event.key)) return;
+      // The send dialog takes its own keys (see SendModal).
+      if (event.target instanceof Element && event.target.closest('.ink-modal')) return;
       const chord = chordFromEvent(event);
       const plain = !chord.ctrl && !chord.alt && !chord.meta && !/^f\d+$/.test(chord.key);
       const typing = isTyping(event.target);

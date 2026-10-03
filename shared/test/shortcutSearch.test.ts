@@ -71,10 +71,10 @@ describe('default keys', () => {
   it('match the key press, whatever order their modifiers are written in', () => {
     const map = effectiveShortcuts({}, false);
     const press = (key: string, mods: Partial<KeyChord>) =>
-      actionForChord(map, ['capture', 'devtools', 'overlay'], chord(key, mods))?.id;
-    expect(press('c', { alt: true, shift: true })).toBe('capture.chat');
+      actionForChord(map, ['send', 'devtools', 'global'], chord(key, mods))?.id;
+    expect(press('e', { alt: true, shift: true })).toBe('mode.inspect');
     expect(press('p', { alt: true, shift: true })).toBe('dev.contextAgent');
-    expect(press('s', { alt: true, shift: true })).toBe('capture.save');
+    expect(press('enter', {})).toBe('send.default');
   });
 });
 

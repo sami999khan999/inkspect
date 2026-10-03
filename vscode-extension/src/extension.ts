@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { initAgentSend } from './agent/chat';
 import { BrowserAgent } from './agent/BrowserAgent';
 import { initContextTray } from './agent/contextTray';
+import { initSendFlow } from './agent/sendFlow';
 import { registerLanguageModelTools } from './agent/languageModelTools';
 import { McpHttpServer, registerMcpCommands } from './agent/mcpServer';
 import { BridgeServer } from './bridge/bridgeServer';
@@ -48,8 +48,13 @@ export function activate(context: vscode.ExtensionContext): void {
   const agent = new BrowserAgent(services);
   const mcp = new McpHttpServer(context, agent, logger);
   void mcp.sync();
-  initAgentSend(context.globalStorageUri.fsPath);
-  const tray = initContextTray(context.globalStorageUri.fsPath);
+  const tray = initContextTray(context.globalStorageUri.fsPath, context.workspaceState);
+  // After each capture: the send dialog in the browser panel (or a notification).
+  const flow = initSendFlow(
+    tray,
+    (offer) => BrowserPanel.active()?.offerSaved(offer) ?? false,
+    logger,
+  );
   const agentTerminals = initAgentTerminals(logger);
   const contextView = new ContextViewProvider(context.extensionUri, tray, agentTerminals);
   const bridge = new BridgeServer(context, bookmarks, logger);
@@ -130,6 +135,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     registerSidebar(services, bridge),
     tray,
+    flow,
     agentTerminals,
     contextView,
     vscode.window.registerWebviewViewProvider(CONTEXT_VIEW_ID, contextView, {

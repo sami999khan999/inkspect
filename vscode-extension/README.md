@@ -49,13 +49,14 @@ Pages are rendered by a real Chromium (Chrome for Testing, downloaded once on fi
   - the React, Vue, Svelte or Angular component and its source file
   - trimmed HTML
 
-  | Action      | Result                                                                |
-  | ----------- | --------------------------------------------------------------------- |
-  | Click       | Copies the details as Markdown (or JSON, selector only or HTML only). |
-  | Ctrl+click  | Sends the details to the chat.                                        |
-  | Shift+click | Builds a multi-selection.                                             |
-  | Alt+click   | Also saves an element screenshot.                                     |
-  | ↑ / ↓       | Moves to the parent or child element.                                 |
+  | Action      | Result                                                                          |
+  | ----------- | ------------------------------------------------------------------------------- |
+  | Click       | Captures the details: copied as Markdown (or JSON, selector only or HTML only). |
+  | Alt+click   | Captures a screenshot of the element instead.                                   |
+  | Shift+click | Adds the element to a selection; **Enter** captures them all.                   |
+  | ↑ / ↓       | Moves to the parent or child element.                                           |
+
+  Every capture is saved in the project's **Saved** list, then a dialog asks where to send it: each agent of the project (agentmux threads, terminal agents, chat) is one click or a number key away, Enter picks the default, and Esc keeps it saved without sending.
 
 - **Drawing** (D):
   - Pens, pencil, marker, brush, highlighter and neon.
@@ -64,12 +65,14 @@ Pages are rendered by a real Chromium (Chrome for Testing, downloaded once on fi
   - Colors, widths and dash styles.
   - Drawings stay anchored while you scroll.
   - **Screenshot drawing area** captures only the part of the page around your drawing, with the drawing on it. You can also capture each drawing group separately, or the whole viewport or page with the drawings.
-- **Screenshots:** viewport, full page (including very tall pages), a region you drag, or an element. Each is saved to `.vscode-browser/screenshots` and its path is copied, ready to paste into an agent. The notification can send the image to the chat.
+- **Screenshots:** viewport, full page (including very tall pages), a region you drag, or an element. Each is copied, saved in the project's **Saved** list (`.inkspect/`), and offered in the send dialog.
 - **Console and network drawer:**
   - Console messages with levels and filters, and clickable sources that open workspace files.
   - A request list with failed requests highlighted.
   - **Copy errors**, **Copy failed requests** and **Copy page context**, formatted for an agent.
 - **Chrome DevTools** (F12) opens beside the browser.
+- **The Saved view** (Browser sidebar): one project's captures (the workspace folder, another project, or the Inbox without one), the same ones the browser extension saves there. Each has **Send** (to the project's default agent), **Send to…**, **Open in agentmux** (paste into the thread without Enter, then show it), **Copy**, **Open** and **Remove**, with Undo. Captures taken together stay together as one group.
+- **agentmux:** agents running in agentmux threads (tmux) are send targets wherever VS Code sends: the send dialog, the Saved view, **Send last screenshot to agent**, **Send latest** and every mode's "send to agent". **Browser: New agentmux Thread** starts one for the project and pastes the capture.
 - **Agent tools in VS Code chat:**
 
   | Tool                     | What it does                      |

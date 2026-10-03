@@ -1,4 +1,4 @@
-/* The side panel. Components and tokens come from @inkspect/shared/ui. */
+/* The side panel. The Saved list (SavedList), components and tokens come from @inkspect/shared/ui. */
 
 * {
   box-sizing: border-box;
@@ -7,7 +7,7 @@
 html,
 body {
   margin: 0;
-  background: var(--vscode-editor-background);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
   color: var(--vscode-foreground);
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
@@ -17,14 +17,14 @@ body {
 .sp {
   display: flex;
   flex-direction: column;
-  gap: var(--ink-space-2);
-  padding: var(--ink-space-3);
+  min-height: 100vh;
 }
 
 .sp-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: var(--ink-space-2) var(--ink-space-3) 0;
 }
 
 .sp-title {
@@ -33,64 +33,25 @@ body {
 }
 
 .sp-empty,
-.sp-target,
-.sp-item-meta,
-.sp-project-detail {
+.sp-target {
   color: var(--ink-muted);
 }
 
 .sp-empty {
-  padding: var(--ink-space-2) 0;
+  padding: var(--ink-space-2) var(--ink-space-3);
 }
 
+/* The project shown (the page's own, or one picked), and its pin. */
 .sp-project {
-  border: 1px solid var(--ink-border-subtle);
-  border-radius: var(--ink-radius);
-  background: var(--ink-surface);
-}
-
-.sp-project-head {
   display: flex;
-  align-items: center;
-  gap: var(--ink-space-1);
-  padding-right: var(--ink-space-1);
-}
-
-.sp-project-toggle {
-  display: flex;
-  flex: 1;
   align-items: center;
   gap: var(--ink-space-2);
+  padding: var(--ink-space-2) var(--ink-space-3) 0;
+}
+
+.sp-project-select {
+  flex: 1;
   min-width: 0;
-  min-height: var(--ink-control-lg);
-  padding: 0 var(--ink-space-2);
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.sp-project-toggle:hover {
-  background: var(--ink-hover);
-}
-
-.sp-project-toggle:focus-visible {
-  outline: 1px solid var(--ink-focus);
-  outline-offset: -1px;
-}
-
-.sp-project-name {
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.sp-project-detail {
-  overflow: hidden;
-  font-size: var(--ink-font-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .sp-dot {
@@ -105,18 +66,9 @@ body {
   background: var(--ink-success);
 }
 
-.sp-project-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ink-space-2);
-  padding: 0 var(--ink-space-2) var(--ink-space-2);
-}
-
-.sp-target {
-  font-size: var(--ink-font-sm);
-}
-
+.sp-target,
 .sp-note {
+  padding: var(--ink-space-1) var(--ink-space-3) 0;
   font-size: var(--ink-font-sm);
 }
 
@@ -128,85 +80,9 @@ body {
   color: var(--ink-danger);
 }
 
-.sp-items {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ink-space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.sp-item {
-  display: flex;
-  gap: var(--ink-space-2);
-  padding: var(--ink-space-2);
-  border-radius: var(--ink-radius-sm);
-  background: var(--ink-surface-sunken);
-}
-
-.sp-thumbs {
-  display: grid;
-  flex: none;
-  grid-template-columns: repeat(2, 32px);
-  grid-auto-rows: 32px;
-  gap: 2px;
-  align-content: start;
-}
-
-.sp-thumbs:has(> :only-child) {
-  grid-template-columns: 64px;
-  grid-auto-rows: 48px;
-}
-
-.sp-thumb {
-  width: 100%;
-  height: 100%;
-  border-radius: var(--ink-radius-sm);
-  background: var(--ink-surface-raised);
-  object-fit: cover;
-}
-
-.sp-thumb-icon {
-  display: grid;
-  place-items: center;
-  font-size: 16px;
-}
-
-.sp-item-body {
-  display: flex;
+/* The list fills the rest of the panel (its footer sticks to the bottom). */
+.sp .saved {
   flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.sp-item-title {
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sp-item-preview {
-  display: -webkit-box;
-  overflow: hidden;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: var(--ink-font-xs);
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
-.sp-item-meta {
-  font-size: var(--ink-font-xs);
-}
-
-.sp-item-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--ink-space-1);
-  margin-top: var(--ink-space-1);
 }
 
 @media (forced-colors: active) {

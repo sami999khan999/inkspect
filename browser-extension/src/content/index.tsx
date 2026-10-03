@@ -7,6 +7,7 @@ import { trackPressesIn } from '@inkspect/shared/ui/popover';
 import { fillActiveSearch } from '@inkspect/shared/ui/ShortcutSearch';
 import type { ToContent } from '../messages';
 import { App } from './App';
+import pairCardCss from '../ui/pair-card.css';
 import toolbarCss from './toolbar.css';
 
 type InkspectWindow = Window & { __inkspect?: boolean };
@@ -36,9 +37,12 @@ function mount(): (signal: number) => void {
   trackPressesIn(shadow);
   const style = document.createElement('style');
   // `@font-face` inside the shadow root would be ignored; the font is added to the document.
-  style.textContent = [codiconCss.replace(/@font-face\s*{[^}]*}/g, ''), sharedCss, toolbarCss].join(
-    '\n',
-  );
+  style.textContent = [
+    codiconCss.replace(/@font-face\s*{[^}]*}/g, ''),
+    sharedCss,
+    pairCardCss,
+    toolbarCss,
+  ].join('\n');
   const container = document.createElement('div');
   shadow.append(style, container);
   document.documentElement.appendChild(host);

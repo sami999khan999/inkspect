@@ -23,10 +23,14 @@ describe('WindowRelay', () => {
         const relay = new WindowRelay<string>(
           dir,
           name,
-          () => `Window ${name.toUpperCase()}`,
+          () => ({
+            name: `Window ${name.toUpperCase()}`,
+            folders: [`/p/${name}`],
+            targets: [{ id: 'terminal:1', kind: 'terminal', label: 'Codex', detail: 'terminal' }],
+          }),
           async (message): Promise<RelayResult> => {
             ran[name]!.push(message);
-            return { ok: true, path: `${name}:${message}` };
+            return { ok: true, sentTo: `${name}:${message}` };
           },
           FAST,
         );
@@ -43,7 +47,7 @@ describe('WindowRelay', () => {
     return () => clearInterval(timer);
   }
 
-  it('lists the open windows, the one used last first', async () => {
+  it('lists the open windows, the one used last first, with their folders and agents', async () => {
     const { a, b, c } = windows();
     b.markFocused();
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -53,57 +57,45 @@ describe('WindowRelay', () => {
       ['b', 'Window B'],
       ['a', 'Window A'],
     ]);
+    expect(a.windows()[0]).toMatchObject({
+      folders: ['/p/c'],
+      targets: [{ id: 'terminal:1', label: 'Codex' }],
+    });
     c.leave();
     expect(a.windows().map((w) => w.id)).toEqual(['b', 'a']);
   });
 
-  it('runs a send here when this window was used last', async () => {
+  it('runs a send for this window here', async () => {
     const { a, ran } = windows();
-    a.markFocused();
-    expect(await a.dispatch('shot')).toEqual({ ok: true, path: 'a:shot' });
+    expect(await a.dispatch('shot', 'a')).toEqual({ ok: true, sentTo: 'a:shot' });
     expect(ran.a).toEqual(['shot']);
   });
 
-  it('hands a send to the window used last, and returns its result', async () => {
+  it('hands a send to the window it is for, and returns its result', async () => {
     const { a, b, ran, dir } = windows();
-    b.markFocused();
     const stop = watch(b);
-    const result = await a.dispatch('shot');
+    const result = await a.dispatch('shot', 'b');
     stop();
-    expect(result).toEqual({ ok: true, path: 'b:shot' });
+    expect(result).toEqual({ ok: true, sentTo: 'b:shot' });
     expect(ran.a).toEqual([]);
     expect(ran.b).toEqual(['shot']);
     // Nothing is left behind but the windows' announcements.
     expect(readdirSync(dir).filter((f) => !f.endsWith('.window'))).toEqual([]);
   });
 
-  it('sends to the window the user picked, even if another was used last', async () => {
+  it('fails a send for a window that closed, or never takes it (it hangs)', async () => {
     const { a, b, c, ran } = windows();
-    b.markFocused();
-    const stop = watch(c);
-    expect(await a.dispatch('picked', 'c')).toEqual({ ok: true, path: 'c:picked' });
-    stop();
-    expect(ran.b).toEqual([]);
-    expect(ran.c).toEqual(['picked']);
-  });
-
-  it('falls back to the window used last when the picked one has closed', async () => {
-    const { a, b, c, ran } = windows();
-    b.markFocused();
     c.leave();
-    const stop = watch(b);
-    expect(await a.dispatch('late', 'c')).toEqual({ ok: true, path: 'b:late' });
-    stop();
-    expect(ran.b).toEqual(['late']);
-  });
-
-  it('runs the send itself when the chosen window never takes it (it hangs)', async () => {
-    const { a, b, ran } = windows();
-    b.markFocused();
-    expect(await a.dispatch('orphan')).toEqual({ ok: true, path: 'a:orphan' });
-    expect(ran.a).toEqual(['orphan']);
-    // Too late for the other window: the request is gone.
+    expect(await a.dispatch('late', 'c')).toEqual({
+      ok: false,
+      error: 'That VS Code window is closed.',
+    });
+    expect(await a.dispatch('orphan', 'b')).toEqual({
+      ok: false,
+      error: 'That VS Code window did not answer.',
+    });
+    // Too late for the other window: the request is gone; nothing ran anywhere.
     await b.poll();
-    expect(ran.b).toEqual([]);
+    expect([...ran.a!, ...ran.b!, ...ran.c!]).toEqual([]);
   });
 });

@@ -8,7 +8,7 @@ import {
   type ProcessInfo,
 } from '../agent/agentDetect';
 import { listProcesses } from '../agent/processes';
-import { bracketedPaste, shellPath, typedLine } from '../agent/sendParts';
+import { bracketedPaste, typedLine } from '../agent/sendParts';
 import { errorMessage } from '../browser/logger';
 import {
   chooseDefault,
@@ -18,7 +18,12 @@ import {
   readKittyPairs,
   type PaneTarget,
 } from '../hub/agents';
-import { listPanes } from '../hub/tmux';
+import { availableHarnesses } from '../hub/agentmux';
+import { readProjectState, writeLastTarget } from '../hub/projectState';
+import { agentPanes, listPanes } from '../hub/tmux';
+import { currentProject, globalTarget, localTarget } from '../agent/projects';
+import type { HubTarget } from '@inkspect/shared/hub';
+import { agentmuxNewTarget, HARNESS_LABELS, type Harness } from '@inkspect/shared/targets';
 import { getConfig } from '../config';
 import type { AgentTarget } from '../shared/agentContext';
 
@@ -48,17 +53,14 @@ export class AgentTerminals implements vscode.Disposable {
   private scanning?: Promise<void>;
   private scanTimer?: ReturnType<typeof setTimeout>;
   private lastScan = 0;
-  /** The agent terminal used last, preferred for sends. */
+  /** The agent terminal used last, listed first. */
   private preferred?: vscode.Terminal;
-  private preferChat = false;
-  /** Agents in agentmux threads (tmux panes) of this workspace's folders, at the last scan. */
+  /** Agents in agentmux threads (tmux panes) of the current project, at the last scan. */
   private panes: PaneTarget[] = [];
   /** The pane agent in the kitty beside this window (see kitty-pair), if any. */
   private pairedPane?: string;
-  /** A pane agent picked as the default (or used last). */
-  private chosenPane?: string;
-  /** The preferred terminal was picked or used by the user (not only the first one found). */
-  private chosenTerminal = false;
+  /** agentmux has the current project open (it can start new threads there). */
+  private agentmuxOpen = false;
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(private readonly logger?: vscode.LogOutputChannel) {
@@ -73,10 +75,7 @@ export class AgentTerminals implements vscode.Disposable {
         this.started.delete(terminal);
         this.marked.delete(terminal);
         this.scanned.delete(terminal);
-        if (this.preferred === terminal) {
-          this.preferred = undefined;
-          this.chosenTerminal = false;
-        }
+        if (this.preferred === terminal) this.preferred = undefined;
         this.onDidChangeEmitter.fire();
       }),
       vscode.window.onDidChangeActiveTerminal((terminal) => {
@@ -103,7 +102,7 @@ export class AgentTerminals implements vscode.Disposable {
     this.scanSoon(0);
   }
 
-  /** A stable id for a terminal, used by the Agent Context view. */
+  /** A stable id for a terminal, used by the Saved view. */
   idOf(terminal: vscode.Terminal): string {
     let id = this.ids.get(terminal);
     if (!id) {
@@ -155,23 +154,28 @@ export class AgentTerminals implements vscode.Disposable {
     ];
   }
 
+  /** Every target with what reaching it takes (agentmux panes keep their tmux details). */
+  sendTargets(): HubTarget[] {
+    return [...this.panes, ...this.targets().filter((t) => t.kind !== 'tmux')];
+  }
+
   /**
-   * Where sends go unless one is chosen: the agent picked or used last; else the one in the kitty
-   * beside this window, the terminal agent used last, the agentmux agent used most recently; else
-   * chat if it was chosen.
+   * Where Send goes unless a target is picked: the one the project sent to last (shared with the
+   * browser, see projectState.ts); else the agent in the kitty beside this window, a terminal
+   * agent, the agentmux agent used most recently; else chat. `vscodeBrowser.agent.sendTarget`
+   * "chat" prefers chat when nothing was used yet.
    */
   defaultTarget(fallback: 'terminal' | 'chat'): string | undefined {
-    if (this.preferChat || (fallback === 'chat' && !this.preferred && !this.panes.length)) {
-      return CHAT_TARGET;
-    }
+    const project = currentProject();
+    const remembered = project ? readProjectState(project).lastTarget : undefined;
+    const last = remembered ? localTarget(remembered) : undefined;
+    const targets = this.sendTargets();
+    if (!targets.some((t) => t.id === last) && fallback === 'chat') return CHAT_TARGET;
     const first = this.agents()[0];
-    const terminal = first ? this.idOf(first.terminal) : undefined;
-    // Only a real choice beats the agent beside this window (kitty-pair).
-    const explicit = this.chosenPane ?? (this.chosenTerminal ? terminal : undefined);
-    return chooseDefault([...this.panes, ...this.targets().filter((t) => t.kind === 'terminal')], {
-      last: explicit,
+    return chooseDefault(targets, {
+      last,
       paired: this.pairedPane,
-      preferredTerminal: terminal,
+      preferredTerminal: first ? this.idOf(first.terminal) : undefined,
     });
   }
 
@@ -180,29 +184,24 @@ export class AgentTerminals implements vscode.Disposable {
     return this.panes.find((p) => p.id === id);
   }
 
-  /** Makes a target the default for sends. */
+  /** Agents a new agentmux thread can run in the current project (none without agentmux). */
+  harnesses(): Harness[] {
+    return this.agentmuxOpen ? availableHarnesses() : [];
+  }
+
+  /** Makes a target the default for sends (for the browser too: the project remembers it). */
   setDefault(target: string): void {
-    if (target === CHAT_TARGET) {
-      this.preferChat = true;
-      this.onDidChangeEmitter.fire();
-      return;
+    const project = currentProject();
+    if (!project) return;
+    try {
+      writeLastTarget(project, globalTarget(target));
+    } catch (error) {
+      this.logger?.warn(`Could not remember the default agent: ${errorMessage(error)}`);
     }
-    if (this.paneById(target)) {
-      this.preferChat = false;
-      if (this.chosenPane === target) return;
-      this.chosenPane = target;
-      this.chosenTerminal = false;
-      this.onDidChangeEmitter.fire();
-      return;
-    }
-    const terminal = this.terminalById(target);
-    if (terminal) this.setPreferred(terminal);
+    this.onDidChangeEmitter.fire();
   }
 
   private setPreferred(terminal: vscode.Terminal): void {
-    this.preferChat = false;
-    this.chosenPane = undefined;
-    this.chosenTerminal = true;
     if (this.preferred === terminal) return;
     this.preferred = terminal;
     this.onDidChangeEmitter.fire();
@@ -260,24 +259,25 @@ export class AgentTerminals implements vscode.Disposable {
     if (changed) this.onDidChangeEmitter.fire();
   }
 
-  /** Agents in agentmux threads of this workspace's folders. Returns whether they changed. */
+  /** Agents in agentmux threads of the current project. Returns whether they changed. */
   private async scanPanes(sockets: string[], processes: ProcessInfo[]): Promise<boolean> {
-    const folders = new Set(
-      (vscode.workspace.workspaceFolders ?? []).flatMap((folder) => {
-        if (folder.uri.scheme !== 'file') return [];
-        try {
-          return [realpathSync(folder.uri.fsPath)];
-        } catch {
-          return [folder.uri.fsPath];
-        }
-      }),
-    );
+    const project = currentProject();
+    const folders = new Set<string>();
+    if (project) {
+      folders.add(project);
+      try {
+        folders.add(realpathSync(project));
+      } catch {
+        // Gone: no agents there.
+      }
+    }
     let panes: PaneTarget[] = [];
     let paired: string | undefined;
+    let agentmuxOpen = false;
     if (sockets.length && folders.size) {
-      panes = paneTargets(await listPanes(sockets), processes).filter((p) =>
-        folders.has(p.project),
-      );
+      const all = await listPanes(sockets);
+      agentmuxOpen = agentPanes(all).some((p) => folders.has(p.project!));
+      panes = paneTargets(all, processes).filter((p) => folders.has(p.project));
       const pairs = readKittyPairs(process.env.XDG_RUNTIME_DIR).filter((p) =>
         folders.has(p.folder),
       );
@@ -288,11 +288,15 @@ export class AgentTerminals implements vscode.Disposable {
         }
       }
     }
-    const before = JSON.stringify([this.panes.map((p) => [p.id, p.label]), this.pairedPane]);
+    const before = JSON.stringify([
+      this.panes.map((p) => [p.id, p.label]),
+      this.pairedPane,
+      this.agentmuxOpen,
+    ]);
     this.panes = panes;
     this.pairedPane = paired;
-    if (this.chosenPane && !this.paneById(this.chosenPane)) this.chosenPane = undefined;
-    return JSON.stringify([panes.map((p) => [p.id, p.label]), paired]) !== before;
+    this.agentmuxOpen = agentmuxOpen;
+    return JSON.stringify([panes.map((p) => [p.id, p.label]), paired, agentmuxOpen]) !== before;
   }
 
   /**
@@ -317,7 +321,7 @@ export class AgentTerminals implements vscode.Disposable {
     if (pick.start) return this.startAgent();
     this.marked.add(pick.terminal!);
     this.setPreferred(pick.terminal!);
-    this.onDidChangeEmitter.fire();
+    this.setDefault(this.idOf(pick.terminal!));
     return pick.terminal;
   }
 
@@ -352,32 +356,37 @@ export function getAgentTerminals(): AgentTerminals {
 }
 
 /**
- * The agent terminal a send goes to: `targetId`, else the default agent. With no agent running,
- * asks which terminal runs one (or offers to start one). Undefined if the user dismissed it.
+ * No agent to send to: asks the user to start one (in a VS Code terminal, or a new agentmux
+ * thread where agentmux has the project open) or to pick the terminal one runs in. Returns the
+ * target to send to, or undefined if dismissed.
  */
-export async function resolveAgentTerminal(
-  targetId?: string,
-): Promise<{ terminal: vscode.Terminal; agent: AgentCli } | undefined> {
+export async function askForAgent(): Promise<string | undefined> {
   const agents = getAgentTerminals();
-  await agents.refresh();
-  let terminal = targetId ? agents.terminalById(targetId) : undefined;
-  terminal ??= agents.agents()[0]?.terminal;
-  if (!terminal) {
-    const choice = await vscode.window.showWarningMessage(
-      'No AI agent is running in a terminal. Start one (Claude Code, Codex, Gemini CLI...), or pick the terminal it runs in.',
-      'Start Agent',
-      'Pick Terminal...',
-    );
-    if (choice === 'Start Agent') {
-      terminal = agents.startAgent(getConfig().agentCommand);
-      // Give the CLI a moment to draw its input before typing into it.
-      await new Promise((resolve) => setTimeout(resolve, 4_000));
-    } else if (choice === 'Pick Terminal...') {
-      terminal = await agents.chooseTerminal();
-    }
-    if (!terminal) return undefined;
+  const harnesses = agents.harnesses();
+  const choice = await vscode.window.showWarningMessage(
+    'No AI agent is running for this project. Start one, or pick the terminal it runs in.',
+    'Start Agent',
+    'Pick Terminal...',
+    ...(harnesses.length ? ['New agentmux Thread...'] : []),
+  );
+  if (choice === 'Start Agent') {
+    const terminal = agents.startAgent(getConfig().agentCommand);
+    // Give the CLI a moment to draw its input before typing into it.
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+    return agents.idOf(terminal);
   }
-  return { terminal, agent: agents.agentFor(terminal) ?? { id: 'custom', label: terminal.name } };
+  if (choice === 'Pick Terminal...') {
+    const terminal = await agents.chooseTerminal();
+    return terminal && agents.idOf(terminal);
+  }
+  if (choice === 'New agentmux Thread...') {
+    const pick = await vscode.window.showQuickPick(
+      harnesses.map((harness) => ({ label: HARNESS_LABELS[harness], harness })),
+      { title: 'New agentmux thread', placeHolder: 'Which agent should it run?' },
+    );
+    return pick && agentmuxNewTarget(pick.harness);
+  }
+  return undefined;
 }
 
 /** Whether an agent's input takes bracketed pastes (every known agent CLI does; plain shells may not). */
@@ -402,20 +411,4 @@ export function pasteIntoTerminal(
     terminal.sendText(`${typedLine(parts)} `, false);
   }
   vscode.window.setStatusBarMessage(`$(check) Sent to ${agent.label}`, 4_000);
-}
-
-/** Types text into the agent's terminal (see resolveAgentTerminal). Returns the agent's name. */
-export async function sendTextToTerminal(
-  text: string,
-  targetId?: string,
-): Promise<string | undefined> {
-  const found = await resolveAgentTerminal(targetId);
-  if (!found) return undefined;
-  pasteIntoTerminal(found.terminal, found.agent, [text]);
-  return found.agent.label;
-}
-
-/** Types a file path (an image, a context file) into the agent's terminal. */
-export async function sendPathToTerminal(path: string): Promise<boolean> {
-  return (await sendTextToTerminal(shellPath(path))) !== undefined;
 }

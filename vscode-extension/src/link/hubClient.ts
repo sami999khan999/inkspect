@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-import { realpathSync } from 'node:fs';
 import type { Socket } from 'node:net';
 import * as vscode from 'vscode';
 import { encode, parseClientMessage, type ServerMessage } from '@inkspect/shared/bridge';
@@ -12,8 +10,9 @@ import {
   type HubToVsCode,
   type VsCodeToHub,
 } from '@inkspect/shared/hub';
-import { sendContextItems } from '../agent/chat';
+import { deliverLocal, savedItems } from '../agent/chat';
 import { contextTray } from '../agent/contextTray';
+import { WINDOW_ID, windowInfo } from '../agent/projects';
 import { errorMessage } from '../browser/logger';
 import { getConfig } from '../config';
 import { frame, FrameDecoder } from '../hub/framing';
@@ -21,20 +20,10 @@ import { fileHash, installHub, uninstallHub, type InstallResult } from '../hub/i
 import { hubPaths } from '../hub/paths';
 import { connectToHub } from '../hub/shim';
 import { getAgentTerminals } from '../features/terminalSend';
-import {
-  isLinkedMessage,
-  type LinkPeer,
-  type LinkService,
-  type SendMessage,
-  type SendResult,
-} from './linkService';
+import { isLinkedMessage, type LinkPeer, type LinkService } from './linkService';
 
-/** What the hub client needs from the WebSocket link's window bookkeeping. */
+/** What the hub client tells the WebSocket link's bookkeeping. */
 export interface LinkWindows {
-  /** The open VS Code windows, for the browser's window picker. */
-  windowsMessage(): ServerMessage;
-  /** Runs a send in the window it names (or the one used last). */
-  dispatchSend(message: SendMessage): Promise<SendResult>;
   /** Browsers linked through the hub, for the status bar and side panel. */
   setHubBrowsers(names: string[]): void;
 }
@@ -51,7 +40,7 @@ export function hubSupported(): boolean {
  */
 export class HubClient implements vscode.Disposable {
   private socket?: Socket;
-  private readonly windowId = randomUUID().slice(0, 12);
+  private readonly windowId = WINDOW_ID;
   private leader = false;
   /** Browsers served while this window leads, by the hub's connection id. */
   private readonly peers = new Map<string, LinkPeer>();
@@ -64,6 +53,8 @@ export class HubClient implements vscode.Disposable {
   private replacedOld = false;
   private installed?: InstallResult;
   private focusedAt = Date.now();
+  /** The window message sent last (a new connection sends it again). */
+  private lastWindow = '';
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -80,9 +71,12 @@ export class HubClient implements vscode.Disposable {
       }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.sendWindow()),
     );
-    // The agents in this window's terminals are targets the browser can send to.
+    // The agents in this window's terminals are targets the browser can send to; the project
+    // its Saved list shows is its project too.
     const agents = getAgentTerminals();
     if (agents) this.disposables.push(agents.onDidChange(() => this.sendWindow()));
+    const tray = contextTray();
+    if (tray) this.disposables.push(tray.onDidChange(() => this.sendWindow()));
   }
 
   /** Registers the hub with the browsers and connects, if the setting allows it. */
@@ -192,6 +186,7 @@ export class HubClient implements vscode.Disposable {
       this.scheduleRetry();
     });
     this.post({ type: 'auth', token: hub.token, role: 'vscode' });
+    this.lastWindow = '';
     this.sendWindow();
   }
 
@@ -208,35 +203,18 @@ export class HubClient implements vscode.Disposable {
     if (this.socket && !this.socket.destroyed) this.socket.write(frame(encodeHub(message)));
   }
 
-  /** Tells the hub this window's name, folders and focus. */
+  /** Tells the hub this window's name, folders, agents and focus (when they change). */
   private sendWindow(): void {
-    const folders = (vscode.workspace.workspaceFolders ?? []).flatMap((folder) => {
-      if (folder.uri.scheme !== 'file') return [];
-      try {
-        return [realpathSync(folder.uri.fsPath)];
-      } catch {
-        return [];
-      }
-    });
-    // Its terminal agents and chat; agentmux agents are the hub's own targets.
-    const targets = (getAgentTerminals()?.targets() ?? [])
-      .filter((t) => t.kind !== 'tmux')
-      .slice(0, 50)
-      // Within the protocol's limits (a terminal can have a very long name).
-      .map((t) => ({
-        id: t.id,
-        kind: t.kind,
-        label: t.label.slice(0, 100),
-        detail: (t.kind === 'chat' ? 'VS Code chat' : `VS Code ${t.detail}`).slice(0, 200),
-      }));
-    this.post({
-      type: 'window',
+    const message = {
+      type: 'window' as const,
       id: this.windowId,
-      name: (vscode.workspace.name ?? 'No folder').slice(0, 200),
-      folders: folders.filter((f) => f.length <= 4096).slice(0, 50),
       focusedAt: this.focusedAt,
-      targets,
-    });
+      ...windowInfo(),
+    };
+    const json = JSON.stringify(message);
+    if (json === this.lastWindow) return;
+    this.lastWindow = json;
+    this.post(message);
   }
 
   private onFrame(text: string): void {
@@ -281,21 +259,19 @@ export class HubClient implements vscode.Disposable {
       case 'pong':
         return;
       case 'run.send': {
-        // The browser sent items of a project to one of this window's agents (or its chat).
-        const items = contextTray()?.itemsIn(message.project, message.ids) ?? [];
+        // The hub sends items of a project to one of this window's agents (or its chat); it
+        // records where they went.
+        const items = savedItems(message.project, message.ids);
         try {
-          const sentTo = items.length ? await sendContextItems(items, message.target) : undefined;
-          this.post({
-            type: 'run.sent',
-            req: message.req,
-            ok: !!sentTo,
-            sentTo,
-            error: sentTo
-              ? undefined
-              : items.length
-                ? 'Nothing was sent.'
-                : 'Those captures are gone.',
-          });
+          const sent = items.length
+            ? await deliverLocal(message.target, message.project, items)
+            : ({ ok: false, error: 'Those captures are gone.' } as const);
+          this.post(
+            sent.ok
+              ? { type: 'run.sent', req: message.req, ok: true, sentTo: sent.sentTo }
+              : { type: 'run.sent', req: message.req, ok: false, error: sent.error },
+          );
+          contextTray()?.load();
         } catch (error) {
           this.post({ type: 'run.sent', req: message.req, ok: false, error: errorMessage(error) });
         }
@@ -324,7 +300,6 @@ export class HubClient implements vscode.Disposable {
       this.peers.set(browser, peer);
       this.service.add(peer);
       this.service.welcome(peer, `VS Code (${vscode.workspace.name ?? 'no folder'})`);
-      send(this.windows.windowsMessage());
       return;
     }
     const peer = this.peers.get(browser);
@@ -332,9 +307,8 @@ export class HubClient implements vscode.Disposable {
       send({ type: 'error', code: 'unauthorized', message: 'Say hello first.' });
       return;
     }
-    if (isLinkedMessage(message)) {
-      await this.service.handle(peer, message, (s) => this.windows.dispatchSend(s));
-    }
+    // Questions about projects go to the hub itself, not through the link.
+    if (isLinkedMessage(message)) await this.service.handle(peer, message);
   }
 
   private setBrowsers(browsers: HubBrowser[]): void {

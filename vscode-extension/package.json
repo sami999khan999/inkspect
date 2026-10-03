@@ -421,7 +421,7 @@
       },
       {
         "command": "vscodeBrowser.showAgentContext",
-        "title": "Show Agent Context",
+        "title": "Show Saved Captures",
         "category": "Browser",
         "icon": "$(sparkle)"
       },
@@ -432,8 +432,19 @@
         "icon": "$(send)"
       },
       {
+        "command": "vscodeBrowser.openInAgentmux",
+        "title": "Open Latest Capture in agentmux",
+        "category": "Browser",
+        "icon": "$(terminal-tmux)"
+      },
+      {
+        "command": "vscodeBrowser.newAgentmuxThread",
+        "title": "New agentmux Thread with Latest Capture",
+        "category": "Browser"
+      },
+      {
         "command": "vscodeBrowser.clearAgentContext",
-        "title": "Clear Agent Context",
+        "title": "Clear Saved Captures",
         "category": "Browser",
         "icon": "$(clear-all)"
       },
@@ -446,6 +457,14 @@
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "vscodeBrowser.openInAgentmux",
+          "when": "isLinux"
+        },
+        {
+          "command": "vscodeBrowser.newAgentmuxThread",
+          "when": "isLinux"
+        },
         {
           "command": "vscodeBrowser.hub.register",
           "when": "isLinux"
@@ -980,18 +999,18 @@
             "The agent running in a terminal (Claude Code, Codex, Gemini CLI and others): its path or text is typed into the terminal, without pressing Enter.",
             "VS Code chat, with the text or files attached."
           ],
-          "markdownDescription": "Where **Send to Agent** goes by default. With `terminal`, it goes to the AI agent running in a terminal (the one used last when several run; pick another in the **Agent Context** view). Plain shells never receive sends unless you pick them with **Browser: Choose Agent Terminal**."
+          "markdownDescription": "Where **Send to Agent** goes by default. With `terminal`, it goes to the AI agent running in a terminal (the one used last when several run; pick another in the **Saved** view). Plain shells never receive sends unless you pick them with **Browser: Choose Agent Terminal**."
         },
         "vscodeBrowser.agent.command": {
           "type": "string",
           "default": "claude",
           "scope": "application",
-          "markdownDescription": "The command that **Start agent** runs in a new terminal (in the Agent Context view, or when you send with no agent running). For example `claude`, `codex` or `gemini`."
+          "markdownDescription": "The command that **Start agent** runs in a new terminal (in the Saved view, or when you send with no agent running). For example `claude`, `codex` or `gemini`."
         },
         "vscodeBrowser.agent.collectConsoleErrors": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Add the console errors of each page to the **Agent Context** list as they happen, so you can send them to your agent in one click."
+          "markdownDescription": "Add the console errors of each page to the **Saved** list as they happen, so you can send them to your agent in one click."
         },
         "vscodeBrowser.mcp.enabled": {
           "type": "boolean",
@@ -1033,7 +1052,7 @@
             "default"
           ],
           "scope": "machine",
-          "markdownDescription": "tmux servers to look for agents on, by socket name (`tmux -L <name>`): agents running in their panes (for example **agentmux** threads, on `agents`) can receive sends from the Agent Context view and the browser. `default` is the tmux server you get without `-L`."
+          "markdownDescription": "tmux servers to look for agents on, by socket name (`tmux -L <name>`): agents running in their panes (for example **agentmux** threads, on `agents`) can receive sends from the Saved view and the browser. `default` is the tmux server you get without `-L`."
         },
         "vscodeBrowser.hub.enabled": {
           "type": "boolean",
@@ -1093,7 +1112,7 @@
         {
           "type": "webview",
           "id": "vscodeBrowser.agentContext",
-          "name": "Agent Context"
+          "name": "Saved"
         },
         {
           "id": "vscodeBrowser.tabs",

@@ -7,7 +7,6 @@ import {
   type ConsoleEntry,
   type NetworkEntry,
 } from '@inkspect/shared/devtools';
-import type { VsCodeWindow } from '@inkspect/shared/bridge';
 import type { ShortcutMap, ShortcutOverrides } from '@inkspect/shared/shortcuts';
 import { Button } from '@inkspect/shared/ui/Button';
 import { ConfirmButton } from '@inkspect/shared/ui/ConfirmButton';
@@ -23,7 +22,6 @@ import {
   type BridgeStatus,
   type CaptureKind,
   type EmulationRequest,
-  type SendTarget,
 } from '../messages';
 import { SHORTCUT_ACTIONS } from '@inkspect/shared/shortcuts';
 import {
@@ -33,8 +31,8 @@ import {
   scopeLabelOf,
   setShortcutKeys,
 } from '../shortcuts';
+import { PairCard } from '../ui/PairCard';
 import { pageRequest } from './page';
-import { LAST_USED, WindowPicker } from './WindowPicker';
 
 interface PanelProps {
   onClose: () => void;
@@ -161,11 +159,8 @@ export function EmulationPanel({
 }
 
 interface ConsolePanelProps extends PanelProps {
+  /** Copies, saves and offers it in the send dialog, like every capture. */
   copy: (text: string, what: string, kind?: CaptureKind) => void;
-  /** `picked`: the window chosen in the panel (the picker's value). */
-  send: (target: SendTarget, payload: { text: string; label: string }, picked?: string) => void;
-  linked: boolean;
-  windows: readonly VsCodeWindow[];
   pageContext: () => Promise<string>;
 }
 
@@ -177,21 +172,16 @@ const LEVEL_ICONS: Record<string, string> = {
   log: 'circle-small',
 };
 
-/** The page's console and failed requests, to copy for an AI chat or send to VS Code. */
-export function ConsolePanel({
-  onClose,
-  copy,
-  send,
-  linked,
-  windows,
-  pageContext,
-}: ConsolePanelProps) {
+/**
+ * The page's console and failed requests. Each copy is saved and offered in the send dialog, like
+ * any capture.
+ */
+export function ConsolePanel({ onClose, copy, pageContext }: ConsolePanelProps) {
   const [logs, setLogs] = useState<{ console: ConsoleEntry[]; network: NetworkEntry[] }>({
     console: [],
     network: [],
   });
   const [view, setView] = useState<'console' | 'network'>('console');
-  const [target, setTarget] = useState(LAST_USED);
   useEffect(() => {
     let alive = true;
     const refresh = async () => {
@@ -215,8 +205,6 @@ export function ConsolePanel({
   const failed = logs.network.filter(isFailedRequest);
   const shown = view === 'console' ? logs.console.slice(-200).reverse() : [];
   const empty = view === 'console' ? !shown.length : !failed.length;
-  const sendContext = (to: SendTarget) =>
-    void pageContext().then((text) => send(to, { text, label: 'Page context' }, target));
   return (
     <PanelFrame title="Console and network" onClose={onClose}>
       <div className="console-tabs">
@@ -322,92 +310,38 @@ export function ConsolePanel({
           </Button>
         </div>
       </div>
-
-      {linked && (
-        <div className="panel-group">
-          <span className="panel-group-title">Send page context to VS Code</span>
-          <WindowPicker windows={windows} value={target} onChange={setTarget} />
-          <div className="button-row wrap">
-            <Button
-              size="sm"
-              variant="primary"
-              icon="terminal"
-              onClick={() => sendContext('terminal')}
-            >
-              Send to terminal
-            </Button>
-            <Button size="sm" icon="comment-discussion" onClick={() => sendContext('chat')}>
-              Send to chat
-            </Button>
-          </div>
-        </div>
-      )}
     </PanelFrame>
   );
 }
 
 export function LinkPanel({ onClose, status }: PanelProps & { status: BridgeStatus }) {
-  const [code, setCode] = useState('');
-  const [error, setError] = useState<string | undefined>();
-  const [busy, setBusy] = useState(false);
-  const pair = async () => {
-    setBusy(true);
-    const reply = await toBackground({ type: 'pair', code });
-    setBusy(false);
-    setError(reply.ok ? reply.status?.error : reply.error);
-  };
   return (
     <PanelFrame title="VS Code link" onClose={onClose}>
-      <p className={`status status-${status.state}`}>
-        {status.state === 'connected'
-          ? `Linked with ${status.peer ?? 'VS Code'}. Bookmarks sync both ways, and screenshots can go to VS Code.`
-          : status.state === 'unpaired'
-            ? 'VS Code is running but this browser is not paired yet.'
-            : status.state === 'connecting'
-              ? 'Connecting to VS Code…'
-              : 'VS Code is not reachable. Start VS Code with the VS Code Browser extension (its link is on by default).'}
-      </p>
-      {status.state === 'unpaired' && (
-        <>
-          <p className="note">
-            In VS Code, click <b>Pair Browser Extension</b> in the Browser side panel: that links
-            this browser, no code needed. Or type a code from{' '}
-            <b>Browser: Pair Browser Extension with a Code</b> here.
-          </p>
-          <div className="row">
-            <input
-              className="code-input"
-              inputMode="numeric"
-              maxLength={6}
-              placeholder="123456"
-              aria-label="Pairing code"
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === 'Enter' && code.length === 6) void pair();
-              }}
-            />
-            <button
-              type="button"
-              className="button primary small"
-              disabled={code.length !== 6 || busy}
-              onClick={() => void pair()}
-            >
-              Pair
-            </button>
-          </div>
-        </>
+      {status.state === 'connected' ? (
+        <p className="status status-connected">
+          Linked with {status.peer ?? 'VS Code'}
+          {status.via === 'hub' ? ' through the browser helper' : ''}. Captures are saved into your
+          projects and offered to send; bookmarks sync both ways.
+        </p>
+      ) : (
+        <PairCard
+          compact
+          status={status}
+          pair={(code) =>
+            toBackground({ type: 'pair', code }).then((reply) =>
+              reply.ok ? reply.status : { ...status, error: reply.error },
+            )
+          }
+        />
       )}
-      {error && <p className="note error">{error}</p>}
       <div className="button-row">
-        <button
-          type="button"
-          className="button secondary small"
+        <Button
+          size="sm"
+          variant="secondary"
           onClick={() => void toBackground({ type: 'openOptions' })}
         >
           Settings
-        </button>
+        </Button>
       </div>
     </PanelFrame>
   );

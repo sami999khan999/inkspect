@@ -11,7 +11,12 @@ import { createConnection, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CHROME_EXTENSION_ID, HUB_HOST_NAME, MAX_TO_BROWSER } from '@inkspect/shared/hub';
+import {
+  CHROME_EXTENSION_ID,
+  HUB_FEATURES,
+  HUB_HOST_NAME,
+  MAX_TO_BROWSER,
+} from '@inkspect/shared/hub';
 import { HubDaemon } from '../../src/hub/daemon';
 import { readItems } from '../../src/hub/store';
 import { frame, FrameDecoder } from '../../src/hub/framing';
@@ -83,7 +88,11 @@ describe('hub frames', () => {
   });
 });
 
-describe('hub registration', () => {
+// The hub is registered and run on Linux only (see hubSupported): its paths, launcher and Unix
+// socket are tested there.
+const linux = process.platform === 'linux';
+
+describe.skipIf(!linux)('hub registration', () => {
   it('finds browsers in the XDG config folder and both Firefox locations', () => {
     const folders = hostFolders({ XDG_CONFIG_HOME: '/c' }, '/h');
     expect(folders.find((f) => f.browser === 'Brave')?.hosts).toBe(
@@ -191,7 +200,7 @@ const linkHello = JSON.stringify({
   token: '',
 });
 
-describe('hub daemon', () => {
+describe.skipIf(!linux)('hub daemon', () => {
   it('authenticates, links a browser to the leader window and exits when idle', async () => {
     const paths = hubPaths({ INKSPECT_HUB_DIR: join(temp(), 'rt') }, temp());
     let exited = false;
@@ -216,7 +225,10 @@ describe('hub daemon', () => {
     const browser = await client(paths.socket);
     send(browser.socket, { type: 'auth', token, role: 'browser', origin: 'chrome-extension://x' });
     await until(() => browser.got.length);
-    expect(browser.got).toEqual([{ v: 1, type: 'status', vscode: false }]);
+    // It says what it can do beyond the first version (newer browser builds check).
+    expect(browser.got).toEqual([
+      { v: 1, type: 'status', vscode: false, features: [...HUB_FEATURES] },
+    ]);
 
     const window = await client(paths.socket);
     send(window.socket, { type: 'auth', token, role: 'vscode' });
@@ -283,7 +295,11 @@ describe('hub daemon', () => {
     await until(() => browser.got.some((m) => m.req === 'r1'));
     const projects = browser.got.find((m) => m.type === 'projects')!;
     expect(projects.suggested).toBe(project);
-    expect(projects.projects).toMatchObject([{ path: project, vscode: true, saved: false }]);
+    // The window's folder, and the Inbox (where captures go when no project fits).
+    expect(projects.projects).toMatchObject([
+      { path: project, vscode: true, saved: false },
+      { path: join(paths.data, 'inbox'), name: 'Inbox', inbox: true },
+    ]);
 
     const image = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64');
     send(browser.socket, {
@@ -326,7 +342,10 @@ describe('hub daemon', () => {
     await until(() => browser.got.some((m) => m.req === 'r4'));
     const later = browser.got.find((m) => m.req === 'r4')!;
     expect(later.suggested).toBe(project);
-    expect(later.projects).toMatchObject([{ path: project, vscode: false, saved: true }]);
+    expect(later.projects).toMatchObject([
+      { path: project, vscode: false, saved: true },
+      { name: 'Inbox', inbox: true },
+    ]);
     browser.socket.destroy();
     daemon.stop('test');
   });

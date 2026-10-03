@@ -9,8 +9,6 @@ export interface PickModifiers {
   add: boolean;
   /** Alt+click: a screenshot of the element. */
   screenshot: boolean;
-  /** Ctrl+click: the chat agent; Ctrl+Shift+click: a terminal agent (Cmd on macOS). */
-  send?: 'chat' | 'terminal';
 }
 
 interface InspectorProps {
@@ -188,12 +186,7 @@ export function Inspector({
       block(event);
       const el = at(event.clientX, event.clientY) ?? targetRef.current;
       if (el) {
-        const send = event.ctrlKey || event.metaKey;
-        handlers.current.onPick(el, {
-          add: event.shiftKey && !send,
-          screenshot: event.altKey,
-          send: send ? (event.shiftKey ? 'terminal' : 'chat') : undefined,
-        });
+        handlers.current.onPick(el, { add: event.shiftKey, screenshot: event.altKey });
       }
     };
     const onKey = (event: KeyboardEvent) => {
@@ -260,7 +253,7 @@ export function Inspector({
 
   return (
     <div className="inspector">
-      <PickerHint className="inspect-hint" purpose={purpose} map={map} altLabel="screenshot" />
+      <PickerHint className="inspect-hint" purpose={purpose} map={map} />
       {boxes && (
         <>
           <div className="hl hl-margin" style={style(boxes.margin)} />

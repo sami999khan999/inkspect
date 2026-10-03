@@ -1,13 +1,16 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import * as vscode from 'vscode';
 import type { ItemMeta } from '@inkspect/shared/hub';
 import { copyImageBytes, copyText } from '../features/clipboard';
 import { displayPath, localWorkspaceFolder } from '../features/screenshots';
+import { inboxFolder } from '../hub/paths';
 import {
   emptyTrash,
   itemFile,
+  moveItems,
   readItem,
   readItems,
   readItemText,
@@ -25,7 +28,7 @@ import {
   type ContextKind,
 } from '../shared/agentContext';
 
-/** What a capture adds to the Agent Context list. */
+/** What a capture adds to the Saved list. */
 export interface ContextInput {
   kind: ContextKind;
   title: string;
@@ -46,6 +49,13 @@ export interface ContextInput {
   group?: string;
 }
 
+export interface AddOptions {
+  /** An update that keeps its place (a growing error list): saved, nothing offered. */
+  quiet?: boolean;
+  /** Saved on its way to a send (or saved by the browser): the send dialog isn't offered. */
+  silent?: boolean;
+}
+
 export interface ContextItem {
   id: string;
   kind: ContextKind;
@@ -64,6 +74,8 @@ export interface ContextItem {
   groupIndex?: number;
   /** Captured in the browser (through the helper) or in VS Code. */
   source: 'browser' | 'vscode';
+  /** The browser's name, for browser captures. */
+  browser?: string;
   /** The folder whose `.inkspect/` holds it. */
   project: string;
   time: number;
@@ -84,7 +96,7 @@ const extensionOf = (mimeType: string) =>
     ?.replace('jpeg', 'jpg')
     .replace(/[^a-z0-9]/g, '') || 'png';
 
-/** A store item as an Agent Context item. */
+/** A store item as a Saved item. */
 function itemFromMeta(root: string, meta: ItemMeta): ContextItem {
   const file = itemFile(root, meta, 'file');
   const text = readItemText(root, meta);
@@ -102,6 +114,7 @@ function itemFromMeta(root: string, meta: ItemMeta): ContextItem {
     group: meta.group,
     groupIndex: meta.groupIndex,
     source: meta.source,
+    browser: meta.browser,
     time: meta.time,
     sentTo: meta.sentTo,
     project: root,
@@ -109,7 +122,7 @@ function itemFromMeta(root: string, meta: ItemMeta): ContextItem {
 }
 
 /**
- * The Agent Context list: everything captured for this project, newest first, ready to send to
+ * The Saved list: everything captured for this project, newest first, ready to send to
  * an agent. It lives in the project's `.inkspect/` folder (see src/hub/store.ts), shared with the
  * browser: captures saved there from the browser show up here, and the other way round. Without
  * a local folder, a store in global storage is used.
@@ -122,7 +135,12 @@ export class ContextTray implements vscode.Disposable {
   private readonly onDidAddImageEmitter = new vscode.EventEmitter<ContextItem>();
   /** An item with an image was added (the view fetches its thumbnail). */
   readonly onDidAddImage = this.onDidAddImageEmitter.event;
+  private readonly onDidCaptureEmitter = new vscode.EventEmitter<ContextItem>();
+  /** Something was captured in VS Code (not a quiet update, not a send on its way): offer it. */
+  readonly onDidCapture = this.onDidCaptureEmitter.event;
   private watcher?: vscode.Disposable[];
+  /** The project picked in the Saved view (else the workspace's, or the Inbox). */
+  private chosen?: string;
   /** The last capture time given out: captures in the same millisecond keep their order. */
   private lastTime = 0;
   private reloadTimer?: ReturnType<typeof setTimeout>;
@@ -130,27 +148,45 @@ export class ContextTray implements vscode.Disposable {
 
   constructor(
     globalStorage: string,
-    /** The folder whose store the list shows (the workspace's, else the inbox). */
+    /** The folder whose store the list shows (the workspace's, else the Inbox). */
     private readonly rootOf: () => string = () =>
-      localWorkspaceFolder() ?? join(globalStorage, 'inbox'),
+      localWorkspaceFolder() ?? defaultInbox(globalStorage),
   ) {
     this.root = rootOf();
     emptyTrash(this.root, 0);
     this.load();
     this.watch();
-    const folders = vscode.workspace.onDidChangeWorkspaceFolders?.(() => {
-      const root = this.rootOf();
-      if (root === this.root) return;
-      this.root = root;
-      this.load();
-      this.watch();
-    });
+    const folders = vscode.workspace.onDidChangeWorkspaceFolders?.(() =>
+      this.show(this.chosen ?? this.rootOf()),
+    );
     if (folders) this.disposables.push(folders);
   }
 
   /** The folder whose `.inkspect/` the list shows. */
   get project(): string {
     return this.root;
+  }
+
+  /** The project the list shows unless one is picked: the workspace's, else the Inbox. */
+  get defaultProject(): string {
+    return this.rootOf();
+  }
+
+  /**
+   * Shows another project's list (the Saved view's project switcher): captures go there too, and
+   * sends go to its agents. `undefined` goes back to the workspace's (or the Inbox).
+   */
+  setProject(path: string | undefined): void {
+    this.chosen = path && path !== this.rootOf() ? path : undefined;
+    this.show(this.chosen ?? this.rootOf());
+  }
+
+  private show(root: string): void {
+    if (root === this.root) return;
+    this.root = root;
+    this.removed = undefined;
+    this.load();
+    this.watch();
   }
 
   private fromMeta(meta: ItemMeta): ContextItem {
@@ -203,7 +239,7 @@ export class ContextTray implements vscode.Disposable {
    * `quiet`, it keeps its place (so a growing error list doesn't jump above what the user
    * captured last).
    */
-  add(input: ContextInput, options: { quiet?: boolean } = {}): ContextItem {
+  add(input: ContextInput, options: AddOptions = {}): ContextItem {
     const previous = input.key ? this.items.find((i) => i.key === input.key) : undefined;
     const keep = options.quiet && previous;
     const meta = writeItem(
@@ -234,6 +270,7 @@ export class ContextTray implements vscode.Disposable {
     );
     if (item.mimeType) this.onDidAddImageEmitter.fire(item);
     this.onDidChangeEmitter.fire();
+    if (!options.quiet && !options.silent) this.onDidCaptureEmitter.fire(item);
     return item;
   }
 
@@ -410,6 +447,9 @@ export class ContextTray implements vscode.Disposable {
       time: item.time,
       sentTo: item.sentTo,
       group: item.group,
+      groupIndex: item.groupIndex,
+      // Captures from the browser say which; VS Code's own need no note.
+      source: item.source === 'browser' ? (item.browser ?? 'Browser') : undefined,
     };
   }
 
@@ -419,26 +459,74 @@ export class ContextTray implements vscode.Disposable {
     for (const d of [...(this.watcher ?? []), ...this.disposables]) d.dispose();
     this.onDidChangeEmitter.dispose();
     this.onDidAddImageEmitter.dispose();
+    this.onDidCaptureEmitter.dispose();
   }
 }
 
 let tray: ContextTray | undefined;
+let inbox: string | undefined;
 
-/** Creates the list (on activation). */
-export function initContextTray(globalStorage: string): ContextTray {
+const PROJECT_KEY = 'vscodeBrowser.savedProject';
+
+/** The Inbox this window saves into without a project (see defaultInbox). */
+export function inboxPath(): string | undefined {
+  return inbox;
+}
+
+/**
+ * Creates the list (on activation), on the project picked in this workspace before (`memory`).
+ * Captures of the old global-storage inbox move to the shared Inbox first.
+ */
+export function initContextTray(globalStorage: string, memory?: vscode.Memento): ContextTray {
+  inbox = defaultInbox(globalStorage);
+  migrateInbox(globalStorage);
   tray = new ContextTray(globalStorage);
+  const picked = memory?.get<string>(PROJECT_KEY);
+  if (picked && isFolder(picked)) tray.setProject(picked);
+  if (memory) {
+    tray.onDidChange(() => {
+      const chosen = tray?.project !== tray?.defaultProject ? tray?.project : undefined;
+      if (memory.get(PROJECT_KEY) !== chosen) void memory.update(PROJECT_KEY, chosen);
+    });
+  }
   return tray;
 }
 
-/** The Agent Context list. Captures add to it through `addContext`. */
+/**
+ * Where captures go without a workspace folder: the Inbox the hub shares (Linux), else one in
+ * global storage.
+ */
+function defaultInbox(globalStorage: string): string {
+  return process.platform === 'linux' ? inboxFolder() : join(globalStorage, 'inbox');
+}
+
+/** Moves what the inbox in global storage held (older versions) to the shared Inbox. */
+function migrateInbox(globalStorage: string): void {
+  const old = join(globalStorage, 'inbox');
+  const inbox = defaultInbox(globalStorage);
+  if (old === inbox || !existsSync(join(old, STORE_FOLDER))) return;
+  try {
+    const ids = readItems(old).map((meta) => meta.id);
+    if (ids.length) moveItems(old, inbox, ids);
+  } catch {
+    // Left where it was: still readable by picking that folder.
+  }
+}
+
+function isFolder(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** The Saved list. Captures add to it through `addContext`. */
 export function contextTray(): ContextTray | undefined {
   return tray;
 }
 
-/** Adds a capture to the Agent Context list (a no-op before activation, as in unit tests). */
-export function addContext(
-  input: ContextInput,
-  options?: { quiet?: boolean },
-): ContextItem | undefined {
+/** Adds a capture to the Saved list (a no-op before activation, as in unit tests). */
+export function addContext(input: ContextInput, options?: AddOptions): ContextItem | undefined {
   return tray?.add(input, options);
 }

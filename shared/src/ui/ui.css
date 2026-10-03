@@ -1069,7 +1069,8 @@ body.vscode-high-contrast .button.accent {
 .menu,
 .popover {
   position: fixed;
-  z-index: 100;
+  /* Above the send dialog (900), like select lists and the color picker. */
+  z-index: 1000;
   min-width: 200px;
   max-width: 420px;
   padding: 4px;
@@ -1272,6 +1273,12 @@ body.vscode-high-contrast .button.accent {
 }
 
 /* Motion ----------------------------------------------------------------------------------- */
+
+@keyframes ink-fade-in {
+  from {
+    opacity: 0;
+  }
+}
 
 @keyframes ink-pop-in {
   from {
@@ -1641,12 +1648,11 @@ body.vscode-high-contrast .key-button:hover {
 /* Element picker hint (PickerHint) ------------------------------------------------------------
    Drawn over page content, so it has its own dark look (the theme's colors could vanish on the
    page), in both products. Each product places it. */
-/* Two rows: what a click does (with each modifier), then the keys. */
+/* One row: what a click does, with each modifier, then the keys. */
 .picker-hint {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 7px;
+  gap: 14px;
   /* Its own width: centered with left: 50%, it would otherwise wrap at half the page. */
   width: max-content;
   padding: 6px 12px;
@@ -1660,14 +1666,6 @@ body.vscode-high-contrast .key-button:hover {
   line-height: 1;
   pointer-events: none;
   backdrop-filter: blur(6px);
-}
-
-.picker-hint-group {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 6px 14px;
 }
 
 .picker-hint-item {
@@ -1828,4 +1826,792 @@ body.vscode-high-contrast .key-button:hover {
 
 body.vscode-high-contrast .thumb-picker-item.on .thumb-picker-image {
   outline: 1px solid var(--vscode-contrastActiveBorder);
+}
+
+/* The send dialog after a capture (SendModal) ------------------------------------------- */
+
+.ink-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ink-space-4);
+  background: color-mix(in srgb, #000 35%, transparent);
+  animation: ink-fade-in var(--ink-normal) var(--ink-ease);
+  pointer-events: auto;
+}
+
+.ink-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ink-space-2);
+  width: min(460px, 100%);
+  max-height: calc(100vh - 2 * var(--ink-space-4));
+  overflow: auto;
+  padding: var(--ink-space-3) var(--ink-space-4) var(--ink-space-3);
+  background: var(--ink-surface);
+  color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-editorWidget-border, var(--ink-border));
+  border-radius: var(--ink-radius-lg);
+  box-shadow: var(--ink-shadow-lg);
+  font-family: var(--vscode-font-family);
+  font-size: var(--ink-font);
+  text-align: left;
+  animation: ink-pop-in var(--ink-normal) var(--ink-ease);
+}
+
+.ink-modal:focus {
+  outline: none;
+}
+
+.ink-modal-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ink-space-3);
+}
+
+.ink-modal-thumbs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.ink-modal-thumbs img {
+  width: 56px;
+  height: 42px;
+  border: 1px solid var(--ink-border-subtle);
+  border-radius: var(--ink-radius-sm);
+  object-fit: cover;
+  object-position: top center;
+}
+
+.ink-modal-heading {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ink-modal-title {
+  display: flex;
+  align-items: center;
+  gap: var(--ink-space-1);
+  font-weight: 600;
+}
+
+.ink-modal-title .codicon {
+  color: var(--ink-success);
+}
+
+.ink-modal-project,
+.ink-modal-detail {
+  display: flex;
+  align-items: center;
+  gap: var(--ink-space-1);
+  font-size: var(--ink-font-sm);
+}
+
+.ink-modal-project-name {
+  font-weight: 600;
+}
+
+.ink-modal-detail,
+.ink-modal-project .ink-muted,
+.ink-modal-empty,
+.ink-modal-label,
+.ink-modal-where,
+.ink-modal-status {
+  color: var(--ink-muted);
+}
+
+.ink-modal-label {
+  margin-top: var(--ink-space-1);
+  font-size: var(--ink-font-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ink-modal-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ink-modal-target {
+  display: flex;
+  align-items: center;
+  gap: var(--ink-space-1);
+}
+
+.ink-modal-send {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--ink-space-2);
+  min-width: 0;
+  min-height: var(--ink-control-lg);
+  padding: 0 var(--ink-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--ink-radius);
+  background: var(--ink-surface-sunken);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--ink-fast) var(--ink-ease);
+}
+
+.ink-modal-send:hover:not(:disabled) {
+  background: var(--ink-hover);
+}
+
+.ink-modal-send:focus-visible {
+  outline: 1px solid var(--ink-focus);
+  outline-offset: -1px;
+}
+
+.ink-modal-target.default .ink-modal-send {
+  border-color: var(--ink-accent);
+  background: var(--ink-accent-soft);
+}
+
+.ink-modal-number {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--ink-border-strong);
+  border-radius: var(--ink-radius-sm);
+  font-size: var(--ink-font-xs);
+}
+
+.ink-modal-agent {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ink-modal-where {
+  flex: 1;
+  overflow: hidden;
+  font-size: var(--ink-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ink-modal-thread {
+  align-self: flex-start;
+}
+
+.ink-modal-empty {
+  padding: var(--ink-space-2) 0;
+}
+
+.ink-modal-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ink-space-1);
+  margin-top: var(--ink-space-1);
+  padding-top: var(--ink-space-2);
+  border-top: 1px solid var(--ink-border-subtle);
+}
+
+.ink-modal-status {
+  flex: 1;
+  min-width: 160px;
+  font-size: var(--ink-font-sm);
+}
+
+.ink-modal-status.tone-error {
+  color: var(--ink-danger);
+}
+
+.ink-modal-status.tone-ok {
+  color: var(--ink-success);
+}
+
+body.vscode-high-contrast .ink-modal-target.default .ink-modal-send {
+  outline: 1px solid var(--vscode-contrastActiveBorder);
+}
+
+@media (forced-colors: active) {
+  .ink-modal-target.default .ink-modal-send {
+    outline: 2px solid Highlight;
+  }
+}
+
+/* Saved list (SavedList) ----------------------------------------------------------------------
+   A project's captures, in VS Code's Saved view and the browser's side panel. Cards are a lighter
+   tint of the sidebar, with no outline: in themes like Tokyo Night the sidebar, editor and
+   borders are all the same near-black. */
+.saved {
+  --card-bg: color-mix(
+    in srgb,
+    var(--vscode-foreground, #888) 5%,
+    var(--vscode-sideBar-background, transparent)
+  );
+  display: flex;
+  flex-direction: column;
+  container: saved / inline-size;
+}
+
+/* The agent picker and filters, pinned at the top. */
+.saved-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ink-space-2);
+  padding: var(--ink-space-2) var(--ink-space-3);
+  border-bottom: 1px solid var(--ink-border-subtle);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+/* Filters fill the width; below 480px only their icons and counts show (names are tooltips). */
+.saved-filter {
+  display: flex;
+  width: 100%;
+}
+
+.saved-filter .segment {
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+@container saved (max-width: 260px) {
+  .saved-filter .segment-count:not(.error) {
+    display: none;
+  }
+}
+
+@container saved (max-width: 480px) {
+  .saved-filter .segment-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* Items. */
+.saved-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ink-space-2);
+  margin: 0;
+  padding: var(--ink-space-2) var(--ink-space-3) var(--ink-space-3);
+  list-style: none;
+}
+
+.saved-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: var(--ink-radius-lg);
+  background: var(--card-bg);
+  outline: none;
+  transition:
+    border-color var(--ink-fast) var(--ink-ease),
+    background var(--ink-fast) var(--ink-ease);
+}
+
+.saved-card:hover {
+  background: color-mix(in srgb, var(--vscode-foreground, #888) 4%, var(--card-bg));
+}
+
+.saved-card:focus-visible {
+  border-color: var(--ink-focus);
+}
+
+/* Screenshots, recordings and element captures: a preview across the card's width. The whole
+   image shows (a short element strip isn't cropped to nothing); only tall captures, such as full
+   pages, are cropped to their top. */
+.saved-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  max-height: 150px;
+  padding: 6px;
+  overflow: hidden;
+  border: none;
+  border-radius: var(--ink-radius);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  cursor: zoom-in;
+  transition: opacity var(--ink-fast) var(--ink-ease);
+}
+
+.saved-thumb:hover {
+  opacity: 0.88;
+}
+
+.saved-thumb:focus-visible {
+  outline: 1px solid var(--ink-focus);
+  outline-offset: 1px;
+}
+
+.saved-thumb img {
+  display: block;
+  max-width: 100%;
+  max-height: 136px;
+  border-radius: var(--ink-radius-sm);
+  object-fit: contain;
+}
+
+.saved-thumb.tall {
+  height: 150px;
+  padding: 0;
+}
+
+.saved-thumb.tall img {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  object-fit: cover;
+  object-position: top center;
+}
+
+.saved-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.saved-card-icon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--ink-radius);
+  background: color-mix(in srgb, var(--kind-tone) 14%, transparent);
+  color: var(--kind-tone);
+}
+
+.saved-card {
+  --kind-tone: var(--ink-blue);
+}
+
+.saved-card.kind-errors,
+.saved-card.kind-network {
+  --kind-tone: var(--ink-red);
+}
+
+.saved-card.kind-report,
+.saved-card.kind-measure {
+  --kind-tone: var(--ink-green);
+}
+
+.saved-card.kind-css,
+.saved-card.kind-color {
+  --kind-tone: var(--ink-magenta);
+}
+
+.saved-card-heading {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.saved-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.saved-card-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  /* The editor text color: some themes (Tokyo Night) keep the sidebar foreground quite dim. */
+  color: var(--vscode-editor-foreground, var(--vscode-foreground));
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* A soft chip in the link color, readable on light, dark and high-contrast backgrounds alike. */
+.saved-card-badge {
+  flex-shrink: 0;
+  padding: 0 7px;
+  border-radius: var(--ink-radius-pill);
+  background: color-mix(in srgb, var(--ink-blue) 16%, transparent);
+  color: var(--ink-blue);
+  font-size: var(--ink-font-xs);
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.saved-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-xs);
+}
+
+.saved-card-meta span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.saved-card-meta span + span::before {
+  content: '·';
+  margin-right: 6px;
+}
+
+.saved-card-preview {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: var(--ink-radius-sm);
+  background: var(--vscode-textCodeBlock-background, var(--ink-surface));
+  color: var(--vscode-descriptionForeground, var(--ink-muted));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--ink-font-xs);
+  line-height: 1.45;
+}
+
+/* Clamped inside the padding, so no half line shows below it. */
+.saved-card-preview span {
+  display: -webkit-box;
+  overflow: hidden;
+  word-break: break-word;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.saved-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+/* Send, and a chevron for another agent, joined into one control. */
+.saved-send {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.saved-send .saved-send-more {
+  min-width: 0;
+  /* A hairline of the card shows between the two halves. */
+  margin-left: 1px;
+  padding: 0 5px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.saved-send .button:first-child:not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.saved-card-tools {
+  display: inline-flex;
+  gap: 1px;
+  margin-left: auto;
+  opacity: 0.55;
+  transition: opacity var(--ink-fast) var(--ink-ease);
+}
+
+.saved-card:hover .saved-card-tools,
+.saved-card:focus-within .saved-card-tools {
+  opacity: 1;
+}
+
+.saved-card-sent {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ink-green);
+  font-size: var(--ink-font-xs);
+}
+
+.saved-card-sent .codicon {
+  flex-shrink: 0;
+  font-size: 12px !important;
+}
+
+.saved-card-sent span:last-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Very narrow: the send button takes the whole row, the tools go below it. */
+@container saved (max-width: 210px) {
+  .saved-send,
+  .saved-send .button:first-child {
+    flex: 1;
+  }
+
+  .saved-card-tools {
+    margin-left: 0;
+  }
+}
+
+.saved-none {
+  margin: var(--ink-space-4) var(--ink-space-3);
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+.saved-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ink-space-2);
+  margin-top: auto;
+  padding: 6px var(--ink-space-3);
+  border-top: 1px solid var(--ink-border-subtle);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.saved-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-xs);
+  white-space: nowrap;
+}
+
+@container saved (max-width: 320px) {
+  .saved-hint {
+    display: none;
+  }
+
+  .saved-footer {
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .saved-card,
+  .saved-card-tools {
+    transition: none;
+  }
+}
+
+body.vscode-high-contrast .saved-card {
+  border-color: var(--vscode-contrastBorder);
+}
+
+body.vscode-high-contrast .saved-card.latest,
+body.vscode-high-contrast .saved-card:focus-visible {
+  border-color: var(--vscode-contrastActiveBorder, var(--ink-focus));
+}
+
+/* Selecting cards (to send, remove or group several): a checkbox in the head, shown on hover,
+   on focus, and on every card while anything is selected. */
+.saved-card-select {
+  display: none;
+  margin-top: 6px;
+}
+
+.saved-card:hover .saved-card-select,
+.saved-card:focus-within .saved-card-select,
+.saved.selecting .saved-card-select,
+.saved-card.selected .saved-card-select {
+  display: inline-flex;
+}
+
+.saved-card.selected {
+  border-color: var(--ink-accent);
+  background: color-mix(in srgb, var(--ink-accent) 8%, var(--card-bg));
+}
+
+body.vscode-high-contrast .saved-card.selected {
+  border-color: var(--vscode-contrastActiveBorder);
+}
+
+/* A group: screenshots taken (or grouped) together, one thumbnail each. */
+.saved-group .saved-card-icon {
+  --kind-tone: var(--ink-blue);
+}
+
+.saved-card-count {
+  flex-shrink: 0;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--ink-radius-pill);
+  background: color-mix(in srgb, var(--vscode-foreground, #888) 12%, transparent);
+  color: var(--vscode-foreground);
+  font-size: var(--ink-font-xs);
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+.saved-group-thumbs {
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+}
+
+/* The footer while cards are selected: what to do with all of them. */
+.saved-selection {
+  justify-content: flex-start;
+  gap: 4px;
+}
+
+.saved-selection-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  font-weight: 600;
+}
+
+.saved-selection-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--ink-radius-pill);
+  background: var(--ink-accent);
+  color: var(--vscode-button-foreground);
+  font-size: var(--ink-font-xs);
+}
+
+/* A group of elements (or other text): a checklist, one row each. */
+.saved-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 4px;
+  border-radius: var(--ink-radius);
+  background: var(--ink-surface-sunken);
+  list-style: none;
+}
+
+.saved-group-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 4px 3px 6px;
+  border-radius: var(--ink-radius-sm);
+}
+
+.saved-group-row:hover {
+  background: var(--vscode-list-hoverBackground, var(--ink-hover));
+}
+
+.saved-group-row:not(.on) .saved-group-row-text,
+.saved-group-row:not(.on) .saved-group-row-icon {
+  opacity: 0.5;
+}
+
+.saved-group-row-icon {
+  flex-shrink: 0;
+  color: var(--ink-blue);
+}
+
+.saved-group-row-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.saved-group-row-title {
+  overflow: hidden;
+  color: var(--vscode-editor-foreground, var(--vscode-foreground));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--ink-font-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.saved-group-row-detail {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.saved-group-row-open {
+  opacity: 0;
+}
+
+.saved-group-row:hover .saved-group-row-open,
+.saved-group-row:focus-within .saved-group-row-open {
+  opacity: 1;
+}
+
+/* After a removal: what went, and Undo (for a few seconds). */
+.saved-undo-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vscode-foreground);
+  font-size: var(--ink-font-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.saved-undo-text .codicon {
+  color: var(--ink-muted);
+}
+
+/* Send and its chevron, then Open in agentmux. */
+.saved-send-group {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+
+/* A thumbnail that opens nothing (the side panel). */
+.saved-thumb.still {
+  cursor: default;
+}
+
+.saved-thumb.still:hover {
+  opacity: 1;
+}
+
+@container saved (max-width: 210px) {
+  .saved-send-group {
+    flex: 1;
+  }
 }

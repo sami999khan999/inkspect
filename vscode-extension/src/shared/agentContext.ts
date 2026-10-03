@@ -1,83 +1,22 @@
-// The Agent Context list: everything captured in the browser (picked elements, screenshots,
-// console errors, reports...), ready to send to an AI agent. Types and messages shared by the
-// extension host and the Agent Context view (a sidebar webview).
+// The Saved list: everything captured for a project (picked elements, screenshots, console
+// errors, reports...), ready to send to an AI agent. Types and messages shared by the extension
+// host and the Saved view (a sidebar webview); the list itself is @inkspect/shared/ui/SavedList.
+import { ITEM_KINDS, type ItemKind } from '@inkspect/shared/hub';
+import { KIND_ICONS, KIND_LABELS, timeAgo, type SavedItemView } from '@inkspect/shared/saved';
 
-export type ContextKind =
-  | 'element'
-  | 'screenshot'
-  | 'recording'
-  | 'errors'
-  | 'network'
-  | 'page'
-  | 'report'
-  | 'css'
-  | 'measure'
-  | 'color'
-  | 'text';
+export type ContextKind = ItemKind;
 
-export const CONTEXT_KINDS: readonly ContextKind[] = [
-  'element',
-  'screenshot',
-  'recording',
-  'errors',
-  'network',
-  'page',
-  'report',
-  'css',
-  'measure',
-  'color',
-  'text',
-];
+export const CONTEXT_KINDS: readonly ContextKind[] = ITEM_KINDS;
 
 /** Codicon per kind. */
-export const CONTEXT_ICONS: Record<ContextKind, string> = {
-  element: 'inspect',
-  screenshot: 'device-camera',
-  recording: 'record',
-  errors: 'error',
-  network: 'globe',
-  page: 'browser',
-  report: 'checklist',
-  css: 'symbol-color',
-  measure: 'symbol-ruler',
-  color: 'symbol-color',
-  text: 'note',
-};
+export const CONTEXT_ICONS: Record<ContextKind, string> = KIND_ICONS;
 
-export const CONTEXT_KIND_LABELS: Record<ContextKind, string> = {
-  element: 'Element',
-  screenshot: 'Screenshot',
-  recording: 'Recording',
-  errors: 'Console errors',
-  network: 'Failed requests',
-  page: 'Page context',
-  report: 'Report',
-  css: 'CSS changes',
-  measure: 'Measurements',
-  color: 'Color',
-  text: 'Text',
-};
+export const CONTEXT_KIND_LABELS: Record<ContextKind, string> = KIND_LABELS;
 
-/** One item as the view shows it. */
-export interface ContextItemView {
-  id: string;
-  kind: ContextKind;
-  title: string;
-  /** A second line: the page, the size, the number of errors... */
-  detail?: string;
-  /** The start of the text that is sent. */
-  preview?: string;
-  /** The item has an image (its bytes come in a `thumbnail` message). */
-  image: boolean;
-  /** The file sent for it, as shown to the user. */
-  file?: string;
-  url?: string;
-  time: number;
-  /** Agents it was sent to. */
-  sentTo: string[];
-  /** Captures made (or grouped) together share a group: shown as one card, sent together. */
-  group?: string;
-}
+/** One item as the view shows it (see SavedList). */
+export type ContextItemView = SavedItemView;
+
+export { timeAgo };
 
 /**
  * A place sends can go: an agent in a VS Code terminal, an agent in an agentmux (tmux) pane, or
@@ -101,6 +40,9 @@ export type HostToContextView =
       keys: { show: string; sendLatest: string };
       /** What the last removal took ("Removed 4 items"), while it can be undone. */
       undo?: string;
+      /** The project the list shows, and the others it can show. */
+      project: { path: string; name: string; inbox?: boolean };
+      projects: { path: string; name: string; detail?: string }[];
     }
   | { type: 'thumbnail'; id: string; data: Uint8Array; mimeType: string };
 
@@ -119,10 +61,14 @@ export type ContextViewToHost =
   /** Puts back what the last removal (Clear all, Remove) took. */
   | { type: 'undo' }
   | { type: 'setTarget'; target: string }
+  /** Shows another project's list (and captures into it). */
+  | { type: 'setProject'; path: string }
+  /** Sends to an agentmux thread, then shows that thread. */
+  | { type: 'openInAgentmux'; ids: string[]; target: string }
   | { type: 'chooseTerminal' }
   | { type: 'startAgent' };
 
-/** Validates a message from the Agent Context view (webview input is untrusted). */
+/** Validates a message from the Saved view (webview input is untrusted). */
 export function isContextViewMessage(value: unknown): value is ContextViewToHost {
   if (typeof value !== 'object' || value === null) return false;
   const m = value as Record<string, unknown>;
@@ -145,6 +91,10 @@ export function isContextViewMessage(value: unknown): value is ContextViewToHost
       return shortString(m.id);
     case 'setTarget':
       return shortString(m.target);
+    case 'setProject':
+      return typeof m.path === 'string' && m.path.length > 0 && m.path.length <= 4096;
+    case 'openInAgentmux':
+      return ids(m.ids) && shortString(m.target);
     case 'sendMany':
       return ids(m.ids) && (m.target === undefined || shortString(m.target));
     case 'removeMany':
@@ -180,15 +130,4 @@ export function previewText(text: string, max = 160): string {
     .replace(/\s+/g, ' ')
     .trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-}
-
-/** `just now`, `5 min ago`, `2 h ago`, then the date. */
-export function timeAgo(time: number, now = Date.now()): string {
-  const seconds = Math.max(0, Math.round((now - time) / 1000));
-  if (seconds < 45) return 'just now';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  return new Date(time).toLocaleDateString();
 }

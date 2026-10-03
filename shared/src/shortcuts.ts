@@ -20,8 +20,8 @@ export type ShortcutScope =
   | 'tweak'
   | 'record'
   | 'a11y'
-  /** While the browser toolbar's popup after a capture is showing (its buttons). */
-  | 'capture';
+  /** While the send dialog is open after a capture (both products). */
+  | 'send';
 
 export interface ShortcutAction {
   id: string;
@@ -53,7 +53,7 @@ export const SCOPE_LABELS: Record<ShortcutScope, string> = {
   tweak: 'CSS tweak',
   record: 'Record',
   a11y: 'Accessibility check',
-  capture: 'After a capture',
+  send: 'Send dialog',
 };
 
 const cmd = (name: string) => `vscodeBrowser.${name}`;
@@ -427,12 +427,14 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     command: cmd('screenshot.sendToTerminal'),
   },
 
-  // The browser toolbar's popup after a capture (its buttons). Alt+Shift: the page stays
-  // usable, and Chrome keeps Alt+Shift+T, B, A and I for itself.
-  { id: 'capture.chat', label: 'Send to chat', scope: 'capture', keys: ['alt+shift+c'] },
-  { id: 'capture.terminal', label: 'Send to terminal', scope: 'capture', keys: ['alt+shift+x'] },
-  { id: 'capture.save', label: 'Save in VS Code', scope: 'capture', keys: ['alt+shift+s'] },
-  { id: 'capture.download', label: 'Download', scope: 'capture', keys: ['alt+shift+d'] },
+  // The send dialog after a capture (it holds the focus, so plain keys). 1-9 send to the agent
+  // with that number (fixed keys, like the drawing colors).
+  { id: 'send.default', label: 'Send to the default agent', scope: 'send', keys: ['enter'] },
+  { id: 'send.newThread', label: 'New agentmux thread', scope: 'send', keys: ['n'] },
+  { id: 'send.project', label: 'Change project', scope: 'send', keys: ['p'] },
+  { id: 'send.copy', label: 'Copy', scope: 'send', keys: ['c'] },
+  { id: 'send.download', label: 'Download', scope: 'send', keys: ['d'] },
+  { id: 'send.close', label: 'Close (keep it saved)', scope: 'send', keys: ['escape'] },
 
   // Console and network (while the drawer is open).
   { id: 'dev.console', label: 'Console', scope: 'devtools', keys: ['alt+1'] },
@@ -583,13 +585,7 @@ export function sanitizeOverrides(value: unknown): ShortcutOverrides {
  * clash with each other). Other modes take over the page; their keys win over browser-wide keys
  * while they are on, which is intended.
  */
-const CONCURRENT: ReadonlySet<ShortcutScope> = new Set([
-  'devtools',
-  'device',
-  'overlay',
-  'record',
-  'capture',
-]);
+const CONCURRENT: ReadonlySet<ShortcutScope> = new Set(['devtools', 'device', 'overlay', 'record']);
 
 export interface ShortcutConflict {
   key: string;
@@ -703,14 +699,16 @@ export const TOOLBAR_ACTION_IDS: ReadonlySet<string> = new Set([
   'shot.region',
   'shot.element',
   'shot.drawing',
-  'capture.chat',
-  'capture.terminal',
-  'capture.save',
-  'capture.download',
+  'send.default',
+  'send.newThread',
+  'send.project',
+  'send.copy',
+  'send.download',
+  'send.close',
 ]);
 
-/** Actions only the browser toolbar has (VS Code Browser has no popup after a capture). */
-const BROWSER_ONLY_SCOPES: ReadonlySet<ShortcutScope> = new Set(['capture']);
+/** Actions only the browser toolbar has. */
+const BROWSER_ONLY_SCOPES: ReadonlySet<ShortcutScope> = new Set([]);
 
 /** A short tag for where a shortcut works: VS for VS Code Browser, BR for the browser toolbar. */
 export interface ShortcutPlace {
@@ -832,7 +830,7 @@ export const SCOPE_ICONS: Record<ShortcutScope, string> = {
   tweak: 'symbol-property',
   record: 'record',
   a11y: 'accessibility',
-  capture: 'check-all',
+  send: 'send',
 };
 
 /** A key for people: `Ctrl+Shift+T`, `⇧⌘T`, `Esc`, `↑`. */
