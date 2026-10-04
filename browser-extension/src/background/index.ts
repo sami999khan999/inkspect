@@ -318,6 +318,26 @@ async function handle(
 ): Promise<BackgroundReply> {
   const tab = sender.tab;
   switch (message.type) {
+    case 'openSaved': {
+      // Browsers open it only in answer to a click: called before anything is awaited.
+      if (!tab?.windowId) return { ok: false, error: 'No tab' };
+      try {
+        if (__BROWSER__ === 'firefox') {
+          const sidebar = (
+            globalThis as { browser?: { sidebarAction?: { open(): Promise<void> } } }
+          ).browser?.sidebarAction;
+          await sidebar?.open();
+        } else {
+          await chrome.sidePanel.open({ windowId: tab.windowId });
+        }
+        return { ok: true };
+      } catch {
+        return {
+          ok: false,
+          error: 'The browser didn’t open the side panel: open Saved from the Inkspect button.',
+        };
+      }
+    }
     case 'capture': {
       if (!tab?.windowId) return { ok: false, error: 'No tab' };
       return { ok: true, dataUrl: await capture(tab.windowId) };

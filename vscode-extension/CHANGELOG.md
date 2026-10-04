@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Send dialog keys:** the page behind it no longer scrolls, Tab keeps the focus inside it (also while it is saving), and the Up and Down arrows pick the agent that Enter sends to.
+
+- **Send dialog redesign:** stacked previews, an icon tile and two lines per agent, keys on the right.
+
 ### Saved, then sent: one flow for every capture
 
 - **Every capture is saved at once,** without a question, into the project's **Saved** list (`.inkspect/`). Then a **send dialog** opens in the middle of the browser panel (a notification without one): the project's agents, one click or number key each (agentmux threads, terminal agents, chat), **Enter** for the default, **Shift+number** (or the ↗ button) to send and open the thread in agentmux, **New agentmux thread** (where agentmux has the project open), **Change project** (moves the capture), **Copy** and **Reveal**. **Esc** keeps it saved without sending. Its keys are in the Shortcuts view ("Send dialog"); the old "After a capture" keys are gone.

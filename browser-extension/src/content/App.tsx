@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   captureArea as drawingArea,
   clusterShapes,
@@ -30,6 +30,8 @@ import {
   DRAW_TOOLS,
   type CaptureMode,
 } from '@inkspect/shared/ui/DrawToolbar';
+import { Button } from '@inkspect/shared/ui/Button';
+import { DragHandle } from '@inkspect/shared/ui/DragHandle';
 import { IconButton } from '@inkspect/shared/ui/IconButton';
 import { Menu, type MenuItem, type MenuState } from '@inkspect/shared/ui/Menu';
 import { isInPopup, listenOutsidePress, pressedOpener } from '@inkspect/shared/ui/popover';
@@ -47,7 +49,6 @@ import {
   type HideUi,
 } from './capture';
 import { Inspector, type PickModifiers } from './Inspector';
-import { pushPage } from './pagePush';
 import {
   ConsolePanel,
   DEFAULT_EMULATION_OPTIONS,
@@ -58,6 +59,7 @@ import {
 } from './panels';
 import { ResponsiveView, type Zoom } from './ResponsiveView';
 import { copyImage, copyText, loadSettings, pageRequest, type Settings } from './page';
+import { useFloating } from './useFloating';
 import { useSendFlow } from './useSendFlow';
 
 type Tool =
@@ -128,7 +130,6 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
   const [bookmarked, setBookmarked] = useState(false);
   const bar = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
-  const [barHeight, setBarHeight] = useState(0);
   // The responsive view: the device, its zoom, and the page's address once it may be framed.
   const [responsive, setResponsive] = useState<DeviceSettings | null>(null);
   const [zoom, setZoom] = useState<Zoom>('fit');
@@ -178,18 +179,8 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     });
   }, [toggleSignal]);
 
-  // The bar's height (it grows a row while drawing) is the room the page makes above itself.
-  useLayoutEffect(() => {
-    const el = bar.current;
-    if (!open || !el) return;
-    const observer = new ResizeObserver(() => setBarHeight(el.offsetHeight));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [open]);
-  useEffect(() => {
-    pushPage(open ? barHeight : 0, host);
-  }, [open, barHeight, host]);
-  useEffect(() => () => pushPage(0, host), [host]);
+  // The bar floats over the page (the page isn't moved), where it was dragged to.
+  const { ref: floatRef, rest, dragging, handle } = useFloating(open, bar);
 
   // While the responsive view covers the page, the page itself doesn't scroll.
   const viewing = responsive !== null;
@@ -635,6 +626,11 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
         [changes.color!, ...colors.filter((c) => c !== changes.color)].slice(0, 6),
       );
   };
+  /** The side panel with the Saved list (the page's project). Opened in the click itself. */
+  const openSaved = () =>
+    void toBackground({ type: 'openSaved' }).then((reply) => {
+      if (!reply.ok) showToast(reply.error, { tone: 'error' });
+    });
   /** The star: bookmarks the page, or removes its bookmark (like the browser's own star). */
   const bookmarkPage = () =>
     void toBackground(
@@ -777,6 +773,11 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [open, tool, panel, menu, menuScope, shortcuts.map, host, offer]);
   if (!open) return null;
+  // Panels open on the side of the bar with more room; the responsive view starts below the bar
+  // when it rests at the top of the window.
+  const alignRight = !!rest && rest.x + rest.width / 2 > size.width / 2;
+  const above = !!rest && rest.y + rest.height / 2 > size.height / 2;
+  const viewTop = rest && rest.y < 64 ? rest.y + rest.height + 8 : 0;
   const mapper: DrawMapper = { scale: 1, scroll, bounds: { left: 0, top: 0, ...size } };
   const style = styles[drawTool] ?? DEFAULT_STYLE;
 
@@ -839,7 +840,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       )}
       {responsive && (
         <ResponsiveView
-          top={barHeight}
+          top={viewTop}
           device={responsive}
           onDevice={setResponsive}
           zoom={zoom}
@@ -851,160 +852,186 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           onClose={closeResponsive}
         />
       )}
-      <div className="bar" ref={bar} role="toolbar" aria-label="Inkspect">
-        <div className="bar-row">
-          <span className="bar-brand">
-            <img src={chrome.runtime.getURL('icons/32.png')} alt="" />
-            Inkspect
-          </span>
-          <span className="separator" />
-          <IconButton
-            icon="inspect"
-            label={`${withKey('Select an element to copy its details for AI', 'mode.inspect')}${viewing ? NOT_IN_FRAME : ''}`}
-            disabled={viewing}
-            active={tool?.kind === 'inspect'}
-            onClick={() => toggleTool({ kind: 'inspect', purpose: 'copy' })}
-          />
-          <IconButton
-            icon="edit"
-            label={`${withKey('Draw on the page', 'mode.draw')}${viewing ? NOT_IN_FRAME : ''}`}
-            disabled={viewing}
-            active={tool?.kind === 'draw'}
-            onClick={() => toggleTool({ kind: 'draw' })}
-          />
-          <IconButton
-            icon="device-camera"
-            label={withKey('Screenshot', 'mode.screenshot')}
-            className="shot-button"
-            onClick={(event) =>
-              openMenu(
-                event,
-                viewing
-                  ? [
-                      {
-                        label: 'Device screen',
-                        icon: 'device-mobile',
-                        onSelect: () => {
-                          const screen = frame.current?.parentElement;
-                          if (!screen) return;
-                          void captureElementRect(screen)
-                            .then((dataUrl) => deliver(dataUrl, 'Device screenshot'))
-                            .catch((error: unknown) =>
-                              showToast(`Screenshot failed: ${String(error)}`),
-                            );
+      <div
+        ref={floatRef}
+        className={['float', alignRight && 'align-right', above && 'above', dragging && 'dragging']
+          .filter(Boolean)
+          .join(' ')}
+      >
+        <div className="bar" ref={bar} role="toolbar" aria-label="Inkspect">
+          <div className="bar-row">
+            <span className="bar-brand">
+              <img src={chrome.runtime.getURL('icons/32.png')} alt="" />
+              Inkspect
+            </span>
+            <span className="separator" />
+            <IconButton
+              icon="inspect"
+              label={`${withKey('Select an element to copy its details for AI', 'mode.inspect')}${viewing ? NOT_IN_FRAME : ''}`}
+              disabled={viewing}
+              active={tool?.kind === 'inspect'}
+              onClick={() => toggleTool({ kind: 'inspect', purpose: 'copy' })}
+            />
+            <IconButton
+              icon="edit"
+              label={`${withKey('Draw on the page', 'mode.draw')}${viewing ? NOT_IN_FRAME : ''}`}
+              disabled={viewing}
+              active={tool?.kind === 'draw'}
+              onClick={() => toggleTool({ kind: 'draw' })}
+            />
+            <IconButton
+              icon="device-camera"
+              label={withKey('Screenshot', 'mode.screenshot')}
+              className="shot-button"
+              onClick={(event) =>
+                openMenu(
+                  event,
+                  viewing
+                    ? [
+                        {
+                          label: 'Device screen',
+                          icon: 'device-mobile',
+                          onSelect: () => {
+                            const screen = frame.current?.parentElement;
+                            if (!screen) return;
+                            void captureElementRect(screen)
+                              .then((dataUrl) => deliver(dataUrl, 'Device screenshot'))
+                              .catch((error: unknown) =>
+                                showToast(`Screenshot failed: ${String(error)}`),
+                              );
+                          },
                         },
-                      },
-                    ]
-                  : screenshotItems(),
-                viewing ? undefined : 'screenshot',
-              )
-            }
-          />
-          <IconButton
-            icon="device-mobile"
-            label={withKey('Responsive view', 'mode.device')}
-            active={viewing}
-            onClick={() => (viewing ? closeResponsive() : void openResponsive())}
-          />
-          <IconButton
-            icon="debug-console"
-            label={`${withKey('Console and network (copy errors for AI)', 'mode.devtools')}${viewing ? NOT_IN_FRAME : ''}`}
-            disabled={viewing}
-            active={panel === 'console'}
-            onClick={() => setPanel((p) => (p === 'console' ? null : 'console'))}
-          />
-          <IconButton
-            icon="copy"
-            label={`Copy page context for AI${viewing ? NOT_IN_FRAME : ''}`}
-            disabled={viewing}
-            onClick={() => void pageContext().then((text) => copy(text, 'Page context', 'page'))}
-          />
-          <IconButton
-            icon={bookmarked ? 'star-full' : 'star-empty'}
-            label={withKey(bookmarked ? 'Remove bookmark' : 'Bookmark this page', 'page.bookmark')}
-            className={bookmarked ? 'bookmarked' : undefined}
-            onClick={bookmarkPage}
-          />
-          <span className="bar-spacer" />
-          <IconButton
-            icon="keyboard"
-            label={withKey('Keyboard shortcuts (shared with VS Code)', 'open.shortcuts')}
-            active={panel === 'shortcuts'}
-            onClick={() => setPanel((p) => (p === 'shortcuts' ? null : 'shortcuts'))}
-          />
-          <IconButton
-            icon={linked ? 'plug' : 'debug-disconnect'}
-            label={linked ? `Linked with ${link.peer ?? 'VS Code'}` : 'Link with VS Code'}
-            active={panel === 'link'}
-            className={`link-${link.state}`}
-            onClick={() => setPanel((p) => (p === 'link' ? null : 'link'))}
-          />
-          <IconButton
-            icon="close"
-            label="Close toolbar"
-            onClick={() => {
-              closeResponsive();
-              setTool(null);
-              setPanel(null);
-              setOpen(false);
-            }}
-          />
+                      ]
+                    : screenshotItems(),
+                  viewing ? undefined : 'screenshot',
+                )
+              }
+            />
+            <IconButton
+              icon="device-mobile"
+              label={withKey('Responsive view', 'mode.device')}
+              active={viewing}
+              onClick={() => (viewing ? closeResponsive() : void openResponsive())}
+            />
+            <IconButton
+              icon="debug-console"
+              label={`${withKey('Console and network (copy errors for AI)', 'mode.devtools')}${viewing ? NOT_IN_FRAME : ''}`}
+              disabled={viewing}
+              active={panel === 'console'}
+              onClick={() => setPanel((p) => (p === 'console' ? null : 'console'))}
+            />
+            <IconButton
+              icon="copy"
+              label={`Copy page context for AI${viewing ? NOT_IN_FRAME : ''}`}
+              disabled={viewing}
+              onClick={() => void pageContext().then((text) => copy(text, 'Page context', 'page'))}
+            />
+            <IconButton
+              icon={bookmarked ? 'star-full' : 'star-empty'}
+              label={withKey(
+                bookmarked ? 'Remove bookmark' : 'Bookmark this page',
+                'page.bookmark',
+              )}
+              className={bookmarked ? 'bookmarked' : undefined}
+              onClick={bookmarkPage}
+            />
+            <span className="separator" />
+            <Button
+              size="sm"
+              variant="ghost"
+              icon="layout-sidebar-right"
+              className="saved-button"
+              title="Saved captures of this page's project, in the side panel"
+              onClick={openSaved}
+            >
+              Saved
+            </Button>
+            <span className="separator" />
+            <IconButton
+              icon="keyboard"
+              label={withKey('Keyboard shortcuts (shared with VS Code)', 'open.shortcuts')}
+              active={panel === 'shortcuts'}
+              onClick={() => setPanel((p) => (p === 'shortcuts' ? null : 'shortcuts'))}
+            />
+            <IconButton
+              icon={linked ? 'plug' : 'debug-disconnect'}
+              label={linked ? `Linked with ${link.peer ?? 'VS Code'}` : 'Link with VS Code'}
+              active={panel === 'link'}
+              className={`link-${link.state}`}
+              onClick={() => setPanel((p) => (p === 'link' ? null : 'link'))}
+            />
+            <IconButton
+              icon="close"
+              label="Close toolbar"
+              onClick={() => {
+                closeResponsive();
+                setTool(null);
+                setPanel(null);
+                setOpen(false);
+              }}
+            />
+            <DragHandle
+              label="Move the toolbar (drag, or use the arrow keys)"
+              dragging={dragging}
+              {...handle}
+            />
+          </div>
+          {tool?.kind === 'draw' && (
+            <DrawToolbar
+              tool={drawTool}
+              style={style}
+              recentColors={recentColors}
+              canUndo={undo.length > 0}
+              canRedo={redo.length > 0}
+              hasShapes={shapes.length > 0}
+              visible={drawingVisible}
+              onTool={setDrawTool}
+              onStyle={setDrawStyle}
+              keyOf={keyOf}
+              onUndo={doUndo}
+              onRedo={doRedo}
+              onClear={() => updateShapes([], true)}
+              onToggleVisible={() => setDrawingVisible((v) => !v)}
+              onCapture={(x, y) => {
+                setMenu({ x, y, items: drawingItems() });
+                // Its items' keys (Alt+G...) work while it is open.
+                setMenuScope('draw');
+              }}
+              onClose={() => setTool(null)}
+            />
+          )}
         </div>
-        {tool?.kind === 'draw' && (
-          <DrawToolbar
-            tool={drawTool}
-            style={style}
-            recentColors={recentColors}
-            canUndo={undo.length > 0}
-            canRedo={redo.length > 0}
-            hasShapes={shapes.length > 0}
-            visible={drawingVisible}
-            onTool={setDrawTool}
-            onStyle={setDrawStyle}
-            keyOf={keyOf}
-            onUndo={doUndo}
-            onRedo={doRedo}
-            onClear={() => updateShapes([], true)}
-            onToggleVisible={() => setDrawingVisible((v) => !v)}
-            onCapture={(x, y) => {
-              setMenu({ x, y, items: drawingItems() });
-              // Its items' keys (Alt+G...) work while it is open.
-              setMenuScope('draw');
-            }}
-            onClose={() => setTool(null)}
-          />
+        {panel && (
+          <div className="panel-dock" ref={dock}>
+            {panel === 'emulation' && (
+              <EmulationPanel
+                onClose={() => setPanel(null)}
+                value={emulation}
+                onChange={setEmulation}
+              />
+            )}
+            {panel === 'console' && (
+              <ConsolePanel
+                onClose={() => setPanel(null)}
+                toast={showToast}
+                copy={(text, what, kind) => void copy(text, what, kind)}
+                pageContext={pageContext}
+              />
+            )}
+            {panel === 'shortcuts' && (
+              <ShortcutsPanel
+                onClose={() => setPanel(null)}
+                map={shortcuts.map}
+                overrides={shortcuts.overrides}
+                linked={linked}
+              />
+            )}
+            {panel === 'link' && (
+              <LinkPanel onClose={() => setPanel(null)} toast={showToast} status={link} />
+            )}
+          </div>
         )}
       </div>
-      {panel && (
-        <div className="panel-dock" ref={dock} style={{ top: barHeight + 8 }}>
-          {panel === 'emulation' && (
-            <EmulationPanel
-              onClose={() => setPanel(null)}
-              value={emulation}
-              onChange={setEmulation}
-            />
-          )}
-          {panel === 'console' && (
-            <ConsolePanel
-              onClose={() => setPanel(null)}
-              toast={showToast}
-              copy={(text, what, kind) => void copy(text, what, kind)}
-              pageContext={pageContext}
-            />
-          )}
-          {panel === 'shortcuts' && (
-            <ShortcutsPanel
-              onClose={() => setPanel(null)}
-              map={shortcuts.map}
-              overrides={shortcuts.overrides}
-              linked={linked}
-            />
-          )}
-          {panel === 'link' && (
-            <LinkPanel onClose={() => setPanel(null)} toast={showToast} status={link} />
-          )}
-        </div>
-      )}
       {menu && <Menu menu={menu} onClose={closeMenu} />}
       {toast && (
         <div

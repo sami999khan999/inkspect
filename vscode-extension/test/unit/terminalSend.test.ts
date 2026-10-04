@@ -64,6 +64,21 @@ describe('finding agents in terminals', () => {
     expect(
       matchAgent('/usr/local/bin/node /usr/lib/node_modules/@openai/codex/bin/codex.js')?.id,
     ).toBe('codex');
+    expect(matchAgent('C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd')?.label).toBe('Codex');
+    expect(
+      matchAgent(
+        '"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js',
+      )?.id,
+    ).toBe('codex');
+    expect(
+      matchAgent(
+        'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\opencode-ai\\bin\\opencode.exe',
+      )?.label,
+    ).toBe('opencode');
+    expect(matchAgent('opencode --continue')?.id).toBe('opencode');
+    expect(matchAgent('"C:\\Users\\me\\AppData\\Local\\Programs\\agy\\agy.exe" chat')?.label).toBe(
+      'Antigravity',
+    );
     expect(matchAgent('gemini -m pro')?.label).toBe('Gemini CLI');
     expect(matchAgent('python -m aider')?.id).toBe('aider');
     expect(matchAgent('npx @anthropic-ai/claude-code')?.id).toBe('claude');

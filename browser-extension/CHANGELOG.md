@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **The toolbar floats:** instead of a full-width bar that pushed the page down, it is a panel over the page, as wide as its buttons. Drag it by the six dots on its right (it follows on a spring and settles inside the window), or focus them and use the arrow keys; it stays where you leave it, on every page. Panels open on the side with more room. The page is no longer moved, so apps that scroll inside no longer get a blank band at the top (or in their screenshots).
+- **Saved in the toolbar:** opens the side panel with the page's project's captures.
+
+- **Send dialog keys:** the page behind it no longer scrolls, Tab keeps the focus inside it (also while it is saving), and the Up and Down arrows pick the agent that Enter sends to.
+
+- **The link graph shows every open VS Code window**, not only the one that answers; the window serving the link is lit. The send dialog has a clearer layout: stacked previews, an icon tile and two lines per agent, keys on the right.
+
 ### Saved, then sent: one flow for every capture
 
 - **Every capture is saved at once** into the page's project, without a question, then a **send dialog** opens in the middle of the page (the popup's buttons in the corner are gone): the project's agents, one click or number key each (agentmux threads, VS Code terminal agents, chat), **Enter** for the default, **Shift+number** (or the ↗ button) to send and open the thread in agentmux, **New agentmux thread** (where agentmux has the project open), **Change project** (moves the capture there, and the site's next captures too), **Copy** and **Download**. **Esc** keeps it saved without sending.

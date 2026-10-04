@@ -140,6 +140,42 @@
   transition: background-color var(--ink-fast) var(--ink-ease);
 }
 
+/* DragHandle: the six-dot grip of a floating panel. */
+.drag-handle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: var(--ink-control);
+  padding: 0;
+  border: none;
+  border-radius: var(--ink-radius-sm);
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  cursor: grab;
+  touch-action: none;
+  transition:
+    background-color var(--ink-fast) var(--ink-ease),
+    color var(--ink-fast) var(--ink-ease);
+}
+
+.drag-handle:hover,
+.drag-handle.dragging {
+  background: var(--ink-hover);
+  color: var(--vscode-foreground);
+}
+
+.drag-handle.dragging {
+  cursor: grabbing;
+}
+
+.drag-handle:focus-visible {
+  outline: 1px solid var(--ink-focus);
+  outline-offset: -1px;
+}
+
 .icon-button.small {
   width: var(--ink-control-sm);
   height: var(--ink-control-sm);
@@ -1846,11 +1882,11 @@ body.vscode-high-contrast .thumb-picker-item.on .thumb-picker-image {
 .ink-modal {
   display: flex;
   flex-direction: column;
-  gap: var(--ink-space-2);
-  width: min(460px, 100%);
+  gap: var(--ink-space-3);
+  width: min(480px, 100%);
   max-height: calc(100vh - 2 * var(--ink-space-4));
   overflow: auto;
-  padding: var(--ink-space-3) var(--ink-space-4) var(--ink-space-3);
+  padding: var(--ink-space-4);
   background: var(--ink-surface);
   color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
   border: 1px solid var(--vscode-editorWidget-border, var(--ink-border));
@@ -1872,33 +1908,65 @@ body.vscode-high-contrast .thumb-picker-item.on .thumb-picker-image {
   gap: var(--ink-space-3);
 }
 
-.ink-modal-thumbs {
-  display: flex;
-  flex: none;
-  gap: 2px;
+.ink-modal-detail {
+  line-height: 1.35;
 }
 
-.ink-modal-thumbs img {
-  width: 56px;
-  height: 42px;
+/* The captures: one row of equal tiles under the heading. */
+.ink-modal-thumbs {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: var(--ink-space-2);
+}
+
+.ink-modal-thumb {
+  position: relative;
+  display: block;
+  height: 64px;
+  overflow: hidden;
   border: 1px solid var(--ink-border-subtle);
-  border-radius: var(--ink-radius-sm);
+  border-radius: var(--ink-radius);
+  background: var(--ink-surface-sunken);
+}
+
+.ink-modal-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   object-position: top center;
+}
+
+.ink-modal-more {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, #000 55%, transparent);
+  color: #fff;
+  font-size: var(--ink-font);
+  font-weight: 600;
 }
 
 .ink-modal-heading {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--ink-space-1);
   min-width: 0;
+}
+
+.ink-modal-project {
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .ink-modal-title {
   display: flex;
   align-items: center;
-  gap: var(--ink-space-1);
+  gap: var(--ink-space-2);
+  font-size: calc(var(--ink-font) + 1px);
   font-weight: 600;
 }
 
@@ -1928,17 +1996,27 @@ body.vscode-high-contrast .thumb-picker-item.on .thumb-picker-image {
 }
 
 .ink-modal-label {
-  margin-top: var(--ink-space-1);
+  display: flex;
+  align-items: center;
+  gap: var(--ink-space-2);
+  margin-bottom: calc(-1 * var(--ink-space-1));
   font-size: var(--ink-font-xs);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+}
+
+.ink-modal-count {
+  padding: 0 6px;
+  border-radius: var(--ink-radius-pill);
+  background: var(--ink-surface-sunken);
+  letter-spacing: 0;
 }
 
 .ink-modal-targets {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--ink-space-1);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1954,22 +2032,30 @@ body.vscode-high-contrast .thumb-picker-item.on .thumb-picker-image {
   display: flex;
   flex: 1;
   align-items: center;
-  gap: var(--ink-space-2);
+  gap: var(--ink-space-3);
   min-width: 0;
-  min-height: var(--ink-control-lg);
-  padding: 0 var(--ink-space-2);
-  border: 1px solid transparent;
-  border-radius: var(--ink-radius);
+  min-height: 52px;
+  padding: var(--ink-space-2) var(--ink-space-3) var(--ink-space-2) var(--ink-space-2);
+  border: 1px solid var(--ink-border-subtle);
+  border-radius: var(--ink-radius-lg);
   background: var(--ink-surface-sunken);
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--ink-fast) var(--ink-ease);
+  transition:
+    background-color var(--ink-fast) var(--ink-ease),
+    border-color var(--ink-fast) var(--ink-ease);
 }
 
 .ink-modal-send:hover:not(:disabled) {
+  border-color: var(--ink-border-strong);
   background: var(--ink-hover);
+}
+
+.ink-modal-send:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .ink-modal-send:focus-visible {
@@ -1982,28 +2068,62 @@ body.vscode-high-contrast .thumb-picker-item.on .thumb-picker-image {
   background: var(--ink-accent-soft);
 }
 
-.ink-modal-number {
-  display: inline-grid;
+.ink-modal-icon {
+  display: grid;
   flex: none;
   place-items: center;
-  width: 18px;
-  height: 18px;
-  border: 1px solid var(--ink-border-strong);
-  border-radius: var(--ink-radius-sm);
-  font-size: var(--ink-font-xs);
+  width: 34px;
+  height: 34px;
+  border-radius: var(--ink-radius);
+  background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+}
+
+.ink-modal-icon .codicon {
+  font-size: 17px;
+}
+
+.ink-modal-target.default .ink-modal-icon {
+  background: var(--ink-accent);
+  color: var(--vscode-button-foreground, #fff);
+}
+
+.ink-modal-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .ink-modal-agent {
+  overflow: hidden;
   font-weight: 600;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .ink-modal-where {
-  flex: 1;
   overflow: hidden;
   font-size: var(--ink-font-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ink-modal-keys {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--ink-space-1);
+}
+
+.ink-modal-number {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  border: 1px solid var(--ink-border-strong);
+  border-radius: var(--ink-radius-sm);
+  color: var(--ink-muted);
+  font-size: var(--ink-font-xs);
 }
 
 .ink-modal-thread {
@@ -2011,16 +2131,18 @@ body.vscode-high-contrast .thumb-picker-item.on .thumb-picker-image {
 }
 
 .ink-modal-empty {
-  padding: var(--ink-space-2) 0;
+  padding: var(--ink-space-3);
+  border: 1px dashed var(--ink-border-strong);
+  border-radius: var(--ink-radius-lg);
+  text-align: center;
 }
 
 .ink-modal-foot {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--ink-space-1);
-  margin-top: var(--ink-space-1);
-  padding-top: var(--ink-space-2);
+  gap: var(--ink-space-2);
+  padding-top: var(--ink-space-3);
   border-top: 1px solid var(--ink-border-subtle);
 }
 

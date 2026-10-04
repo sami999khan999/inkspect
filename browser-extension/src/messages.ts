@@ -53,6 +53,8 @@ export type ToBackground =
   | { type: 'endFraming' }
   | { type: 'bridgeStatus' }
   | { type: 'openOptions' }
+  /** Opens the side panel with the Saved list (answering the click that asked for it). */
+  | { type: 'openSaved' }
   | { type: 'pair'; code: string }
   /**
    * The projects (from the browser helper, or VS Code over the link), and the one `url`'s

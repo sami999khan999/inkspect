@@ -120,18 +120,35 @@
   opacity: 0 !important;
 }
 
-/* The toolbar: a full-width bar that slides down from the top; the page moves down to make room
-   (see pagePush.ts). While drawing, the drawing tools add a second row. */
-.bar {
+/* The toolbar floats over the page (the page isn't moved), as wide as its buttons. Its handle
+   drags it (useFloating.ts writes the position into the transform); panels hang off its side with
+   more room. While drawing, the drawing tools add a second row. */
+.float {
   position: fixed;
   top: 0;
-  right: 0;
   left: 0;
-  border-bottom: 1px solid var(--ink-border-strong);
+}
+
+.bar {
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  border: 1px solid var(--ink-border-strong);
+  border-radius: var(--ink-radius-lg);
   background: var(--vscode-editorWidget-background);
-  box-shadow: var(--ink-shadow-sm);
+  box-shadow: var(--ink-shadow-lg);
   user-select: none;
   animation: bar-in var(--ink-normal) var(--ink-ease);
+  transition:
+    box-shadow var(--ink-fast) var(--ink-ease),
+    scale var(--ink-fast) var(--ink-ease);
+}
+
+/* Lifted while dragged. */
+.float.dragging .bar {
+  scale: 1.02;
+  box-shadow:
+    var(--ink-shadow-lg),
+    0 16px 40px color-mix(in srgb, #000 30%, transparent);
 }
 
 .bar-row {
@@ -139,7 +156,7 @@
   align-items: center;
   gap: 2px;
   height: 40px;
-  padding: 0 8px;
+  padding: 0 4px 0 8px;
 }
 
 .bar-brand {
@@ -157,20 +174,30 @@
   border-radius: 4px;
 }
 
-.bar-spacer {
-  flex: 1;
+.saved-button {
+  flex-shrink: 0;
 }
 
-/* The drawing tools span the bar's width as its second row. */
+/* The drawing tools: the bar's second row. */
 .bar .draw-toolbar {
   justify-content: center;
+  border-top: 1px solid var(--ink-border-subtle);
   border-bottom: none;
+  border-radius: 0 0 var(--ink-radius-lg) var(--ink-radius-lg);
   background: transparent;
 }
 
 @keyframes bar-in {
   from {
-    transform: translateY(-100%);
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    animation: none;
+    transition: none;
   }
 }
 
@@ -292,10 +319,21 @@
 /* Panels ------------------------------------------------------------------------------------ */
 
 .panel-dock {
-  position: fixed;
-  right: 12px;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
   width: 370px;
-  max-width: calc(100vw - 24px);
+  max-width: calc(100vw - 16px);
+}
+
+.float.align-right .panel-dock {
+  right: 0;
+  left: auto;
+}
+
+.float.above .panel-dock {
+  top: auto;
+  bottom: calc(100% + 8px);
 }
 
 .panel {
