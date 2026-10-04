@@ -3,7 +3,12 @@
 // `console` and `fetch` needs the page's own objects. It answers the content script through DOM
 // events and never exposes anything to the page itself.
 import { accessibleInfo, COLLECT_HELPERS, collectElementDetails } from '@inkspect/shared/collect';
-import type { ConsoleEntry, ConsoleLevel, NetworkEntry } from '@inkspect/shared/devtools';
+import {
+  formatConsoleArguments,
+  type ConsoleEntry,
+  type ConsoleLevel,
+  type NetworkEntry,
+} from '@inkspect/shared/devtools';
 import {
   PAGE_REQUEST_EVENT,
   PAGE_RESPONSE_EVENT,
@@ -69,7 +74,8 @@ function install(): void {
           id: nextId++,
           time: Date.now(),
           level,
-          text: args.map(describe).join(' ').slice(0, 4000),
+          // `%s`, `%d`, `%c`... applied like DevTools does (styles dropped), not printed.
+          text: formatConsoleArguments(args.map(describe)).slice(0, 4000),
           source: 'console',
           ...callSite(),
         });

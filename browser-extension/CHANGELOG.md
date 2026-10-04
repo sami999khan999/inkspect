@@ -2,8 +2,15 @@
 
 ## Unreleased
 
+- **Readable console:** styled logs (`%c`) show their text instead of their CSS, and `%s`/`%d` placeholders are filled in, as in DevTools. A long file name no longer squeezes the message into a narrow column (it is cut instead, and shown decoded: `[root].js`, not `%5Broot%5D.js`).
+- **Docked in the responsive view:** while it is open, the toolbar is a full-width bar across the top, with the view right under it, and can't be dragged; closing the view puts it back where it was.
+- **The toolbar stays open when the page reloads** (or the tab goes to another page of the same site): it comes back by itself.
+- **Copy for AI buttons** are named by what they copy: Console errors, Failed requests, Page context.
 - **The toolbar floats:** instead of a full-width bar that pushed the page down, it is a panel over the page, as wide as its buttons. Drag it by the six dots on its right (it follows on a spring and settles inside the window), or focus them and use the arrow keys; it stays where you leave it, on every page. Panels open on the side with more room. The page is no longer moved, so apps that scroll inside no longer get a blank band at the top (or in their screenshots).
 - **Saved in the toolbar:** opens the side panel with the page's project's captures.
+- **Drawings belong to their page:** each page keeps its own drawings. Going to another page (also a single-page app's route change) shows that page's, and coming back, or reloading, brings them back.
+- **Drawings stay on scrolling sections:** a drawing on a part of the page that scrolls by itself (a sidebar, a list, a chat) moves with it when it scrolls and is hidden outside it, on screen and in screenshots. While drawing, the wheel scrolls the section under the pointer.
+- **Screenshots include your drawings:** the Screenshot menu (visible area, full page, region, element) keeps what you drew on the page, as long as the drawings are shown. Hide them (the eye button) for a clean screenshot.
 
 - **Send dialog keys:** the page behind it no longer scrolls, Tab keeps the focus inside it (also while it is saving), and the Up and Down arrows pick the agent that Enter sends to.
 

@@ -43,9 +43,11 @@ const paint = (el: HTMLElement | null, p: Point) => {
 
 /**
  * Makes `ref`'s element float at a draggable position while `open`. `measure` is the part whose
- * size keeps it inside the window (the bar, not the panels hanging off it).
+ * size keeps it inside the window (the bar, not the panels hanging off it). While `docked` (the
+ * responsive view), it sits at the top-left as a full-width bar and can't be moved; undocked, it
+ * goes back where it was.
  */
-export function useFloating(open: boolean, measure: RefObject<HTMLElement | null>) {
+export function useFloating(open: boolean, measure: RefObject<HTMLElement | null>, docked = false) {
   const ref = useRef<HTMLDivElement>(null);
   const [rest, setRest] = useState<Rest | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -127,6 +129,13 @@ export function useFloating(open: boolean, measure: RefObject<HTMLElement | null
   // Opening: where it was left last time (kept inside this window), else centered at the top.
   useLayoutEffect(() => {
     if (!open) return;
+    if (docked) {
+      pos.current = { x: 0, y: 0 };
+      target.current = { x: 0, y: 0 };
+      paint(ref.current, pos.current);
+      settle();
+      return;
+    }
     let current = true;
     const place = (saved: unknown) => {
       if (!current) return;
@@ -154,12 +163,13 @@ export function useFloating(open: boolean, measure: RefObject<HTMLElement | null
       frame.current = 0;
       grab.current = null;
     };
-  }, [open, clamp, settle, measure]);
+  }, [open, docked, clamp, settle, measure]);
 
   // It stays in the window when the window shrinks, or the bar grows (the drawing tools' row).
   useEffect(() => {
     if (!open) return;
     const keepInside = () => {
+      if (docked) return settle();
       if (grab.current) return;
       const centered = { x: (innerWidth - sizeOf(measure.current).width) / 2, y: START_TOP };
       moveTo(clamp(placed.current ? target.current : centered));
@@ -171,10 +181,10 @@ export function useFloating(open: boolean, measure: RefObject<HTMLElement | null
       observer.disconnect();
       removeEventListener('resize', keepInside);
     };
-  }, [open, clamp, moveTo, measure]);
+  }, [open, docked, clamp, moveTo, settle, measure]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLElement>) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || docked) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     placed.current = true;
@@ -209,6 +219,7 @@ export function useFloating(open: boolean, measure: RefObject<HTMLElement | null
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (docked) return;
     const step = event.shiftKey ? KEY_STEP * 4 : KEY_STEP;
     const delta: Record<string, Point> = {
       ArrowLeft: { x: -step, y: 0 },

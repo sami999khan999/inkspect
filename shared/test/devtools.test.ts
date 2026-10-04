@@ -128,5 +128,15 @@ describe('console values', () => {
     );
     expect(formatConsoleArguments(['%cstyled', 'color:red'])).toBe('styled');
     expect(formatConsoleArguments(['plain', 'a', 'b'])).toBe('plain a b');
+    // Next.js replays server logs with a styled " Server " badge.
+    expect(
+      formatConsoleArguments([
+        '%c%s%c Query failed: %s',
+        'background: #e6e6e6; border-radius: 2px',
+        ' Server ',
+        '',
+        'timeout',
+      ]),
+    ).toBe(' Server  Query failed: timeout');
   });
 });

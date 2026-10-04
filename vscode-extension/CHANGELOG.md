@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Console drawer:** a long file name no longer squeezes the message into a narrow column (it is cut instead).
+- **Drawings belong to their page:** each page keeps its own drawings. Going to another page (a single-page app's route change too) shows that page's, and coming back brings them back, also after a restart (`vscodeBrowser.drawing.clearOnNavigation` off keeps the same drawings on every page, as before). Private tabs keep them in memory only.
+- **Drawings stay on scrolling sections:** a drawing on a part of the page that scrolls by itself (a sidebar, a list, a chat) moves with it when it scrolls and is hidden outside it, on screen and in screenshots.
+
 - **Send dialog keys:** the page behind it no longer scrolls, Tab keeps the focus inside it (also while it is saving), and the Up and Down arrows pick the agent that Enter sends to.
 
 - **Send dialog redesign:** stacked previews, an icon tile and two lines per agent, keys on the right.

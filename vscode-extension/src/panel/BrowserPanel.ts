@@ -21,9 +21,10 @@ import {
 import { formatDetails } from '../shared/elementInfo';
 import type { SavedWindow, SessionStore } from '../features/sessions';
 import { acceptToFilters } from '../features/fileChooser';
+import type { DrawingStore } from '../features/drawings';
 import { stepZoom, type ZoomStore } from '../features/zoom';
 import { normalizeSourcePath } from '../features/sourcePaths';
-import { sanitizeShapes } from '../shared/annotations';
+import { drawingPageKey, sanitizeShapes } from '../shared/annotations';
 import {
   formatConsoleErrors,
   formatFailedRequests,
@@ -95,6 +96,7 @@ export interface Services {
   extensions: ExtensionsManager;
   sessions: SessionStore;
   zoom: ZoomStore;
+  drawings: DrawingStore;
   logger: vscode.LogOutputChannel;
 }
 
@@ -329,7 +331,12 @@ export class BrowserPanel implements vscode.Disposable {
       framesAcked: this.framesAcked,
       lastSavedImage: this.lastSavedImage,
       activeTabId: this.activeTabId,
-      tabs: this.tabs.map((tab) => ({ ...tab.toState(), live: !!tab.session })),
+      tabs: this.tabs.map((tab) => ({
+        ...tab.toState(),
+        live: !!tab.session,
+        drawings: tab.annotations.map((shape) => shape.id),
+        sections: tab.sectionsSent,
+      })),
     };
   }
 
@@ -645,7 +652,15 @@ export class BrowserPanel implements vscode.Disposable {
       }
       case 'annotations': {
         const tab = this.tab(message.tabId);
-        if (tab) tab.annotations = sanitizeShapes(message.shapes);
+        if (!tab) return;
+        tab.annotations = sanitizeShapes(message.shapes);
+        this.keepDrawings(tab);
+        this.measureSections(tab);
+        return;
+      }
+      case 'sectionAt': {
+        const section = await this.tab(message.tabId)?.session?.sectionAt(message.x, message.y);
+        this.post({ type: 'drawingSection', requestId: message.requestId, section });
         return;
       }
       case 'annotationCapture': {
@@ -833,7 +848,11 @@ export class BrowserPanel implements vscode.Disposable {
     this.post({ type: 'settings', recordMaxSeconds: getConfig().recordMaxSeconds });
     this.postState();
     const active = this.activeTab;
-    if (active) this.post({ type: 'annotations', tabId: active.id, shapes: active.annotations });
+    if (active) {
+      this.post({ type: 'annotations', tabId: active.id, shapes: active.annotations });
+      active.sectionsSent = '';
+      this.measureSections(active);
+    }
     // The webview was (re)loaded, so its canvas is empty: restart the stream for a fresh frame.
     if (this.activeTab) void this.showTab(this.activeTab, true);
   }
@@ -1119,6 +1138,8 @@ export class BrowserPanel implements vscode.Disposable {
     this.activeTabId = tab.id;
     tab.lastActive = Date.now();
     this.post({ type: 'annotations', tabId: tab.id, shapes: tab.annotations });
+    tab.sectionsSent = '';
+    this.measureSections(tab);
     if (previous) this.hideTab(previous);
     if (!tab.session && !tab.sessionPromise && !tab.internalPage) {
       // A discarded tab, or one whose engine went away: load it again.
@@ -1377,6 +1398,8 @@ export class BrowserPanel implements vscode.Disposable {
       void this.host.webview.postMessage(message).then((delivered) => {
         if (!delivered) session.ackFrame();
       });
+      // The page changed on screen: sections with drawings may have scrolled.
+      this.measureSections(tab);
     });
     events.on('info', (url, title) => {
       if (tab.internalPage) return;
@@ -1397,16 +1420,16 @@ export class BrowserPanel implements vscode.Disposable {
       tab.fullscreen = false;
       if (!tab.internalPage) tab.url = url;
       if (!tab.private) this.services.history.recordVisit(url, tab.title);
-      if (tab.annotations.length && getConfig().drawingClearOnNavigation) {
-        tab.annotations = [];
-        this.post({ type: 'annotations', tabId: tab.id, shapes: [] });
-      }
+      if (!tab.internalPage) this.followDrawingPage(tab, url);
       const zoom = this.services.zoom.get(url);
       if (zoom !== tab.zoom) {
         tab.zoom = zoom;
         void this.showTab(tab);
       }
       this.queueState();
+    });
+    events.on('navigatedInPage', (url) => {
+      if (!tab.internalPage) this.followDrawingPage(tab, url);
     });
     events.on('history', (canGoBack, canGoForward) => {
       tab.canGoBack = canGoBack;
@@ -2118,7 +2141,73 @@ export class BrowserPanel implements vscode.Disposable {
     const tab = this.activeTab;
     if (!tab) return;
     tab.annotations = sanitizeShapes(shapes);
+    this.keepDrawings(tab);
     this.post({ type: 'annotations', tabId: tab.id, shapes: tab.annotations });
+    this.measureSections(tab);
+  }
+
+  /**
+   * Each page keeps its own drawings: when a tab goes to another page (a single-page app's route
+   * change too), it shows that page's and keeps the ones it left. With
+   * `drawing.clearOnNavigation` off, the same drawings stay on every page.
+   */
+  private followDrawingPage(tab: Tab, url: string): void {
+    const page = drawingPageKey(url);
+    if (page === tab.drawingPage) return;
+    const first = tab.drawingPage === undefined;
+    tab.drawingPage = page;
+    if (!getConfig().drawingClearOnNavigation) {
+      this.keepDrawings(tab);
+      return;
+    }
+    const saved = tab.private
+      ? (tab.privateDrawings.get(page) ?? [])
+      : this.services.drawings.get(page);
+    // A tab's first page keeps what is already drawn (restored with the tab) unless it has its own.
+    if (first && !saved.length) {
+      this.keepDrawings(tab);
+      return;
+    }
+    tab.annotations = saved;
+    tab.sectionsSent = '';
+    this.post({ type: 'annotations', tabId: tab.id, shapes: tab.annotations });
+    this.measureSections(tab);
+  }
+
+  /** Remembers a tab's drawings for its page (private tabs: in memory only). */
+  private keepDrawings(tab: Tab): void {
+    if (tab.internalPage) return;
+    const page = (tab.drawingPage ??= drawingPageKey(tab.url));
+    if (tab.private) tab.privateDrawings.set(page, tab.annotations);
+    else this.services.drawings.set(page, tab.annotations);
+  }
+
+  /**
+   * Tells the webview where the sections the tab's drawings are anchored to are, when that
+   * changed. Runs after frames (scrolling paints), one measure at a time.
+   */
+  private measureSections(tab: Tab): void {
+    const session = tab.session;
+    if (!session || !tab.annotations.some((shape) => shape.anchor)) return;
+    if (tab.measuringSections) {
+      tab.measureAgain = true;
+      return;
+    }
+    tab.measuringSections = true;
+    tab.measureAgain = false;
+    const ids = [...new Set(tab.annotations.flatMap((shape) => shape.anchor ?? []))];
+    void session
+      .measureSections(ids)
+      .then((anchors) => {
+        const json = JSON.stringify(anchors);
+        if (json === tab.sectionsSent) return;
+        tab.sectionsSent = json;
+        this.post({ type: 'drawingSections', tabId: tab.id, anchors });
+      })
+      .finally(() => {
+        tab.measuringSections = false;
+        if (tab.measureAgain) this.measureSections(tab);
+      });
   }
 
   /** Copies the details of the element at a point (viewport CSS pixels) in the active tab. */

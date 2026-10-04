@@ -1663,8 +1663,12 @@ kbd {
 }
 
 .dev-source {
-  flex-shrink: 0;
+  /* Long file names are cut, never the message. */
+  max-width: 35%;
+  overflow: hidden;
   font-size: var(--ink-font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dev-empty {

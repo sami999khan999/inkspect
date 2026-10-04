@@ -264,7 +264,7 @@ npm run package      # production build + .vsix
 
 - **What it holds:**
   - element details and selectors (`elementInfo`, `collect`)
-  - drawing (`annotations`, `drawing/render`, `drawing/composite`, `ui/DrawingLayer`, `ui/DrawToolbar`)
+  - drawing (`annotations`, `drawing/render`, `drawing/composite`, `ui/DrawingLayer`, `ui/DrawToolbar`) and the page's scrolling sections drawings are anchored to (`sections`: self-contained, VS Code sends them to Chromium as source text)
   - capturing and sending: the target ids (`targets`), the send dialog (`sendModal`, `ui/SendModal`), the Saved list (`saved`, `ui/SavedList`), the picker's hint and selection bar (`ui/PickerHint`, `ui/SelectionBar`)
   - `devices`, Copy-for-AI formats (`devtools`), `color`
   - the bookmark merge (`bookmarkSync`), the link protocol (`bridge`) and the hub protocol (`hub`)

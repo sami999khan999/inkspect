@@ -52,6 +52,8 @@ export type ToBackground =
   | { type: 'allowFraming'; url: string }
   | { type: 'endFraming' }
   | { type: 'bridgeStatus' }
+  /** The toolbar opened or closed: an open one comes back when the page reloads. */
+  | { type: 'toolbarOpen'; open: boolean }
   | { type: 'openOptions' }
   /** Opens the side panel with the Saved list (answering the click that asked for it). */
   | { type: 'openSaved' }

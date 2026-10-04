@@ -189,7 +189,7 @@ browser-extension/
 - [x] **Opening it:** shortcut `toggle-toolbar` (Alt+Shift+K) and the toolbar button. The toolbar is injected on demand (`activeTab` + `scripting`) with its MAIN-world helper.
 - [x] **The toolbar:**
   - React in a **closed** shadow root on a custom element, so page CSS can't reach it.
-  - A floating panel over the page (the page isn't moved), as wide as its buttons: dragged by its six-dot handle on a spring (or moved with the arrow keys), kept inside the window, remembered between pages. Panels open on the side with more room; **Saved** opens the side panel. While drawing, the drawing tools are its second row. (It was a full-width bar that pushed the page down, which left blank bands in apps that scroll inside.)
+  - A floating panel over the page (the page isn't moved), as wide as its buttons: dragged by its six-dot handle on a spring (or moved with the arrow keys), kept inside the window, remembered between pages. Panels open on the side with more room; **Saved** opens the side panel. While the responsive view is open, it is docked as a full-width bar across the top (no handle). While drawing, the drawing tools are its second row. (It was a full-width bar that pushed the page down, which left blank bands in apps that scroll inside.)
   - Follows the system light/dark theme through VS Code theme variables.
   - The codicon font is registered from bytes (`FontFace`), so page CSP can't block it.
   - Hidden during captures.
@@ -234,9 +234,10 @@ browser-extension/
 
 - [x] **Drawing layer:** the shared `DrawingLayer` and `DrawToolbar` over the page, anchored to the document (follows scrolling), with every tool, style, undo/redo and tool shortcut.
 - [x] **Captures:** Screenshot drawing area, each drawing separately, drawing area without drawings, annotated viewport, and annotated full page (shared `captureArea` / `clusterShapes` / `compositeScreenshot`).
-- [ ] Drawings are kept while the toolbar is open. They aren't kept across navigations.
+- [x] **Drawings per page:** each page (its address; hash routes count as pages) keeps its own drawings in local storage (the 30 most recent pages), restored when you come back, after a reload, or on a single-page app's route change.
+- [x] **Scrolling sections** (shared with VS Code Browser, `@inkspect/shared/sections`): a drawing on a section that scrolls by itself (a sidebar, a list, a code panel) is anchored to it (a CSS selector), moves with it and is clipped to it, on screen and in screenshots. While drawing, the wheel scrolls the section under the pointer.
 
-**End-to-end tests:** the drawing-area image is the stroke plus 40 px of padding.
+**End-to-end tests:** the drawing-area image is the stroke plus 40 px of padding; drawings go away on a route change and come back; a drawing on a scrolling pane follows the wheel's scroll and hides when scrolled out.
 
 ## Phase 5: Devices and resolutions
 

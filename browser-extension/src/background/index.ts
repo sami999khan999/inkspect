@@ -252,6 +252,22 @@ function commandBinding(shown: string): string {
 
 // The toolbar button opens the popup (src/popup/), which opens the toolbar with 'toggleToolbar'.
 
+/** Puts the toolbar's scripts into a tab unless they are there; true when they were added. */
+async function injectToolbar(tabId: number): Promise<boolean> {
+  const [probe] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => !!(window as Window & { __inkspect?: boolean }).__inkspect,
+  });
+  if (probe?.result) return false;
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['main-world.js'],
+    world: 'MAIN',
+  });
+  return true;
+}
+
 async function toggleToolbar(
   tab: chrome.tabs.Tab,
   key?: string,
@@ -259,18 +275,7 @@ async function toggleToolbar(
   bridge.ensureConnected();
   if (!tab.id) return { ok: false, error: 'No tab' };
   try {
-    const [probe] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => !!(window as Window & { __inkspect?: boolean }).__inkspect,
-    });
-    if (!probe?.result) {
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ['main-world.js'],
-        world: 'MAIN',
-      });
-    }
+    await injectToolbar(tab.id);
     await chrome.tabs.sendMessage(tab.id, { type: 'toggle', key } satisfies ToContent);
     return { ok: true };
   } catch {
@@ -284,6 +289,41 @@ async function toggleToolbar(
     };
   }
 }
+
+// An open toolbar comes back when its page reloads (or the tab goes to another page the
+// browser still lets us reach). The tabs are kept in session storage: the service worker can stop.
+const OPEN_TABS_KEY = 'inkspectOpenTabs';
+
+async function openTabs(): Promise<number[]> {
+  const stored = (await chrome.storage.session.get(OPEN_TABS_KEY).catch(() => ({}))) as {
+    [OPEN_TABS_KEY]?: unknown;
+  };
+  const list = stored[OPEN_TABS_KEY];
+  return Array.isArray(list) ? list.filter((id): id is number => typeof id === 'number') : [];
+}
+
+async function setToolbarOpen(tabId: number, open: boolean): Promise<void> {
+  const list = (await openTabs()).filter((id) => id !== tabId);
+  if (open) list.push(tabId);
+  await chrome.storage.session.set({ [OPEN_TABS_KEY]: list }).catch(() => {});
+}
+
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (change.status !== 'complete') return;
+  void openTabs().then(async (list) => {
+    if (!list.includes(tabId)) return;
+    try {
+      // Only into a new document (a page whose toolbar is still there is left alone).
+      if (await injectToolbar(tabId)) {
+        await chrome.tabs.sendMessage(tabId, { type: 'toggle' } satisfies ToContent);
+      }
+    } catch {
+      // The browser no longer lets us into the tab (another site): it stays closed.
+      await setToolbarOpen(tabId, false);
+    }
+  });
+});
+chrome.tabs.onRemoved.addListener((tabId) => void setToolbarOpen(tabId, false));
 
 bridge.onStatus((status) => {
   void broadcast({ type: 'bridgeStatus', status });
@@ -380,6 +420,9 @@ async function handle(
       return { ok: true };
     case 'bridgeStatus':
       return { ok: true, status: bridge.status };
+    case 'toolbarOpen':
+      if (tab?.id) await setToolbarOpen(tab.id, message.open);
+      return { ok: true };
     case 'openOptions':
       await chrome.runtime.openOptionsPage();
       return { ok: true };

@@ -33,7 +33,7 @@ export interface ShapeStyle {
   fill: boolean;
 }
 
-export type Shape =
+export type Shape = (
   | {
       id: string;
       kind: 'stroke';
@@ -43,13 +43,105 @@ export type Shape =
     }
   | { id: string; kind: ShapeTool; start: Point; end: Point; style: ShapeStyle }
   | { id: string; kind: 'text'; at: Point; text: string; style: ShapeStyle }
-  | { id: string; kind: 'callout'; at: Point; number: number; style: ShapeStyle };
+  | { id: string; kind: 'callout'; at: Point; number: number; style: ShapeStyle }
+) & {
+  /**
+   * The scrolling section of the page the shape was drawn on (a key into `Anchors`). Its
+   * coordinates are then that section's content: document coordinates plus the section's scroll,
+   * so the shape moves with the section when it scrolls.
+   */
+  anchor?: string;
+};
 
 export interface Bounds {
   x: number;
   y: number;
   width: number;
   height: number;
+}
+
+/** Where a scrolling section is now: its scroll, and the part of the document it shows. */
+export interface Anchor {
+  x: number;
+  y: number;
+  clip: Bounds;
+}
+
+export type Anchors = Record<string, Anchor>;
+
+/** A scrolling section of the page (its selector), and where it is now. */
+export interface Section {
+  id: string;
+  at: Anchor;
+}
+
+/** Makes anchors measured in a page safe to use (the page can change what its scripts return). */
+export function sanitizeAnchors(value: unknown): Anchors {
+  const anchors: Anchors = {};
+  if (typeof value !== 'object' || value === null) return anchors;
+  const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>).slice(0, 200)) {
+    const a = raw as { x?: unknown; y?: unknown; clip?: Record<string, unknown> } | null;
+    const clip = a?.clip;
+    if (
+      id.length <= 1_000 &&
+      finite(a?.x) &&
+      finite(a.y) &&
+      clip &&
+      finite(clip.x) &&
+      finite(clip.y) &&
+      finite(clip.width) &&
+      finite(clip.height)
+    ) {
+      anchors[id] = {
+        x: a.x,
+        y: a.y,
+        clip: { x: clip.x, y: clip.y, width: clip.width, height: clip.height },
+      };
+    }
+  }
+  return anchors;
+}
+
+/**
+ * Shapes in document coordinates, as they are on screen now: anchored ones moved by their
+ * section's scroll. Shapes whose section is gone are left out.
+ */
+export function placeShapes(shapes: Shape[], anchors: Anchors | undefined): Shape[] {
+  if (!anchors) return shapes;
+  const placed: Shape[] = [];
+  for (const shape of shapes) {
+    if (!shape.anchor) {
+      placed.push(shape);
+      continue;
+    }
+    const anchor = anchors[shape.anchor];
+    if (anchor) placed.push(moveShape(shape, -anchor.x, -anchor.y));
+  }
+  return placed;
+}
+
+/**
+ * The page drawings belong to, from its address. The fragment is left out (it scrolls within a
+ * page), unless it is a route (`#/settings`, `#!/inbox`), which single-page apps use as pages.
+ */
+export function drawingPageKey(href: string): string {
+  try {
+    const url = new URL(href);
+    if (!/^#!?\//.test(url.hash)) url.hash = '';
+    return url.href;
+  } catch {
+    return href;
+  }
+}
+
+/** The part of two rectangles they share, or undefined. */
+export function intersect(a: Bounds, b: Bounds): Bounds | undefined {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.width, b.x + b.width);
+  const bottom = Math.min(a.y + a.height, b.y + b.height);
+  return right > x && bottom > y ? { x, y, width: right - x, height: bottom - y } : undefined;
 }
 
 export const COLORS = [
@@ -256,6 +348,8 @@ export function sanitizeShapes(value: unknown): Shape[] {
       const style = shape.style as Record<string, unknown> | undefined;
       if (
         typeof shape.id !== 'string' ||
+        (shape.anchor !== undefined &&
+          (typeof shape.anchor !== 'string' || shape.anchor.length > 1_000)) ||
         typeof style?.color !== 'string' ||
         typeof style.width !== 'number'
       ) {

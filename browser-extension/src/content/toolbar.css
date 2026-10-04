@@ -144,6 +144,24 @@
 }
 
 /* Lifted while dragged. */
+/* Docked across the top while the responsive view is open (it can't be moved then). */
+.float.docked {
+  right: 0;
+}
+
+.float.docked .bar {
+  width: auto;
+  max-width: none;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
+.float.docked .bar-row {
+  justify-content: center;
+}
+
 .float.dragging .bar {
   scale: 1.02;
   box-shadow:
@@ -451,7 +469,8 @@
 .log {
   min-height: 120px;
   max-height: 280px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid var(--ink-border-subtle);
   border-radius: var(--ink-radius);
   background: var(--vscode-editor-background);
@@ -504,8 +523,12 @@
 }
 
 .log-source {
-  flex-shrink: 0;
+  /* Long file names are cut, never the message. */
+  max-width: 35%;
+  overflow: hidden;
   color: var(--ink-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .log-empty {

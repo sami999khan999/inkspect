@@ -4,6 +4,7 @@ import {
   clusterShapes,
   COLORS,
   DEFAULT_STYLE,
+  placeShapes,
   type Bounds,
   type DrawTool,
   type Shape,
@@ -48,6 +49,7 @@ import {
   viewportArea,
   type HideUi,
 } from './capture';
+import { anchorAt, measureAnchors, scrollUnder } from './anchors';
 import { Inspector, type PickModifiers } from './Inspector';
 import {
   ConsolePanel,
@@ -59,6 +61,7 @@ import {
 } from './panels';
 import { ResponsiveView, type Zoom } from './ResponsiveView';
 import { copyImage, copyText, loadSettings, pageRequest, type Settings } from './page';
+import { flushDrawings, loadDrawings, pageKeyOf, saveDrawings } from './pageDrawings';
 import { useFloating } from './useFloating';
 import { useSendFlow } from './useSendFlow';
 
@@ -157,10 +160,62 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     height: number;
   } | null>(null);
   const [sampling, setSampling] = useState(false);
+  // Drawings belong to a page: the one shown now (single-page apps change it without loading),
+  // the one `shapes` are for, and whether that page's saved drawings are loaded yet.
+  const [page, setPage] = useState(() => pageKeyOf(location.href));
+  const [drawnOn, setDrawnOn] = useState(page);
+  const [loadedPage, setLoadedPage] = useState<string | null>(null);
+  if (drawnOn !== page) {
+    setDrawnOn(page);
+    setShapes([]);
+    setUndo([]);
+    setRedo([]);
+  }
+  // Scrolling inside the page moves drawings anchored to its sections: a re-render measures them.
+  const [, setSectionScroll] = useState(0);
+  const drawHost = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     shapesRef.current = shapes;
   }, [shapes]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadDrawings(page).then((saved) => {
+      if (cancelled) return;
+      // Anything drawn while they loaded goes on top.
+      setShapes((now) => [...saved, ...now]);
+      setLoadedPage(page);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [page]);
+  useEffect(() => {
+    if (loadedPage === drawnOn) saveDrawings(drawnOn, shapes);
+  }, [shapes, drawnOn, loadedPage]);
+  useEffect(() => {
+    const check = () => setPage(pageKeyOf(location.href));
+    const timer = setInterval(check, 500);
+    window.addEventListener('popstate', check);
+    window.addEventListener('hashchange', check);
+    window.addEventListener('pagehide', flushDrawings);
+    let frame = 0;
+    const onSectionScroll = (event: Event) => {
+      if (event.target === document || !shapesRef.current.some((shape) => shape.anchor)) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setSectionScroll((n) => n + 1));
+    };
+    document.addEventListener('scroll', onSectionScroll, { capture: true, passive: true });
+    return () => {
+      clearInterval(timer);
+      cancelAnimationFrame(frame);
+      window.removeEventListener('popstate', check);
+      window.removeEventListener('hashchange', check);
+      window.removeEventListener('pagehide', flushDrawings);
+      document.removeEventListener('scroll', onSectionScroll, { capture: true });
+    };
+  }, []);
 
   // The toggle message: open, or close everything.
   const lastSignal = useRef(0);
@@ -179,8 +234,14 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     });
   }, [toggleSignal]);
 
+  // The background puts an open toolbar back after the page reloads.
+  useEffect(() => {
+    void toBackground({ type: 'toolbarOpen', open });
+  }, [open]);
+
   // The bar floats over the page (the page isn't moved), where it was dragged to.
-  const { ref: floatRef, rest, dragging, handle } = useFloating(open, bar);
+  // While the responsive view is open, the bar is docked across the top, above the view.
+  const { ref: floatRef, rest, dragging, handle } = useFloating(open, bar, responsive !== null);
 
   // While the responsive view covers the page, the page itself doesn't scroll.
   const viewing = responsive !== null;
@@ -318,6 +379,25 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     };
   }, [hideHost]);
 
+  /** Captures part of the document, with the drawings on it while they are shown. */
+  const shoot = useCallback(
+    async (area: Bounds): Promise<string> => {
+      const captured = await captureArea(area, hideUi);
+      const shapes = drawingVisible ? shapesRef.current : [];
+      if (!shapes.length) return captured.dataUrl;
+      const bytes = new Uint8Array(await (await fetch(captured.dataUrl)).arrayBuffer());
+      const base64 = await compositeScreenshot(
+        bytes,
+        'image/png',
+        captured.area,
+        shapes,
+        measureAnchors(shapes),
+      );
+      return `data:image/png;base64,${base64}`;
+    },
+    [drawingVisible, hideUi],
+  );
+
   const linked = link.state === 'connected';
   // Every capture is copied, saved (into the page's project with the browser helper, VS Code's
   // Saved list over the link), then the send dialog offers where it goes.
@@ -379,13 +459,15 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       if (mode === 'element') return setTool({ kind: 'inspect', purpose: 'screenshot' });
       try {
         const area = mode === 'viewport' ? viewportArea() : fullPageArea();
-        const { dataUrl } = await captureArea(area, hideUi);
-        await deliver(dataUrl, mode === 'viewport' ? 'Screenshot' : 'Full-page screenshot');
+        await deliver(
+          await shoot(area),
+          mode === 'viewport' ? 'Screenshot' : 'Full-page screenshot',
+        );
       } catch (error) {
         showToast(`Screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     },
-    [deliver, hideUi, showToast],
+    [deliver, shoot, showToast],
   );
 
   /** Element details, from the page world when possible (framework components are only there). */
@@ -407,12 +489,14 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
   const captureElement = useCallback(
     async (el: Element) => {
       const rect = el.getBoundingClientRect();
-      return captureArea(
-        { x: rect.x + scrollX, y: rect.y + scrollY, width: rect.width, height: rect.height },
-        hideUi,
-      );
+      return shoot({
+        x: rect.x + scrollX,
+        y: rect.y + scrollY,
+        width: rect.width,
+        height: rect.height,
+      });
     },
-    [hideUi],
+    [shoot],
   );
 
   // The bar over a Shift+click selection: every choice acts on all the selected elements.
@@ -423,7 +507,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     if (action === 'copy') return copyElements(list);
     try {
       const shots = [];
-      for (const el of list) shots.push((await captureElement(el)).dataUrl);
+      for (const el of list) shots.push(await captureElement(el));
       await deliver(shots, list.length === 1 ? 'Element screenshot' : 'Element screenshots');
     } catch (error) {
       showToast(`Screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -464,8 +548,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       // Alt+click is a screenshot of the element, and only that; a click captures its details.
       if (shot || modifiers.screenshot) {
         try {
-          const { dataUrl } = await captureElement(el);
-          await deliver(dataUrl, 'Element screenshot');
+          await deliver(await captureElement(el), 'Element screenshot');
         } catch (error) {
           showToast(`Screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -520,12 +603,15 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
 
   const captureDrawing = useCallback(
     async (mode: CaptureMode) => {
-      const all = shapesRef.current;
+      // Where the drawings are on the page now (those on scrolled sections move with them).
+      const anchors = measureAnchors(shapesRef.current);
+      const all = placeShapes(shapesRef.current, anchors);
       if (!all.length && (mode === 'area' || mode === 'groups' || mode === 'clean')) {
         showToast('Draw something first.');
         return;
       }
       const padding = settings.current?.annotationPadding ?? 40;
+      const byId = new Map(shapesRef.current.map((shape) => [shape.id, shape]));
       const groups = mode === 'groups' ? clusterShapes(all, 80) : [all];
       const images: string[] = [];
       for (const group of groups) {
@@ -543,7 +629,8 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
             bytes,
             'image/png',
             captured.area,
-            mode === 'clean' ? [] : group,
+            mode === 'clean' ? [] : group.map((shape) => byId.get(shape.id)!),
+            anchors,
           );
           images.push(`data:image/png;base64,${base64}`);
         } catch (error) {
@@ -596,6 +683,20 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       clearTimeout(timer);
     };
   }, [open, hasRedactions, freshImage, scroll.x, scroll.y, size.width, size.height]);
+
+  // While drawing, the layer covers the page: the wheel scrolls the section under the pointer.
+  const drawing = tool?.kind === 'draw';
+  useEffect(() => {
+    const layer = drawHost.current;
+    if (!drawing || !layer) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) return; // Zoom.
+      event.preventDefault();
+      scrollUnder(event, host);
+    };
+    layer.addEventListener('wheel', onWheel, { passive: false });
+    return () => layer.removeEventListener('wheel', onWheel);
+  }, [drawing, host]);
 
   // Toolbar ---------------------------------------------------------------------------------
 
@@ -777,14 +878,15 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
   // when it rests at the top of the window.
   const alignRight = !!rest && rest.x + rest.width / 2 > size.width / 2;
   const above = !!rest && rest.y + rest.height / 2 > size.height / 2;
-  const viewTop = rest && rest.y < 64 ? rest.y + rest.height + 8 : 0;
+  const viewTop = !rest ? 0 : viewing ? rest.height : rest.y < 64 ? rest.y + rest.height + 8 : 0;
   const mapper: DrawMapper = { scale: 1, scroll, bounds: { left: 0, top: 0, ...size } };
+  const anchors = measureAnchors(shapes);
   const style = styles[drawTool] ?? DEFAULT_STYLE;
 
   return (
     <div className={`inkspect${hidden ? ' capturing' : ''}${sampling ? ' sampling' : ''}`}>
       {(shapes.length > 0 || tool?.kind === 'draw') && (
-        <div className="draw-host">
+        <div className="draw-host" ref={drawHost}>
           <DrawingLayer
             mapper={mapper}
             shapes={shapes}
@@ -795,6 +897,8 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
             onChange={updateShapes}
             liveRedactions
             pixelSource={freshImage}
+            anchors={anchors}
+            anchorAt={(point) => anchorAt(point[0] - scrollX, point[1] - scrollY, host)}
           />
         </div>
       )}
@@ -832,8 +936,8 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           onCancel={() => setTool(null)}
           onDone={(rect) => {
             setTool(null);
-            void captureArea({ ...rect, x: rect.x + scrollX, y: rect.y + scrollY }, hideUi)
-              .then(({ dataUrl }) => deliver(dataUrl, 'Region screenshot'))
+            void shoot({ ...rect, x: rect.x + scrollX, y: rect.y + scrollY })
+              .then((dataUrl) => deliver(dataUrl, 'Region screenshot'))
               .catch((error: unknown) => showToast(`Screenshot failed: ${String(error)}`));
           }}
         />
@@ -854,7 +958,13 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       )}
       <div
         ref={floatRef}
-        className={['float', alignRight && 'align-right', above && 'above', dragging && 'dragging']
+        className={[
+          'float',
+          viewing && 'docked',
+          alignRight && 'align-right',
+          above && 'above',
+          dragging && 'dragging',
+        ]
           .filter(Boolean)
           .join(' ')}
       >
@@ -970,11 +1080,13 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
                 setOpen(false);
               }}
             />
-            <DragHandle
-              label="Move the toolbar (drag, or use the arrow keys)"
-              dragging={dragging}
-              {...handle}
-            />
+            {!viewing && (
+              <DragHandle
+                label="Move the toolbar (drag, or use the arrow keys)"
+                dragging={dragging}
+                {...handle}
+              />
+            )}
           </div>
           {tool?.kind === 'draw' && (
             <DrawToolbar
