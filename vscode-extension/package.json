@@ -976,7 +976,7 @@
         "vscodeBrowser.drawing.clearOnNavigation": {
           "type": "boolean",
           "default": true,
-          "description": "Remove drawings when the tab navigates to another page."
+          "markdownDescription": "Each page keeps its own drawings: going to another page (a single-page app's route change too) shows that page's drawings, and coming back brings them back. Turn off to keep the same drawings on every page."
         },
         "vscodeBrowser.devtools.enabled": {
           "type": "boolean",

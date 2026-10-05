@@ -1,11 +1,15 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   constrain,
   hitTest,
+  intersect,
   moveShape,
+  placeShapes,
   PEN_TOOLS,
   SHAPE_TOOLS,
+  type Anchors,
   type DrawTool,
+  type Section,
   type PenTool,
   type Point,
   type Shape,
@@ -47,6 +51,13 @@ interface DrawingLayerProps {
    * `liveRedactions`, the backdrop blur stands in while there is none (say, after scrolling).
    */
   pixelSource?: CanvasImageSource;
+  /**
+   * The page's scrolling sections (browser extension): shapes drawn on one scroll with it. New
+   * shapes are anchored to the section `anchorAt` finds at the point (document coordinates).
+   * It may answer later (VS Code asks the page): the shape is then moved onto the section.
+   */
+  anchors?: Anchors;
+  anchorAt?: (point: Point) => Section | undefined | Promise<Section | undefined>;
 }
 
 let nextId = 1;
@@ -66,6 +77,8 @@ export function DrawingLayer({
   onChange,
   liveRedactions,
   pixelSource,
+  anchors: measured,
+  anchorAt,
 }: DrawingLayerProps) {
   const blurRedactions = liveRedactions && !pixelSource;
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -77,10 +90,30 @@ export function DrawingLayer({
     setDraftState(next);
   };
   const [selectedId, setSelectedId] = useState<string | undefined>();
-  const [text, setText] = useState<{ at: Point; local: Point; value: string } | null>(null);
+  const [text, setText] = useState<{
+    id: string;
+    at: Point;
+    anchor?: string;
+    local: Point;
+    value: string;
+  } | null>(null);
   const drag = useRef<{ start: Point; original: Shape } | null>(null);
   const erasing = useRef(false);
   const { bounds, scale, scroll } = mapper;
+  // The section of the shape being drawn, until the host measures it with the others.
+  const [fresh, setFresh] = useState<Section | null>(null);
+  // For sections found after the shape was drawn.
+  const shapesRef = useRef(shapes);
+  useEffect(() => {
+    shapesRef.current = shapes;
+  }, [shapes]);
+  const anchors = useMemo(
+    () =>
+      measured && fresh && !(fresh.id in measured)
+        ? { ...measured, [fresh.id]: fresh.at }
+        : measured,
+    [measured, fresh],
+  );
 
   // Draw whenever shapes, the draft, the scroll position or the size change.
   useLayoutEffect(() => {
@@ -108,9 +141,11 @@ export function DrawingLayer({
         pixelSource: pixelSource ?? pageCanvas ?? undefined,
         skipRedactions: blurRedactions,
         selectedId: interactive ? selectedId : undefined,
+        anchors,
       },
     );
   }, [
+    anchors,
     blurRedactions,
     pixelSource,
     shapes,
@@ -152,30 +187,71 @@ export function DrawingLayer({
     ];
   };
 
+  /** A document point in the coordinates of shapes anchored to `anchor`. */
+  const inSpace = (point: Point, anchor: string | undefined): Point => {
+    const at = anchor ? anchors?.[anchor] : undefined;
+    return at ? [point[0] + at.x, point[1] + at.y] : point;
+  };
+  const hits = (shape: Shape, point: Point) =>
+    (!shape.anchor || !anchors || !!anchors[shape.anchor]) &&
+    hitTest(shape, inSpace(point, shape.anchor), 6 / scale);
+
   const erase = (point: Point) => {
-    const remaining = shapes.filter((s) => !hitTest(s, point, 6 / scale));
+    const remaining = shapes.filter((s) => !hits(s, point));
     if (remaining.length !== shapes.length) onChange(remaining, false);
   };
 
   const commitText = () => {
     if (text?.value.trim()) {
       onChange(
-        [...shapes, { id: newId(), kind: 'text', at: text.at, text: text.value, style }],
+        [
+          ...shapes,
+          { id: text.id, kind: 'text', at: text.at, text: text.value, style, anchor: text.anchor },
+        ],
         true,
       );
     }
     setText(null);
   };
 
+  /** Moves a shape drawn on the page onto the section found under it since. */
+  const settle = (id: string, section: Section) => {
+    setFresh(section);
+    const lift = (shape: Shape): Shape =>
+      shape.id === id && !shape.anchor
+        ? { ...moveShape(shape, section.at.x, section.at.y), anchor: section.id }
+        : shape;
+    const draft = draftRef.current;
+    if (draft?.id === id) setDraft(lift(draft));
+    setText((t) =>
+      t?.id === id && !t.anchor
+        ? { ...t, at: [t.at[0] + section.at.x, t.at[1] + section.at.y], anchor: section.id }
+        : t,
+    );
+    if (shapesRef.current.some((shape) => shape.id === id && !shape.anchor)) {
+      onChange(shapesRef.current.map(lift), false);
+    }
+  };
+
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (event.button !== 0 || !visible) return;
     event.preventDefault();
     const point = toDocument(event);
+    // New shapes belong to the scrolling section under the pointer, if any.
+    const id = newId();
+    const found = tool === 'eraser' || tool === 'select' ? undefined : anchorAt?.(point);
+    const section = found instanceof Promise ? undefined : found;
+    if (found instanceof Promise) void found.then((later) => later && settle(id, later));
+    const anchor = section?.id;
+    if (section) setFresh(section);
+    const at = section ? ([point[0] + section.at.x, point[1] + section.at.y] as Point) : point;
     if (text) commitText();
     if (tool === 'text') {
       const rect = event.currentTarget.getBoundingClientRect();
       setText({
-        at: point,
+        id,
+        at,
+        anchor,
         local: [event.clientX - rect.left, event.clientY - rect.top],
         value: '',
       });
@@ -183,7 +259,7 @@ export function DrawingLayer({
     }
     if (tool === 'callout') {
       const number = Math.max(0, ...shapes.map((s) => (s.kind === 'callout' ? s.number : 0))) + 1;
-      onChange([...shapes, { id: newId(), kind: 'callout', at: point, number, style }], true);
+      onChange([...shapes, { id, kind: 'callout', at, number, style, anchor }], true);
       return;
     }
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -195,7 +271,7 @@ export function DrawingLayer({
       return;
     }
     if (tool === 'select') {
-      const hit = [...shapes].reverse().find((s) => hitTest(s, point, 6 / scale));
+      const hit = [...shapes].reverse().find((s) => hits(s, point));
       setSelectedId(hit?.id);
       if (hit) {
         drag.current = { start: point, original: hit };
@@ -206,19 +282,20 @@ export function DrawingLayer({
     const pressure = event.pressure || 0.5;
     if ((PEN_TOOLS as readonly string[]).includes(tool)) {
       setDraft({
-        id: newId(),
+        id,
         kind: 'stroke',
         tool: tool as PenTool,
-        points: [[...point, pressure]],
+        points: [[...at, pressure]],
         style,
+        anchor,
       });
     } else if ((SHAPE_TOOLS as readonly string[]).includes(tool)) {
-      setDraft({ id: newId(), kind: tool as ShapeTool, start: point, end: point, style });
+      setDraft({ id, kind: tool as ShapeTool, start: at, end: at, style, anchor });
     }
   };
 
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const point = toDocument(event);
+    let point = toDocument(event);
     if (erasing.current) {
       erase(point);
       return;
@@ -234,6 +311,7 @@ export function DrawingLayer({
     }
     const draft = draftRef.current;
     if (!draft) return;
+    point = inSpace(point, draft.anchor);
     if (draft.kind === 'stroke') {
       setDraft({ ...draft, points: [...draft.points, [...point, event.pressure || 0.5]] });
     } else if (draft.kind !== 'text' && draft.kind !== 'callout') {
@@ -274,18 +352,28 @@ export function DrawingLayer({
     >
       {blurRedactions &&
         visible &&
-        (draft ? [...shapes, draft] : shapes).map((shape) => {
+        placeShapes(draft ? [...shapes, draft] : shapes, anchors).map((shape) => {
           if (shape.kind !== 'blur') return null;
           const [a, b] = [shape.start, shape.end];
+          const box = {
+            x: Math.min(a[0], b[0]),
+            y: Math.min(a[1], b[1]),
+            width: Math.abs(b[0] - a[0]),
+            height: Math.abs(b[1] - a[1]),
+          };
+          // Inside its scrolling section only.
+          const clip = shape.anchor && anchors?.[shape.anchor]?.clip;
+          const shown = clip ? intersect(box, clip) : box;
+          if (!shown) return null;
           return (
             <div
               key={shape.id}
               className="drawing-redaction"
               style={{
-                left: (Math.min(a[0], b[0]) - scroll.x) * scale,
-                top: (Math.min(a[1], b[1]) - scroll.y) * scale,
-                width: Math.abs(b[0] - a[0]) * scale,
-                height: Math.abs(b[1] - a[1]) * scale,
+                left: (shown.x - scroll.x) * scale,
+                top: (shown.y - scroll.y) * scale,
+                width: shown.width * scale,
+                height: shown.height * scale,
               }}
             />
           );

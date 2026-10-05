@@ -2,9 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   clusterShapes,
   DEFAULT_STYLE,
+  placeShapes,
   shapeBounds,
   union,
+  type Anchors,
   type DrawTool,
+  type Section,
   type Shape,
   type ShapeStyle,
 } from '@shared/annotations';
@@ -126,6 +129,9 @@ interface EditorState {
   y: number;
 }
 
+/** No sections measured (a stable value, so the drawing layer doesn't redraw for it). */
+const NO_ANCHORS: Anchors = {};
+
 export function App() {
   const [engine, setEngine] = useState<EngineState>({ status: 'starting' });
   const [windowState, setWindowState] = useState<WindowState>({
@@ -184,6 +190,13 @@ export function App() {
   const drawingRef = useRef(drawing);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pendingCaptures = useRef(new Map<string, (image: CapturedImage) => void>());
+  // Scrolling sections of the page that drawings are anchored to (measured by the host).
+  const [sections, setSections] = useState<{ tabId: string; anchors: Anchors }>({
+    tabId: '',
+    anchors: NO_ANCHORS,
+  });
+  const sectionsRef = useRef(sections);
+  const pendingSections = useRef(new Map<string, (section: Section | undefined) => void>());
   const [menu, setMenu] = useState<MenuState | null>(null);
   /** The screenshot chooser is a menu whose letters are shortcuts (the `screenshot` scope). */
   const [menuScope, setMenuScope] = useState<ShortcutScope | null>(null);
@@ -261,6 +274,20 @@ export function App() {
   useEffect(() => {
     drawingRef.current = drawing;
   }, [drawing]);
+  useEffect(() => {
+    sectionsRef.current = sections;
+  }, [sections]);
+
+  /** Asks the page for the scrolling section at a point (document CSS pixels). */
+  const requestSection = useCallback(
+    (tabId: string, point: [number, number]) =>
+      new Promise<Section | undefined>((resolve) => {
+        const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        pendingSections.current.set(requestId, resolve);
+        postToHost({ type: 'sectionAt', tabId, requestId, x: point[0], y: point[1] });
+      }),
+    [],
+  );
 
   /** Changes the drawings; `commit` adds an undo step. Syncs them to the host (debounced). */
   const updateShapes = useCallback((shapes: Shape[], commit: boolean) => {
@@ -320,12 +347,17 @@ export function App() {
   /** Screenshots with the drawings composited on top (see CaptureMode). */
   const captureDrawing = useCallback(
     async (mode: CaptureMode, toAgent = false) => {
-      const { tabId, shapes } = drawingRef.current;
+      const { tabId, shapes: drawn } = drawingRef.current;
       if (!tabId) return;
+      // Where the drawings are now (those on scrolled sections move with them).
+      const anchors =
+        sectionsRef.current.tabId === tabId ? sectionsRef.current.anchors : NO_ANCHORS;
+      const shapes = placeShapes(drawn, anchors);
       if (!shapes.length && (mode === 'area' || mode === 'groups' || mode === 'clean')) {
         showToast('Draw something first.');
         return;
       }
+      const byId = new Map(drawn.map((shape) => [shape.id, shape]));
       const groups = mode === 'groups' ? clusterShapes(shapes, 80) : [shapes];
       // Every screenshot first, then all of them: a group is only as big as what was captured
       // (one that fails ends it, with what came before still delivered and offered).
@@ -343,7 +375,8 @@ export function App() {
             image.data,
             image.mimeType ?? 'image/png',
             image.rect,
-            mode === 'clean' ? [] : group,
+            mode === 'clean' ? [] : group.map((shape) => byId.get(shape.id)!),
+            anchors,
           ),
         );
       }
@@ -472,8 +505,19 @@ export function App() {
         case 'annotations':
           // The host sends these as it activates a tab, which can arrive before the new tab
           // state has rendered, so do not filter on the active tab here.
+          // A sync still waiting would put the drawings of the page left onto this one.
+          if (message.tabId === drawingRef.current.tabId) clearTimeout(syncTimer.current);
           setDrawing({ tabId: message.tabId, shapes: message.shapes, undo: [], redo: [] });
           break;
+        case 'drawingSections':
+          setSections({ tabId: message.tabId, anchors: message.anchors });
+          break;
+        case 'drawingSection': {
+          const resolve = pendingSections.current.get(message.requestId);
+          pendingSections.current.delete(message.requestId);
+          resolve?.(message.section);
+          break;
+        }
         case 'annotationImage': {
           const resolve = pendingCaptures.current.get(message.requestId);
           pendingCaptures.current.delete(message.requestId);
@@ -963,6 +1007,8 @@ export function App() {
                           tool={drawTool}
                           style={styles[drawTool] ?? DEFAULT_STYLE}
                           onChange={updateShapes}
+                          anchors={sections.tabId === activeTab.id ? sections.anchors : NO_ANCHORS}
+                          anchorAt={(point) => requestSection(activeTab.id, point)}
                         />
                       )}
                       {tool?.kind === 'inspect' && (

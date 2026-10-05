@@ -2,6 +2,7 @@
 // (`Runtime.callFunctionOn`), so they must be self-contained.
 import { collectElementDetails, STYLE_PROPERTIES } from '@inkspect/shared/collect';
 import { buildSelector, buildXPath } from '@inkspect/shared/elementInfo';
+import { measureSections, sectionAt } from '@inkspect/shared/sections';
 
 /**
  * Collects `ElementDetails` (except role and name, which come from the accessibility tree).
@@ -35,3 +36,16 @@ export const PARENT_FUNCTION = `function () {
 export const FIRST_CHILD_FUNCTION = `function () {
   return this.firstElementChild || (this.shadowRoot && this.shadowRoot.firstElementChild) || null;
 }`;
+
+/**
+ * The scrolling section at a point (document CSS pixels) and where it is, for anchoring drawings
+ * (`@inkspect/shared/sections`, shared with the browser extension).
+ */
+export const SECTION_AT_FUNCTION = `function (x, y) {
+  const id = (${sectionAt.toString()})(x - scrollX, y - scrollY, null);
+  const at = id && (${measureSections.toString()})([id])[id];
+  return at ? { id, at } : null;
+}`;
+
+/** Where the sections drawings are anchored to are now. Argument: their selectors. */
+export const MEASURE_SECTIONS_FUNCTION = measureSections.toString();

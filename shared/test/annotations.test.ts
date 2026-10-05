@@ -4,8 +4,12 @@ import {
   clusterShapes,
   constrain,
   DEFAULT_STYLE,
+  drawingPageKey,
   hitTest,
+  intersect,
   moveShape,
+  placeShapes,
+  sanitizeAnchors,
   sanitizeShapes,
   shapeBounds,
   type Shape,
@@ -97,5 +101,53 @@ describe('annotation geometry', () => {
     ]);
     expect(shapes.map((s) => s.id)).toEqual(['ok']);
     expect(sanitizeShapes('bad')).toEqual([]);
+  });
+});
+
+describe('anchored shapes (scrolling sections)', () => {
+  const anchors = { '#list': { x: 0, y: 300, clip: { x: 0, y: 100, width: 200, height: 400 } } };
+
+  it('places shapes on a section by its scroll, and drops those whose section is gone', () => {
+    const onList = { ...rect('a', 10, 500, 20, 20), anchor: '#list' };
+    const gone = { ...rect('b', 0, 0, 5, 5), anchor: '#gone' };
+    const placed = placeShapes([rect('p', 1, 2, 3, 4), onList, gone], anchors);
+    expect(placed.map((s) => s.id)).toEqual(['p', 'a']);
+    expect(shapeBounds(placed[1]!).y).toBe(200 - 2);
+    // Without anchors (VS Code), shapes are where they were drawn.
+    expect(placeShapes([onList], undefined)).toEqual([onList]);
+  });
+
+  it('intersects rectangles', () => {
+    expect(
+      intersect({ x: 0, y: 0, width: 10, height: 10 }, { x: 5, y: 5, width: 10, height: 10 }),
+    ).toEqual({ x: 5, y: 5, width: 5, height: 5 });
+    expect(
+      intersect({ x: 0, y: 0, width: 1, height: 1 }, { x: 5, y: 5, width: 1, height: 1 }),
+    ).toBeUndefined();
+  });
+
+  it('keeps anchors when sanitizing, and drops shapes with a malformed one', () => {
+    const kept = sanitizeShapes([{ ...rect('a', 0, 0, 1, 1), anchor: '#list' }]);
+    expect(kept[0]?.anchor).toBe('#list');
+    expect(sanitizeShapes([{ ...rect('a', 0, 0, 1, 1), anchor: 42 }])).toEqual([]);
+  });
+});
+
+describe('drawingPageKey', () => {
+  it('leaves out fragments within a page, keeps hash routes', () => {
+    expect(drawingPageKey('https://a.test/docs?x=1#install')).toBe('https://a.test/docs?x=1');
+    expect(drawingPageKey('https://a.test/#/settings')).toBe('https://a.test/#/settings');
+    expect(drawingPageKey('not a url')).toBe('not a url');
+  });
+});
+
+describe('sanitizeAnchors', () => {
+  it('keeps well-formed anchors and drops the rest', () => {
+    const good = { x: 1, y: 2, clip: { x: 0, y: 0, width: 10, height: 10 } };
+    expect(
+      sanitizeAnchors({ '#a': good, '#b': { x: 'no', y: 0, clip: good.clip }, '#c': null }),
+    ).toEqual({ '#a': good });
+    expect(sanitizeAnchors({ '#a': { ...good, x: Infinity } })).toEqual({});
+    expect(sanitizeAnchors('nope')).toEqual({});
   });
 });

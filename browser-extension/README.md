@@ -41,7 +41,7 @@ The extension reaches a page only when you open the toolbar on it (`activeTab`);
 
 ## The toolbar
 
-Press **Alt+Shift+K** or click the extension's button. A bar slides down across the top of the page, and the page moves down to make room (its fixed and sticky headers too). It has:
+Press **Alt+Shift+K** or click the extension's button. A toolbar floats over the top of the page (the page isn't moved). Drag it anywhere by the six dots on its right (or focus them and use the arrow keys); it stays where you leave it. It has:
 
 - **Select an element** to capture its details for an AI agent (Alt+click: a screenshot of it; Shift+click for several, Enter captures them all)
 - **Draw** on the page, then screenshot just the drawing
@@ -52,7 +52,7 @@ Press **Alt+Shift+K** or click the extension's button. A bar slides down across 
 
 **After every capture:** it is copied, saved into the page's project (`.inkspect/` in that folder; the Inbox when no project fits), and a dialog in the middle of the page asks where it goes: each agent of the project (agentmux threads, VS Code terminal agents, chat) is one click or a number key away, Enter picks the default, Shift+number also opens the thread in agentmux, and Esc keeps it saved without sending. **Change project** moves it. Without VS Code or the browser helper, the dialog offers Copy and Download.
 
-**The Saved side panel** (the popup's **Saved**): the captures of the tab's project, or of another, ready to send, open in agentmux or remove.
+**The Saved side panel** (**Saved** in the toolbar or the popup): the captures of the tab's project, or of another, ready to send, open in agentmux or remove.
 
 **About the responsive view:**
 

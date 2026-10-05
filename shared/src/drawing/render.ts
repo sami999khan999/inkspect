@@ -4,6 +4,7 @@ import {
   calloutRadius,
   shapeBounds,
   textSize,
+  type Anchors,
   type PenTool,
   type Point,
   type Shape,
@@ -23,6 +24,11 @@ export interface RenderOptions {
   /** Redactions are drawn by someone else (the browser extension's live backdrop blur). */
   skipRedactions?: boolean;
   selectedId?: string;
+  /**
+   * Where the page's scrolling sections are: shapes anchored to one are moved by its scroll and
+   * clipped to it, and those whose section is gone are not drawn. Without it, anchors are ignored.
+   */
+  anchors?: Anchors;
 }
 
 const PEN_OPTIONS: Record<
@@ -42,6 +48,48 @@ export function drawShapes(
   shapes: Shape[],
   t: Transform,
   options: RenderOptions = {},
+): void {
+  const { anchors } = options;
+  if (!anchors || !shapes.some((shape) => shape.anchor)) {
+    drawInPlace(ctx, shapes, t, options);
+    return;
+  }
+  // Shapes on the page itself, then each scrolling section's, inside it.
+  const sections = new Map<string, Shape[]>();
+  const page: Shape[] = [];
+  for (const shape of shapes) {
+    if (!shape.anchor) page.push(shape);
+    else sections.set(shape.anchor, [...(sections.get(shape.anchor) ?? []), shape]);
+  }
+  drawInPlace(ctx, page, t, options);
+  for (const [id, list] of sections) {
+    const anchor = anchors[id];
+    if (!anchor) continue;
+    const { clip } = anchor;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(
+      (clip.x - t.offsetX) * t.scale,
+      (clip.y - t.offsetY) * t.scale,
+      clip.width * t.scale,
+      clip.height * t.scale,
+    );
+    ctx.clip();
+    drawInPlace(
+      ctx,
+      list,
+      { scale: t.scale, offsetX: t.offsetX + anchor.x, offsetY: t.offsetY + anchor.y },
+      options,
+    );
+    ctx.restore();
+  }
+}
+
+function drawInPlace(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  shapes: Shape[],
+  t: Transform,
+  options: RenderOptions,
 ): void {
   const map = ([x, y]: Point | [number, number, number]): Point => [
     (x - t.offsetX) * t.scale,

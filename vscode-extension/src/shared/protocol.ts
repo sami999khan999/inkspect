@@ -1,5 +1,5 @@
 import { CONTEXT_KINDS, type ContextKind } from './agentContext';
-import type { Shape } from './annotations';
+import type { Anchors, Section, Shape } from './annotations';
 import type { BookmarkRoots } from './bookmarks';
 import type { ConsoleEntry, NetworkEntry } from './devtools';
 import type { DevicePreset, EmulationSettings } from './devices';
@@ -294,8 +294,12 @@ export type HostToWebview =
   /** Turns the element picker on (with a purpose) or off (`null`). */
   | { type: 'setInspect'; purpose: InspectPurpose | null }
   | { type: 'startRegionSelect' }
-  /** The drawings of a tab (sent when the tab is shown, or cleared after navigating). */
+  /** The drawings of a tab (sent when the tab is shown, and when it goes to another page). */
   | { type: 'annotations'; tabId: string; shapes: Shape[] }
+  /** Where the scrolling sections a tab's drawings are anchored to are now. */
+  | { type: 'drawingSections'; tabId: string; anchors: Anchors }
+  /** The answer to `sectionAt`. */
+  | { type: 'drawingSection'; requestId: string; section?: Section }
   /** A clean screenshot for the webview to draw the annotations onto. */
   | {
       type: 'annotationImage';
@@ -465,6 +469,8 @@ export type WebviewToHost =
       action: 'copy' | 'screenshot' | 'clear';
     }
   | { type: 'annotations'; tabId: string; shapes: Shape[] }
+  /** The scrolling section at a point (document CSS pixels), to anchor a new drawing to. */
+  | { type: 'sectionAt'; tabId: string; requestId: string; x: number; y: number }
   /** Screenshot for compositing drawings; `rect` in document CSS pixels for `region`. */
   | {
       type: 'annotationCapture';
@@ -715,6 +721,7 @@ const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
   },
   emulation: { tabId: isString, settings: isObject },
   annotations: { tabId: isString, shapes: (v) => Array.isArray(v) },
+  sectionAt: { tabId: isString, requestId: isString, x: isNumber, y: isNumber },
   annotationCapture: {
     tabId: isString,
     requestId: isString,

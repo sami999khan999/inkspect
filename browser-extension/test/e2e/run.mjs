@@ -110,7 +110,7 @@ header{position:sticky;top:0;background:#0f172a;color:#fff;padding:8px}
 ${rows}
 <script>
 document.querySelector('button').addEventListener('click', () => { document.title = 'clicked'; });
-window.logError = () => { console.error('boom from fixture'); fetch('/missing.json'); };
+window.logError = () => { console.log('%cStyled%c log', 'color:red;border-radius:2px', ''); console.error('boom from fixture'); fetch('/missing.json'); };
 </script></body></html>`;
 
 const site = createServer((request, response) => {
@@ -352,25 +352,101 @@ await test('the shortcut opens the toolbar on the page', async () => {
   assert(buttons >= 9, `only ${buttons} buttons`);
 });
 
-await test('the toolbar spans the top and pushes the page, and its sticky header, down', async () => {
-  const layout = await until('pushed page', () =>
-    tab.evaluate(() => {
-      const bar = document
-        .querySelector('inkspect-toolbar')
-        .shadowRoot.querySelector('.bar')
-        .getBoundingClientRect();
-      const margin = parseFloat(getComputedStyle(document.documentElement).marginTop);
-      const header = parseFloat(getComputedStyle(document.querySelector('header')).top);
-      // Measured once the bar has slid in.
-      return margin > 0 && header > 0 && bar.top === 0
-        ? { top: bar.top, width: bar.width, height: bar.height, margin, header }
-        : undefined;
-    }),
+await test('the toolbar floats over the page, and its handle drags it on a spring', async () => {
+  const barRect = () =>
+    inToolbar((shadow) => {
+      const bar = shadow.querySelector('.bar');
+      // Measured once it has popped in and stopped moving.
+      if (!bar || bar.getAnimations().length) return undefined;
+      const r = bar.getBoundingClientRect();
+      return { x: Math.round(r.x), y: Math.round(r.y), width: r.width, height: r.height };
+    });
+  const settled = async (what) => {
+    let previous;
+    return until(what, async () => {
+      const rect = await barRect();
+      const same = rect && JSON.stringify(rect) === JSON.stringify(previous);
+      previous = rect;
+      return same ? rect : undefined;
+    });
+  };
+  const page = await tab.evaluate(() => ({
+    margin: getComputedStyle(document.documentElement).marginTop,
+    header: getComputedStyle(document.querySelector('header')).top,
+    innerWidth,
+  }));
+  // The page isn't moved: no margin above it, its sticky header where it was.
+  assert(page.margin === '0px' && page.header === '0px', JSON.stringify(page));
+  // As wide as its buttons, centered near the top.
+  const start = await settled('the toolbar in place');
+  const centered = Math.abs(start.x + start.width / 2 - page.innerWidth / 2) < 2;
+  assert(start.width < page.innerWidth - 100 && centered && start.y < 40, JSON.stringify(start));
+  // On whole pixels, and not on a layer of its own: text there would be resampled (blurry).
+  const placed = await inToolbar((shadow) => {
+    const style = getComputedStyle(shadow.querySelector('.float'));
+    const [x, y] = new DOMMatrix(style.transform).toFloat32Array().slice(12, 14);
+    return { x, y, willChange: style.willChange };
+  });
+  assert(
+    Number.isInteger(placed.x) && Number.isInteger(placed.y) && placed.willChange === 'auto',
+    `placed: ${JSON.stringify(placed)}`,
   );
-  const innerWidth = await tab.evaluate(() => innerWidth);
-  assert(layout.top === 0 && layout.width === innerWidth, `bar: ${JSON.stringify(layout)}`);
-  assert(Math.abs(layout.margin - layout.height) < 1, `page: ${JSON.stringify(layout)}`);
-  assert(Math.abs(layout.header - layout.height) < 1, `header: ${JSON.stringify(layout)}`);
+  // Dragged by the six dots on its right: it follows the pointer and stays where it is let go.
+  const grip = await inToolbar((shadow) => {
+    const r = shadow.querySelector('.bar .drag-handle')?.getBoundingClientRect();
+    return r && { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  assert(grip && grip.x > start.x + start.width - 40, `handle: ${JSON.stringify(grip)}`);
+  await tab.mouse.move(grip.x, grip.y);
+  await tab.mouse.down();
+  for (let i = 1; i <= 12; i++) await tab.mouse.move(grip.x - i * 20, grip.y + i * 25);
+  await tab.mouse.up();
+  const moved = await settled('the toolbar dropped');
+  assert(
+    Math.abs(moved.x - (start.x - 240)) < 3 && Math.abs(moved.y - (start.y + 300)) < 3,
+    `dropped at ${JSON.stringify(moved)}, from ${JSON.stringify(start)}`,
+  );
+  // Past the window's edge it springs back inside.
+  await tab.mouse.move(grip.x - 240, grip.y + 300);
+  await tab.mouse.down();
+  await tab.mouse.move(grip.x - 240, 790, { steps: 10 });
+  await tab.mouse.move(grip.x - 240, 1200, { steps: 10 });
+  await tab.mouse.up();
+  const inside = await settled('the toolbar back inside');
+  const innerHeight = await tab.evaluate(() => innerHeight);
+  assert(inside.y + inside.height <= innerHeight - 7, `outside: ${JSON.stringify(inside)}`);
+  // The arrow keys move it too.
+  await inToolbar((shadow) => shadow.querySelector('.bar .drag-handle').focus());
+  await tab.keyboard.press('ArrowUp');
+  const nudged = await settled('the toolbar nudged');
+  assert(Math.abs(inside.y - 24 - nudged.y) < 2, `nudged: ${JSON.stringify(nudged)}`);
+  // Remembered: closed and opened again, it is where it was left.
+  await worker.evaluate((id) => globalThis.__inkspectTest.toggleToolbar(id), tabId);
+  await until('closed', async () => !(await inToolbar((shadow) => !!shadow.querySelector('.bar'))));
+  await worker.evaluate((id) => globalThis.__inkspectTest.toggleToolbar(id), tabId);
+  const again = await settled('the toolbar open again');
+  assert(
+    Math.abs(again.x - nudged.x) < 2 && Math.abs(again.y - nudged.y) < 2,
+    JSON.stringify(again),
+  );
+  // Back to the top for the tests after this one.
+  await worker.evaluate(() => chrome.storage.local.remove('toolbarPosition'));
+  await worker.evaluate((id) => globalThis.__inkspectTest.toggleToolbar(id), tabId);
+  await until('closed', async () => !(await inToolbar((shadow) => !!shadow.querySelector('.bar'))));
+  await worker.evaluate((id) => globalThis.__inkspectTest.toggleToolbar(id), tabId);
+  await settled('the toolbar at the top again');
+});
+
+await test('Saved opens the side panel', async () => {
+  const point = await inToolbar((shadow) => {
+    const r = shadow.querySelector('.bar .saved-button')?.getBoundingClientRect();
+    return r && { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  assert(point, 'no Saved button');
+  // A real click: the browser opens side panels only in answer to one.
+  await tab.mouse.click(point.x, point.y);
+  await browser.waitForTarget((t) => t.url().endsWith('/sidepanel.html'), { timeout: 10_000 });
+  assert(!(await toastText()), `toast: ${await toastText()}`);
 });
 
 await test('the responsive view shows the page in a centered device-sized frame', async () => {
@@ -390,6 +466,30 @@ await test('the responsive view shows the page in a centered device-sized frame'
   );
   assert(view.width < 500, `frame width ${view.width}`);
   assert(Math.abs(view.center - view.middle) < 20, `not centered: ${JSON.stringify(view)}`);
+  // The bar is docked across the top, above the view, and can't be dragged.
+  const barLayout = () =>
+    inToolbar((shadow) => {
+      const bar = shadow.querySelector('.bar').getBoundingClientRect();
+      const rv = shadow.querySelector('.rv')?.getBoundingClientRect();
+      return {
+        x: bar.x,
+        y: bar.y,
+        width: bar.width,
+        bottom: bar.bottom,
+        window: innerWidth,
+        rvTop: rv?.top,
+        handle: !!shadow.querySelector('.bar [aria-label^="Move the toolbar"]'),
+      };
+    });
+  const docked = await until('the bar docked', async () => {
+    const l = await barLayout();
+    return l.x === 0 && l.y === 0 && Math.abs(l.width - l.window) < 2 ? l : undefined;
+  });
+  assert(!docked.handle, 'the drag handle is still there');
+  assert(
+    Math.abs(docked.rvTop - docked.bottom) < 2,
+    `view not under the bar: ${JSON.stringify(docked)}`,
+  );
   // Real clicks (not element.click()): the device list is a popup in the shadow root, which must
   // take the pointer, and the width box replaces its value when typed into.
   const center = (selector, text) =>
@@ -429,6 +529,12 @@ await test('the responsive view shows the page in a centered device-sized frame'
   );
   const overflow = await tab.evaluate(() => document.documentElement.style.overflow);
   assert(overflow === '', `page scroll still locked: ${overflow}`);
+  // Undocked: floating again, with its handle.
+  const floating = await until('the bar floating again', async () => {
+    const l = await barLayout();
+    return l.width < l.window - 20 && l.handle ? l : undefined;
+  });
+  assert(floating.handle, 'no drag handle after closing the view');
 });
 
 await test('the element selector highlights with a Chrome-style tooltip and copies details', async () => {
@@ -486,12 +592,7 @@ await test('viewport and full-page screenshots are copied as images', async () =
     }, item);
     await tab.mouse.click(point.x, point.y);
     const image = await until(`${item} image`, clipboardImage, 20_000);
-    // The page's own height: the room made for the toolbar above it isn't captured.
-    const pageHeight = await tab.evaluate(
-      () =>
-        document.documentElement.scrollHeight -
-        parseFloat(getComputedStyle(document.documentElement).marginTop),
-    );
+    const pageHeight = await tab.evaluate(() => document.documentElement.scrollHeight);
     if (expectTall)
       assert(image.height >= pageHeight - 2, `full page ${image.height} < ${pageHeight}`);
     else
@@ -539,14 +640,100 @@ await test('drawing, then "screenshot drawing area" captures just the drawing', 
   await tab.keyboard.press('Escape');
 });
 
+/** The box (viewport pixels) of what is drawn on the drawing layer, or undefined. */
+const inkBox = () =>
+  inToolbar((shadow) => {
+    const canvas = shadow.querySelector('.drawing-layer canvas');
+    if (!canvas || !canvas.width) return undefined;
+    const { data, width, height } = canvas
+      .getContext('2d')
+      .getImageData(0, 0, canvas.width, canvas.height);
+    let [left, top, right, bottom] = [width, height, -1, -1];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (data[(y * width + x) * 4 + 3] > 0) {
+          left = Math.min(left, x);
+          right = Math.max(right, x);
+          top = Math.min(top, y);
+          bottom = Math.max(bottom, y);
+        }
+      }
+    }
+    const dpr = devicePixelRatio;
+    return right < 0
+      ? undefined
+      : { x: left / dpr, y: top / dpr, width: (right - left) / dpr, height: (bottom - top) / dpr };
+  });
+
+await test('drawings belong to their page, and scroll with the section they are on', async () => {
+  // The previous test's drawing is on this page.
+  const first = await until('the drawing', inkBox);
+  // A single-page app's route change: another page, without its drawings...
+  await tab.evaluate(() => history.pushState({}, '', '/pane'));
+  await until('no drawings on the other page', async () => !(await inkBox()));
+  // ...where a scrolling section gets one.
+  await tab.evaluate(() => {
+    const pane = document.createElement('div');
+    pane.id = 'pane';
+    pane.style.cssText =
+      'position:fixed;left:100px;top:200px;width:320px;height:240px;overflow:auto;background:#fff;z-index:5';
+    pane.innerHTML = Array.from({ length: 60 }, (_, i) => `<p>Line ${i}</p>`).join('');
+    document.body.append(pane);
+  });
+  assert(await clickButton('Draw on the page'), 'no draw button');
+  await until('drawing layer', () =>
+    inToolbar((shadow) => !!shadow.querySelector('.drawing-layer canvas')),
+  );
+  await tab.mouse.move(150, 300);
+  await tab.mouse.down();
+  for (let i = 1; i <= 10; i++) await tab.mouse.move(150 + i * 15, 300 + i * 3);
+  await tab.mouse.up();
+  const drawn = await until('the drawing on the pane', inkBox);
+  // The wheel scrolls the pane under the pointer while drawing, and the drawing goes with it.
+  await tab.mouse.move(250, 400);
+  await tab.mouse.wheel({ deltaY: 60 });
+  const scrolled = await until('the pane scrolled', async () => {
+    const top = await tab.evaluate(() => document.getElementById('pane').scrollTop);
+    return top > 0 && top;
+  });
+  const moved = await until('the drawing moved with the pane', async () => {
+    const box = await inkBox();
+    return box && Math.abs(drawn.y - scrolled - box.y) < 3 && box;
+  });
+  assert(Math.abs(moved.x - drawn.x) < 3, `moved sideways: ${JSON.stringify([drawn, moved])}`);
+  // Scrolled out of the pane, it isn't shown over the rest of the page.
+  await tab.evaluate(() => (document.getElementById('pane').scrollTop = 1000));
+  await until('the drawing hidden outside the pane', async () => !(await inkBox()));
+  await tab.evaluate(() => (document.getElementById('pane').scrollTop = 0));
+  await until('the drawing back', inkBox);
+  await tab.keyboard.press('Escape');
+  // Back on the first page, its drawing comes back where it was.
+  await tab.evaluate(() => document.getElementById('pane').remove());
+  await tab.evaluate(() => history.back());
+  await until('the first page’s drawing back', async () => {
+    const box = await inkBox();
+    return box && Math.abs(box.x - first.x) < 2 && Math.abs(box.y - first.y) < 2;
+  });
+});
+
 await test('console errors and failed requests are captured and copied for AI', async () => {
   await tab.evaluate(() => window.logError());
   assert(await clickButton('Console and network'), 'no console button');
   await until('console entry', () =>
     inToolbar((shadow) => shadow.querySelector('.log')?.textContent.includes('boom from fixture')),
   );
+  // Styled logs read as text (%c styles dropped), and the message gets the row's width.
+  const styled = await inToolbar((shadow) => {
+    const row = [...shadow.querySelectorAll('.log-row')].find((r) =>
+      r.textContent.includes('Styled log'),
+    );
+    const text = row?.querySelector('.log-text');
+    return text && { text: text.textContent, width: text.getBoundingClientRect().width };
+  });
+  assert(styled && !styled.text.includes('border-radius'), JSON.stringify(styled));
+  assert(styled.width > 150, `message only ${styled.width}px wide`);
   await clearClipboard();
-  await clickButton('Copy errors');
+  await clickButton('Copy console errors');
   const text = await until('copied errors', async () => {
     const t = await clipboardText();
     return t.includes('boom from fixture') ? t : undefined;
@@ -566,6 +753,21 @@ await test('console errors and failed requests are captured and copied for AI', 
   assert(failed.includes('404'), failed);
   await closeDialog('Failed requests');
   await clickButton('Close');
+});
+
+await test('an open toolbar comes back when the page reloads', async () => {
+  const barButtons = () => inToolbar((shadow) => shadow.querySelectorAll('.bar button').length);
+  const wasOpen = !!(await barButtons());
+  const toggle = () => worker.evaluate((id) => globalThis.__inkspectTest.toggleToolbar(id), tabId);
+  if (!wasOpen) await toggle();
+  await until('the toolbar', barButtons);
+  await tab.reload();
+  await until('the toolbar after the reload', barButtons);
+  // As the next tests expect it.
+  if (!wasOpen) {
+    await toggle();
+    await until('the toolbar closed', async () => !(await barButtons()));
+  }
 });
 
 await test('pairs with VS Code and syncs bookmarks both ways', async () => {
@@ -595,15 +797,23 @@ await test('pairs with VS Code and syncs bookmarks both ways', async () => {
       document.querySelector('.status-chip')?.textContent?.startsWith('Linked'),
     ),
   );
-  // The link, drawn: a lit branch to the VS Code window that answers.
-  const graph = await options.evaluate(() =>
-    [...document.querySelectorAll('.graph-target')].map((row) => ({
-      name: row.querySelector('.graph-name')?.textContent,
-      lit: row.classList.contains('lit'),
-    })),
-  );
+  // The link, drawn: a lit branch to the VS Code window that answers, and one to every other
+  // window the link knows is open.
+  const graph = await until('the graph to list the open windows', async () => {
+    const rows = await options.evaluate(() =>
+      [...document.querySelectorAll('.graph-target')].map((row) => ({
+        name: row.querySelector('.graph-name')?.textContent,
+        lit: row.classList.contains('lit'),
+      })),
+    );
+    return rows.length > 1 ? rows : undefined;
+  });
   assert(
-    JSON.stringify(graph) === JSON.stringify([{ name: 'Fake VS Code', lit: true }]),
+    JSON.stringify(graph) ===
+      JSON.stringify([
+        { name: 'Fake VS Code', lit: true },
+        { name: 'VS Code (shop)', lit: false },
+      ]),
     JSON.stringify(graph),
   );
   // Unlink (it takes a second click: the first only arms it), then pair the fallback way: a
@@ -767,7 +977,7 @@ await test('shortcuts: changed in the toolbar, they reach VS Code and work; VS C
     await worker.evaluate((id) => globalThis.__inkspectTest.toggleToolbar(id), tabId);
   }
   await until('toolbar', () =>
-    inToolbar((shadow) => shadow.querySelector('.bar')?.getBoundingClientRect().top === 0),
+    inToolbar((shadow) => shadow.querySelector('.bar')?.getAnimations().length === 0),
   );
   fake.shortcutsFromBrowser = undefined;
   // Record a new key for "Draw on the page" in the shortcuts panel.
@@ -854,7 +1064,7 @@ await test('shortcuts: changed in the toolbar, they reach VS Code and work; VS C
   const consoleButton = '.bar button[aria-label^="Console and network"]';
   await pressOn(consoleButton);
   await until('the console panel', () => has('.panel-dock'));
-  await pressOn('.bar-spacer');
+  await pressOn('.bar-brand');
   await until('the panel closed by a toolbar press', async () => !(await has('.panel-dock')));
   await pressOn(consoleButton);
   await until('the console panel again', () => has('.panel-dock'));
@@ -868,7 +1078,7 @@ await test('shortcuts: changed in the toolbar, they reach VS Code and work; VS C
   assert(!(await has('.menu-item')), 'its button reopened the menu instead of closing it');
   await pressOn('.shot-button');
   await until('the screenshot menu again', () => has('.menu-item'));
-  await pressOn('.bar-spacer');
+  await pressOn('.bar-brand');
   await until('the menu closed by a toolbar press', async () => !(await has('.menu-item')));
 
   // A change made in VS Code (newer) arrives in the toolbar.
@@ -897,8 +1107,8 @@ await test('over the link, captures are saved into the window’s project and th
     inToolbar(
       (shadow) =>
         shadow.querySelector('.link-connected') !== null &&
-        // Slid in: clicks land where the boxes are measured.
-        shadow.querySelector('.bar').getBoundingClientRect().top === 0,
+        // Popped in: clicks land where the boxes are measured.
+        shadow.querySelector('.bar').getAnimations().length === 0,
     ),
   );
   const pointOf = (selector, text) =>
@@ -966,6 +1176,25 @@ await test('over the link, captures are saved into the window’s project and th
   const toChat = await until('the chat send', () => fake.runs[runs]);
   assert(toChat.target === 'chat', JSON.stringify(toChat));
   await closed();
+  // The page behind doesn't scroll, Tab stays in the dialog, and the arrow keys pick the agent
+  // that Enter sends to (chat was used last, so it is first; Down picks the terminal).
+  await shoot();
+  assert(
+    (await tab.evaluate(() => getComputedStyle(document.documentElement).overflow)) === 'hidden',
+    'the page can still scroll behind the dialog',
+  );
+  for (let i = 0; i < 12; i++) await tab.keyboard.press('Tab');
+  assert((await dialogText()) !== undefined, 'Tab left the dialog');
+  runs = fake.runs.length;
+  await tab.keyboard.press('ArrowDown');
+  await tab.keyboard.press('Enter');
+  const arrowed = await until('the arrow-picked send', () => fake.runs[runs]);
+  assert(arrowed.target === 'terminal:1', JSON.stringify(arrowed));
+  await closed();
+  assert(
+    (await tab.evaluate(() => getComputedStyle(document.documentElement).overflow)) !== 'hidden',
+    'the page stays locked after the dialog closes',
+  );
   // Esc keeps it saved without sending.
   before = saved().length;
   await shoot();

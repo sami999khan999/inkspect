@@ -36,6 +36,15 @@ export class Tab {
   emulation: EmulationSettings = DEFAULT_EMULATION;
   /** Drawings on the page (document coordinates). */
   annotations: Shape[] = [];
+  /** The page (`drawingPageKey`) the drawings belong to. */
+  drawingPage?: string;
+  /** A private tab's drawings of the pages it left (kept in memory only). */
+  privateDrawings = new Map<string, Shape[]>();
+  /** Where the sections drawings are anchored to were last seen (JSON), and a measure running. */
+  sectionsSent = '';
+  measuringSections = false;
+  /** A frame came while measuring: measure again after. */
+  measureAgain = false;
 
   session?: TabSession;
   /** Set while a session is being created for this tab. */

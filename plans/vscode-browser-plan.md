@@ -410,7 +410,8 @@ plans/                this plan
 **UX**
 - [x] Toggle with the toolbar's pencil button or **Browser: Draw on Page**. Tool keys: V select, P pen, M marker, H highlighter, L line, A arrow, R rectangle, O ellipse, T text, N callout, B redact, E eraser. Esc stops drawing.
 - [x] Undo and redo (Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z), 100 steps.
-- [x] `vscodeBrowser.drawing.clearOnNavigation` (default on) clears a tab's drawings when it navigates; an eye button hides and shows them.
+- [x] Drawings belong to their page (`drawingPageKey`: the address without an in-page fragment; hash routes count as pages). On navigation, also a single-page app's route change (`Page.navigatedWithinDocument`), the tab shows that page's drawings and keeps the ones it left (`DrawingStore`, `drawings.json` in globalStorage, the 30 most recent pages; private tabs in memory). `vscodeBrowser.drawing.clearOnNavigation` off keeps the same drawings on every page. An eye button hides and shows them.
+- [x] Drawings on a section that scrolls by itself are anchored to it (`@inkspect/shared/sections`, run in the page): the webview asks the host for the section under a new shape (`sectionAt`), the host measures the sections after frames and sends them (`drawingSections`), and shapes are moved by their section's scroll and clipped to it, on screen and in screenshots.
 
 **Annotation screenshot**
 - [x] **Screenshot → Drawing area** (also **Browser: Screenshot: Drawing Area**): the union of all shapes plus `vscodeBrowser.screenshots.annotationPadding` (default 40 px), kept inside the page. The host captures that clean region (`clip` + `captureBeyondViewport`, so it can extend beyond the visible area), and the webview draws the shapes onto it in an OffscreenCanvas at the image's resolution. The result is saved and copied like other screenshots.

@@ -2,7 +2,6 @@
 // hides the toolbar, crops, and scrolls and stitches for areas taller than the viewport.
 import type { Bounds } from '@inkspect/shared/annotations';
 import { toBackground } from '../messages';
-import { pushOffset } from './pagePush';
 
 /** Hides the toolbar while capturing; returns a function that shows it again. */
 export type HideUi = () => () => void;
@@ -136,23 +135,16 @@ export async function captureArea(
   return { dataUrl: canvas.toDataURL('image/png'), area: clipped };
 }
 
-/** What the user sees of the page: the viewport below the toolbar. */
+/** What the user sees of the page (the toolbar floats over it, and is hidden while capturing). */
 export function viewportArea(): Bounds {
   const doc = document.documentElement;
-  const top = pushOffset();
-  return { x: scrollX, y: scrollY + top, width: doc.clientWidth, height: doc.clientHeight - top };
+  return { x: scrollX, y: scrollY, width: doc.clientWidth, height: doc.clientHeight };
 }
 
-/** The whole page, without the room made for the toolbar above it. */
+/** The whole page. */
 export function fullPageArea(): Bounds {
   const doc = document.documentElement;
-  const top = pushOffset();
-  return {
-    x: 0,
-    y: top,
-    width: doc.clientWidth,
-    height: Math.max(doc.scrollHeight, innerHeight) - top,
-  };
+  return { x: 0, y: 0, width: doc.clientWidth, height: Math.max(doc.scrollHeight, innerHeight) };
 }
 
 /**

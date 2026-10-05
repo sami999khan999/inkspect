@@ -252,7 +252,7 @@ export function ConsolePanel({ onClose, copy, pageContext }: ConsolePanelProps) 
                 <span className="log-text">{entry.text}</span>
                 {entry.url && (
                   <span className="log-source" title={entry.url}>
-                    {entry.url.split('/').pop()}
+                    {sourceName(entry.url)}
                     {entry.line !== undefined ? `:${entry.line + 1}` : ''}
                   </span>
                 )}
@@ -282,31 +282,37 @@ export function ConsolePanel({ onClose, copy, pageContext }: ConsolePanelProps) 
           <Button
             size="sm"
             icon="copy"
+            title="Copy console errors for AI"
+            aria-label="Copy console errors for AI"
             onClick={() =>
               void fresh().then((l) =>
                 copy(formatConsoleErrors(l.console, location.href), 'Console errors', 'errors'),
               )
             }
           >
-            Copy errors
+            Console errors
           </Button>
           <Button
             size="sm"
             icon="copy"
+            title="Copy failed requests for AI"
+            aria-label="Copy failed requests for AI"
             onClick={() =>
               void fresh().then((l) =>
                 copy(formatFailedRequests(l.network, location.href), 'Failed requests', 'network'),
               )
             }
           >
-            Copy failed requests
+            Failed requests
           </Button>
           <Button
             size="sm"
             icon="copy"
+            title="Copy page context for AI"
+            aria-label="Copy page context for AI"
             onClick={() => void pageContext().then((text) => copy(text, 'Page context', 'page'))}
           >
-            Copy page context
+            Page context
           </Button>
         </div>
       </div>
@@ -399,4 +405,14 @@ export function ShortcutsPanel({
       />
     </PanelFrame>
   );
+}
+
+/** A script's file name for the console (`%5Broot%5D.js` reads as `[root].js`). */
+function sourceName(url: string): string {
+  const name = url.split(/[?#]/)[0]!.split('/').pop() || url;
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
 }

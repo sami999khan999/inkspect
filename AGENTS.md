@@ -264,7 +264,7 @@ npm run package      # production build + .vsix
 
 - **What it holds:**
   - element details and selectors (`elementInfo`, `collect`)
-  - drawing (`annotations`, `drawing/render`, `drawing/composite`, `ui/DrawingLayer`, `ui/DrawToolbar`)
+  - drawing (`annotations`, `drawing/render`, `drawing/composite`, `ui/DrawingLayer`, `ui/DrawToolbar`) and the page's scrolling sections drawings are anchored to (`sections`: self-contained, VS Code sends them to Chromium as source text)
   - capturing and sending: the target ids (`targets`), the send dialog (`sendModal`, `ui/SendModal`), the Saved list (`saved`, `ui/SavedList`), the picker's hint and selection bar (`ui/PickerHint`, `ui/SelectionBar`)
   - `devices`, Copy-for-AI formats (`devtools`), `color`
   - the bookmark merge (`bookmarkSync`), the link protocol (`bridge`) and the hub protocol (`hub`)
@@ -294,7 +294,7 @@ npm run package      # production build + .vsix
   - the VS Code link client (`bridge.ts`): the browser helper (native messaging, `connectNative`) first, else the WebSocket; `hubRequest()` asks the helper about projects and captures
   - the browser half of bookmark sync (`bookmarks.ts`)
 - **Content** (`src/content/`): the toolbar is React in a **closed** shadow root on `<inkspect-toolbar>`. It holds the inspector, drawing, region select, panels, the responsive view (`ResponsiveView.tsx`), capture and stitching (`capture.ts`), and the capture flow (`useSendFlow.ts`: save into the page's project, then the send dialog, which takes the keys while it is open).
-  - The toolbar is a **full-width bar at the top**, and the page moves down to make room (`pagePush.ts`: the `html` margin, plus fixed and sticky elements anchored at the top). Anything measuring the page (captures) uses `pushOffset()`.
+  - The toolbar is a **floating panel** over the page, as wide as its buttons; the page isn't moved. Its six-dot handle (`DragHandle` in `@inkspect/shared/ui`) drags it on a spring, or the arrow keys move it (`useFloating.ts`: the position goes straight into the transform each frame, is kept inside the window and remembered in `chrome.storage.local`). Panels hang off the side of the bar with more room. Its **Saved** button opens the side panel (`openSaved`, called before anything is awaited: browsers open it only in answer to a click).
   - The **responsive view** shows the page in a device-sized `<iframe>` of the same tab, centered and scaled to fit. The debugger's device metrics can't do this: they always draw the page at the tab's top-left. While it is open, a session rule drops `X-Frame-Options` and `Content-Security-Policy` for frames of the page's own origin, **in that tab only**, and it is removed when the view closes. The frame is sandboxed without scripted top navigation, so frame-busting scripts can't end the view. Tools that act on the page (picker, drawing, console, page context) don't reach into the frame yet and are disabled while it is open.
 - **Side panel** (`src/sidepanel/`, Chrome `side_panel`, Firefox `sidebar_action`): the Saved list (`SavedList`) of the tab's project or another, through the background (`{ type: 'hub' }` messages, allowed for the extension's own pages only), over either link.
 - **Pairing** looks the same everywhere: `ui/PairCard.tsx` on the settings page, in the popup and in the toolbar's VS Code panel.

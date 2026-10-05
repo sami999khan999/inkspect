@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   captureArea as drawingArea,
   clusterShapes,
   COLORS,
   DEFAULT_STYLE,
+  placeShapes,
   type Bounds,
   type DrawTool,
   type Shape,
@@ -30,6 +31,8 @@ import {
   DRAW_TOOLS,
   type CaptureMode,
 } from '@inkspect/shared/ui/DrawToolbar';
+import { Button } from '@inkspect/shared/ui/Button';
+import { DragHandle } from '@inkspect/shared/ui/DragHandle';
 import { IconButton } from '@inkspect/shared/ui/IconButton';
 import { Menu, type MenuItem, type MenuState } from '@inkspect/shared/ui/Menu';
 import { isInPopup, listenOutsidePress, pressedOpener } from '@inkspect/shared/ui/popover';
@@ -46,8 +49,8 @@ import {
   viewportArea,
   type HideUi,
 } from './capture';
+import { anchorAt, measureAnchors, scrollUnder } from './anchors';
 import { Inspector, type PickModifiers } from './Inspector';
-import { pushPage } from './pagePush';
 import {
   ConsolePanel,
   DEFAULT_EMULATION_OPTIONS,
@@ -58,6 +61,8 @@ import {
 } from './panels';
 import { ResponsiveView, type Zoom } from './ResponsiveView';
 import { copyImage, copyText, loadSettings, pageRequest, type Settings } from './page';
+import { flushDrawings, loadDrawings, pageKeyOf, saveDrawings } from './pageDrawings';
+import { useFloating } from './useFloating';
 import { useSendFlow } from './useSendFlow';
 
 type Tool =
@@ -128,7 +133,6 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
   const [bookmarked, setBookmarked] = useState(false);
   const bar = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
-  const [barHeight, setBarHeight] = useState(0);
   // The responsive view: the device, its zoom, and the page's address once it may be framed.
   const [responsive, setResponsive] = useState<DeviceSettings | null>(null);
   const [zoom, setZoom] = useState<Zoom>('fit');
@@ -156,10 +160,62 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     height: number;
   } | null>(null);
   const [sampling, setSampling] = useState(false);
+  // Drawings belong to a page: the one shown now (single-page apps change it without loading),
+  // the one `shapes` are for, and whether that page's saved drawings are loaded yet.
+  const [page, setPage] = useState(() => pageKeyOf(location.href));
+  const [drawnOn, setDrawnOn] = useState(page);
+  const [loadedPage, setLoadedPage] = useState<string | null>(null);
+  if (drawnOn !== page) {
+    setDrawnOn(page);
+    setShapes([]);
+    setUndo([]);
+    setRedo([]);
+  }
+  // Scrolling inside the page moves drawings anchored to its sections: a re-render measures them.
+  const [, setSectionScroll] = useState(0);
+  const drawHost = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     shapesRef.current = shapes;
   }, [shapes]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadDrawings(page).then((saved) => {
+      if (cancelled) return;
+      // Anything drawn while they loaded goes on top.
+      setShapes((now) => [...saved, ...now]);
+      setLoadedPage(page);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [page]);
+  useEffect(() => {
+    if (loadedPage === drawnOn) saveDrawings(drawnOn, shapes);
+  }, [shapes, drawnOn, loadedPage]);
+  useEffect(() => {
+    const check = () => setPage(pageKeyOf(location.href));
+    const timer = setInterval(check, 500);
+    window.addEventListener('popstate', check);
+    window.addEventListener('hashchange', check);
+    window.addEventListener('pagehide', flushDrawings);
+    let frame = 0;
+    const onSectionScroll = (event: Event) => {
+      if (event.target === document || !shapesRef.current.some((shape) => shape.anchor)) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setSectionScroll((n) => n + 1));
+    };
+    document.addEventListener('scroll', onSectionScroll, { capture: true, passive: true });
+    return () => {
+      clearInterval(timer);
+      cancelAnimationFrame(frame);
+      window.removeEventListener('popstate', check);
+      window.removeEventListener('hashchange', check);
+      window.removeEventListener('pagehide', flushDrawings);
+      document.removeEventListener('scroll', onSectionScroll, { capture: true });
+    };
+  }, []);
 
   // The toggle message: open, or close everything.
   const lastSignal = useRef(0);
@@ -178,18 +234,14 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     });
   }, [toggleSignal]);
 
-  // The bar's height (it grows a row while drawing) is the room the page makes above itself.
-  useLayoutEffect(() => {
-    const el = bar.current;
-    if (!open || !el) return;
-    const observer = new ResizeObserver(() => setBarHeight(el.offsetHeight));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [open]);
+  // The background puts an open toolbar back after the page reloads.
   useEffect(() => {
-    pushPage(open ? barHeight : 0, host);
-  }, [open, barHeight, host]);
-  useEffect(() => () => pushPage(0, host), [host]);
+    void toBackground({ type: 'toolbarOpen', open });
+  }, [open]);
+
+  // The bar floats over the page (the page isn't moved), where it was dragged to.
+  // While the responsive view is open, the bar is docked across the top, above the view.
+  const { ref: floatRef, rest, dragging, handle } = useFloating(open, bar, responsive !== null);
 
   // While the responsive view covers the page, the page itself doesn't scroll.
   const viewing = responsive !== null;
@@ -327,6 +379,25 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     };
   }, [hideHost]);
 
+  /** Captures part of the document, with the drawings on it while they are shown. */
+  const shoot = useCallback(
+    async (area: Bounds): Promise<string> => {
+      const captured = await captureArea(area, hideUi);
+      const shapes = drawingVisible ? shapesRef.current : [];
+      if (!shapes.length) return captured.dataUrl;
+      const bytes = new Uint8Array(await (await fetch(captured.dataUrl)).arrayBuffer());
+      const base64 = await compositeScreenshot(
+        bytes,
+        'image/png',
+        captured.area,
+        shapes,
+        measureAnchors(shapes),
+      );
+      return `data:image/png;base64,${base64}`;
+    },
+    [drawingVisible, hideUi],
+  );
+
   const linked = link.state === 'connected';
   // Every capture is copied, saved (into the page's project with the browser helper, VS Code's
   // Saved list over the link), then the send dialog offers where it goes.
@@ -388,13 +459,15 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       if (mode === 'element') return setTool({ kind: 'inspect', purpose: 'screenshot' });
       try {
         const area = mode === 'viewport' ? viewportArea() : fullPageArea();
-        const { dataUrl } = await captureArea(area, hideUi);
-        await deliver(dataUrl, mode === 'viewport' ? 'Screenshot' : 'Full-page screenshot');
+        await deliver(
+          await shoot(area),
+          mode === 'viewport' ? 'Screenshot' : 'Full-page screenshot',
+        );
       } catch (error) {
         showToast(`Screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     },
-    [deliver, hideUi, showToast],
+    [deliver, shoot, showToast],
   );
 
   /** Element details, from the page world when possible (framework components are only there). */
@@ -416,12 +489,14 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
   const captureElement = useCallback(
     async (el: Element) => {
       const rect = el.getBoundingClientRect();
-      return captureArea(
-        { x: rect.x + scrollX, y: rect.y + scrollY, width: rect.width, height: rect.height },
-        hideUi,
-      );
+      return shoot({
+        x: rect.x + scrollX,
+        y: rect.y + scrollY,
+        width: rect.width,
+        height: rect.height,
+      });
     },
-    [hideUi],
+    [shoot],
   );
 
   // The bar over a Shift+click selection: every choice acts on all the selected elements.
@@ -432,7 +507,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     if (action === 'copy') return copyElements(list);
     try {
       const shots = [];
-      for (const el of list) shots.push((await captureElement(el)).dataUrl);
+      for (const el of list) shots.push(await captureElement(el));
       await deliver(shots, list.length === 1 ? 'Element screenshot' : 'Element screenshots');
     } catch (error) {
       showToast(`Screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -473,8 +548,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       // Alt+click is a screenshot of the element, and only that; a click captures its details.
       if (shot || modifiers.screenshot) {
         try {
-          const { dataUrl } = await captureElement(el);
-          await deliver(dataUrl, 'Element screenshot');
+          await deliver(await captureElement(el), 'Element screenshot');
         } catch (error) {
           showToast(`Screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -529,12 +603,15 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
 
   const captureDrawing = useCallback(
     async (mode: CaptureMode) => {
-      const all = shapesRef.current;
+      // Where the drawings are on the page now (those on scrolled sections move with them).
+      const anchors = measureAnchors(shapesRef.current);
+      const all = placeShapes(shapesRef.current, anchors);
       if (!all.length && (mode === 'area' || mode === 'groups' || mode === 'clean')) {
         showToast('Draw something first.');
         return;
       }
       const padding = settings.current?.annotationPadding ?? 40;
+      const byId = new Map(shapesRef.current.map((shape) => [shape.id, shape]));
       const groups = mode === 'groups' ? clusterShapes(all, 80) : [all];
       const images: string[] = [];
       for (const group of groups) {
@@ -552,7 +629,8 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
             bytes,
             'image/png',
             captured.area,
-            mode === 'clean' ? [] : group,
+            mode === 'clean' ? [] : group.map((shape) => byId.get(shape.id)!),
+            anchors,
           );
           images.push(`data:image/png;base64,${base64}`);
         } catch (error) {
@@ -606,6 +684,20 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     };
   }, [open, hasRedactions, freshImage, scroll.x, scroll.y, size.width, size.height]);
 
+  // While drawing, the layer covers the page: the wheel scrolls the section under the pointer.
+  const drawing = tool?.kind === 'draw';
+  useEffect(() => {
+    const layer = drawHost.current;
+    if (!drawing || !layer) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) return; // Zoom.
+      event.preventDefault();
+      scrollUnder(event, host);
+    };
+    layer.addEventListener('wheel', onWheel, { passive: false });
+    return () => layer.removeEventListener('wheel', onWheel);
+  }, [drawing, host]);
+
   // Toolbar ---------------------------------------------------------------------------------
 
   const toggleTool = (next: Tool) =>
@@ -635,6 +727,11 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
         [changes.color!, ...colors.filter((c) => c !== changes.color)].slice(0, 6),
       );
   };
+  /** The side panel with the Saved list (the page's project). Opened in the click itself. */
+  const openSaved = () =>
+    void toBackground({ type: 'openSaved' }).then((reply) => {
+      if (!reply.ok) showToast(reply.error, { tone: 'error' });
+    });
   /** The star: bookmarks the page, or removes its bookmark (like the browser's own star). */
   const bookmarkPage = () =>
     void toBackground(
@@ -777,13 +874,19 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [open, tool, panel, menu, menuScope, shortcuts.map, host, offer]);
   if (!open) return null;
+  // Panels open on the side of the bar with more room; the responsive view starts below the bar
+  // when it rests at the top of the window.
+  const alignRight = !!rest && rest.x + rest.width / 2 > size.width / 2;
+  const above = !!rest && rest.y + rest.height / 2 > size.height / 2;
+  const viewTop = !rest ? 0 : viewing ? rest.height : rest.y < 64 ? rest.y + rest.height + 8 : 0;
   const mapper: DrawMapper = { scale: 1, scroll, bounds: { left: 0, top: 0, ...size } };
+  const anchors = measureAnchors(shapes);
   const style = styles[drawTool] ?? DEFAULT_STYLE;
 
   return (
     <div className={`inkspect${hidden ? ' capturing' : ''}${sampling ? ' sampling' : ''}`}>
       {(shapes.length > 0 || tool?.kind === 'draw') && (
-        <div className="draw-host">
+        <div className="draw-host" ref={drawHost}>
           <DrawingLayer
             mapper={mapper}
             shapes={shapes}
@@ -794,6 +897,8 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
             onChange={updateShapes}
             liveRedactions
             pixelSource={freshImage}
+            anchors={anchors}
+            anchorAt={(point) => anchorAt(point[0] - scrollX, point[1] - scrollY, host)}
           />
         </div>
       )}
@@ -831,15 +936,15 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           onCancel={() => setTool(null)}
           onDone={(rect) => {
             setTool(null);
-            void captureArea({ ...rect, x: rect.x + scrollX, y: rect.y + scrollY }, hideUi)
-              .then(({ dataUrl }) => deliver(dataUrl, 'Region screenshot'))
+            void shoot({ ...rect, x: rect.x + scrollX, y: rect.y + scrollY })
+              .then((dataUrl) => deliver(dataUrl, 'Region screenshot'))
               .catch((error: unknown) => showToast(`Screenshot failed: ${String(error)}`));
           }}
         />
       )}
       {responsive && (
         <ResponsiveView
-          top={barHeight}
+          top={viewTop}
           device={responsive}
           onDevice={setResponsive}
           zoom={zoom}
@@ -851,160 +956,194 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           onClose={closeResponsive}
         />
       )}
-      <div className="bar" ref={bar} role="toolbar" aria-label="Inkspect">
-        <div className="bar-row">
-          <span className="bar-brand">
-            <img src={chrome.runtime.getURL('icons/32.png')} alt="" />
-            Inkspect
-          </span>
-          <span className="separator" />
-          <IconButton
-            icon="inspect"
-            label={`${withKey('Select an element to copy its details for AI', 'mode.inspect')}${viewing ? NOT_IN_FRAME : ''}`}
-            disabled={viewing}
-            active={tool?.kind === 'inspect'}
-            onClick={() => toggleTool({ kind: 'inspect', purpose: 'copy' })}
-          />
-          <IconButton
-            icon="edit"
-            label={`${withKey('Draw on the page', 'mode.draw')}${viewing ? NOT_IN_FRAME : ''}`}
-            disabled={viewing}
-            active={tool?.kind === 'draw'}
-            onClick={() => toggleTool({ kind: 'draw' })}
-          />
-          <IconButton
-            icon="device-camera"
-            label={withKey('Screenshot', 'mode.screenshot')}
-            className="shot-button"
-            onClick={(event) =>
-              openMenu(
-                event,
-                viewing
-                  ? [
-                      {
-                        label: 'Device screen',
-                        icon: 'device-mobile',
-                        onSelect: () => {
-                          const screen = frame.current?.parentElement;
-                          if (!screen) return;
-                          void captureElementRect(screen)
-                            .then((dataUrl) => deliver(dataUrl, 'Device screenshot'))
-                            .catch((error: unknown) =>
-                              showToast(`Screenshot failed: ${String(error)}`),
-                            );
+      <div
+        ref={floatRef}
+        className={[
+          'float',
+          viewing && 'docked',
+          alignRight && 'align-right',
+          above && 'above',
+          dragging && 'dragging',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        <div className="bar" ref={bar} role="toolbar" aria-label="Inkspect">
+          <div className="bar-row">
+            <span className="bar-brand">
+              <img src={chrome.runtime.getURL('icons/32.png')} alt="" />
+              Inkspect
+            </span>
+            <span className="separator" />
+            <IconButton
+              icon="inspect"
+              label={`${withKey('Select an element to copy its details for AI', 'mode.inspect')}${viewing ? NOT_IN_FRAME : ''}`}
+              disabled={viewing}
+              active={tool?.kind === 'inspect'}
+              onClick={() => toggleTool({ kind: 'inspect', purpose: 'copy' })}
+            />
+            <IconButton
+              icon="edit"
+              label={`${withKey('Draw on the page', 'mode.draw')}${viewing ? NOT_IN_FRAME : ''}`}
+              disabled={viewing}
+              active={tool?.kind === 'draw'}
+              onClick={() => toggleTool({ kind: 'draw' })}
+            />
+            <IconButton
+              icon="device-camera"
+              label={withKey('Screenshot', 'mode.screenshot')}
+              className="shot-button"
+              onClick={(event) =>
+                openMenu(
+                  event,
+                  viewing
+                    ? [
+                        {
+                          label: 'Device screen',
+                          icon: 'device-mobile',
+                          onSelect: () => {
+                            const screen = frame.current?.parentElement;
+                            if (!screen) return;
+                            void captureElementRect(screen)
+                              .then((dataUrl) => deliver(dataUrl, 'Device screenshot'))
+                              .catch((error: unknown) =>
+                                showToast(`Screenshot failed: ${String(error)}`),
+                              );
+                          },
                         },
-                      },
-                    ]
-                  : screenshotItems(),
-                viewing ? undefined : 'screenshot',
-              )
-            }
-          />
-          <IconButton
-            icon="device-mobile"
-            label={withKey('Responsive view', 'mode.device')}
-            active={viewing}
-            onClick={() => (viewing ? closeResponsive() : void openResponsive())}
-          />
-          <IconButton
-            icon="debug-console"
-            label={`${withKey('Console and network (copy errors for AI)', 'mode.devtools')}${viewing ? NOT_IN_FRAME : ''}`}
-            disabled={viewing}
-            active={panel === 'console'}
-            onClick={() => setPanel((p) => (p === 'console' ? null : 'console'))}
-          />
-          <IconButton
-            icon="copy"
-            label={`Copy page context for AI${viewing ? NOT_IN_FRAME : ''}`}
-            disabled={viewing}
-            onClick={() => void pageContext().then((text) => copy(text, 'Page context', 'page'))}
-          />
-          <IconButton
-            icon={bookmarked ? 'star-full' : 'star-empty'}
-            label={withKey(bookmarked ? 'Remove bookmark' : 'Bookmark this page', 'page.bookmark')}
-            className={bookmarked ? 'bookmarked' : undefined}
-            onClick={bookmarkPage}
-          />
-          <span className="bar-spacer" />
-          <IconButton
-            icon="keyboard"
-            label={withKey('Keyboard shortcuts (shared with VS Code)', 'open.shortcuts')}
-            active={panel === 'shortcuts'}
-            onClick={() => setPanel((p) => (p === 'shortcuts' ? null : 'shortcuts'))}
-          />
-          <IconButton
-            icon={linked ? 'plug' : 'debug-disconnect'}
-            label={linked ? `Linked with ${link.peer ?? 'VS Code'}` : 'Link with VS Code'}
-            active={panel === 'link'}
-            className={`link-${link.state}`}
-            onClick={() => setPanel((p) => (p === 'link' ? null : 'link'))}
-          />
-          <IconButton
-            icon="close"
-            label="Close toolbar"
-            onClick={() => {
-              closeResponsive();
-              setTool(null);
-              setPanel(null);
-              setOpen(false);
-            }}
-          />
+                      ]
+                    : screenshotItems(),
+                  viewing ? undefined : 'screenshot',
+                )
+              }
+            />
+            <IconButton
+              icon="device-mobile"
+              label={withKey('Responsive view', 'mode.device')}
+              active={viewing}
+              onClick={() => (viewing ? closeResponsive() : void openResponsive())}
+            />
+            <IconButton
+              icon="debug-console"
+              label={`${withKey('Console and network (copy errors for AI)', 'mode.devtools')}${viewing ? NOT_IN_FRAME : ''}`}
+              disabled={viewing}
+              active={panel === 'console'}
+              onClick={() => setPanel((p) => (p === 'console' ? null : 'console'))}
+            />
+            <IconButton
+              icon="copy"
+              label={`Copy page context for AI${viewing ? NOT_IN_FRAME : ''}`}
+              disabled={viewing}
+              onClick={() => void pageContext().then((text) => copy(text, 'Page context', 'page'))}
+            />
+            <IconButton
+              icon={bookmarked ? 'star-full' : 'star-empty'}
+              label={withKey(
+                bookmarked ? 'Remove bookmark' : 'Bookmark this page',
+                'page.bookmark',
+              )}
+              className={bookmarked ? 'bookmarked' : undefined}
+              onClick={bookmarkPage}
+            />
+            <span className="separator" />
+            <Button
+              size="sm"
+              variant="ghost"
+              icon="layout-sidebar-right"
+              className="saved-button"
+              title="Saved captures of this page's project, in the side panel"
+              onClick={openSaved}
+            >
+              Saved
+            </Button>
+            <span className="separator" />
+            <IconButton
+              icon="keyboard"
+              label={withKey('Keyboard shortcuts (shared with VS Code)', 'open.shortcuts')}
+              active={panel === 'shortcuts'}
+              onClick={() => setPanel((p) => (p === 'shortcuts' ? null : 'shortcuts'))}
+            />
+            <IconButton
+              icon={linked ? 'plug' : 'debug-disconnect'}
+              label={linked ? `Linked with ${link.peer ?? 'VS Code'}` : 'Link with VS Code'}
+              active={panel === 'link'}
+              className={`link-${link.state}`}
+              onClick={() => setPanel((p) => (p === 'link' ? null : 'link'))}
+            />
+            <IconButton
+              icon="close"
+              label="Close toolbar"
+              onClick={() => {
+                closeResponsive();
+                setTool(null);
+                setPanel(null);
+                setOpen(false);
+              }}
+            />
+            {!viewing && (
+              <DragHandle
+                label="Move the toolbar (drag, or use the arrow keys)"
+                dragging={dragging}
+                {...handle}
+              />
+            )}
+          </div>
+          {tool?.kind === 'draw' && (
+            <DrawToolbar
+              tool={drawTool}
+              style={style}
+              recentColors={recentColors}
+              canUndo={undo.length > 0}
+              canRedo={redo.length > 0}
+              hasShapes={shapes.length > 0}
+              visible={drawingVisible}
+              onTool={setDrawTool}
+              onStyle={setDrawStyle}
+              keyOf={keyOf}
+              onUndo={doUndo}
+              onRedo={doRedo}
+              onClear={() => updateShapes([], true)}
+              onToggleVisible={() => setDrawingVisible((v) => !v)}
+              onCapture={(x, y) => {
+                setMenu({ x, y, items: drawingItems() });
+                // Its items' keys (Alt+G...) work while it is open.
+                setMenuScope('draw');
+              }}
+              onClose={() => setTool(null)}
+            />
+          )}
         </div>
-        {tool?.kind === 'draw' && (
-          <DrawToolbar
-            tool={drawTool}
-            style={style}
-            recentColors={recentColors}
-            canUndo={undo.length > 0}
-            canRedo={redo.length > 0}
-            hasShapes={shapes.length > 0}
-            visible={drawingVisible}
-            onTool={setDrawTool}
-            onStyle={setDrawStyle}
-            keyOf={keyOf}
-            onUndo={doUndo}
-            onRedo={doRedo}
-            onClear={() => updateShapes([], true)}
-            onToggleVisible={() => setDrawingVisible((v) => !v)}
-            onCapture={(x, y) => {
-              setMenu({ x, y, items: drawingItems() });
-              // Its items' keys (Alt+G...) work while it is open.
-              setMenuScope('draw');
-            }}
-            onClose={() => setTool(null)}
-          />
+        {panel && (
+          <div className="panel-dock" ref={dock}>
+            {panel === 'emulation' && (
+              <EmulationPanel
+                onClose={() => setPanel(null)}
+                value={emulation}
+                onChange={setEmulation}
+              />
+            )}
+            {panel === 'console' && (
+              <ConsolePanel
+                onClose={() => setPanel(null)}
+                toast={showToast}
+                copy={(text, what, kind) => void copy(text, what, kind)}
+                pageContext={pageContext}
+              />
+            )}
+            {panel === 'shortcuts' && (
+              <ShortcutsPanel
+                onClose={() => setPanel(null)}
+                map={shortcuts.map}
+                overrides={shortcuts.overrides}
+                linked={linked}
+              />
+            )}
+            {panel === 'link' && (
+              <LinkPanel onClose={() => setPanel(null)} toast={showToast} status={link} />
+            )}
+          </div>
         )}
       </div>
-      {panel && (
-        <div className="panel-dock" ref={dock} style={{ top: barHeight + 8 }}>
-          {panel === 'emulation' && (
-            <EmulationPanel
-              onClose={() => setPanel(null)}
-              value={emulation}
-              onChange={setEmulation}
-            />
-          )}
-          {panel === 'console' && (
-            <ConsolePanel
-              onClose={() => setPanel(null)}
-              toast={showToast}
-              copy={(text, what, kind) => void copy(text, what, kind)}
-              pageContext={pageContext}
-            />
-          )}
-          {panel === 'shortcuts' && (
-            <ShortcutsPanel
-              onClose={() => setPanel(null)}
-              map={shortcuts.map}
-              overrides={shortcuts.overrides}
-              linked={linked}
-            />
-          )}
-          {panel === 'link' && (
-            <LinkPanel onClose={() => setPanel(null)} toast={showToast} status={link} />
-          )}
-        </div>
-      )}
       {menu && <Menu menu={menu} onClose={closeMenu} />}
       {toast && (
         <div

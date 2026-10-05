@@ -25,6 +25,7 @@ import {
   type ConsoleLevel,
   type NetworkEntry,
 } from '../shared/devtools';
+import { sanitizeAnchors, type Anchors, type Section } from '../shared/annotations';
 import type { ElementDetails } from '../shared/elementInfo';
 import { sanitizeScan, type A11yScan, type MeasureBox } from '../shared/tools';
 import type { BrowserEngine } from './BrowserEngine';
@@ -40,7 +41,9 @@ import {
   ANCESTRY_FUNCTION,
   COLLECT_DETAILS_FUNCTION,
   FIRST_CHILD_FUNCTION,
+  MEASURE_SECTIONS_FUNCTION,
   PARENT_FUNCTION,
+  SECTION_AT_FUNCTION,
 } from './inspectorScripts';
 import { toCdpKeyEvent } from './input';
 import { errorMessage, type Logger } from './logger';
@@ -81,6 +84,8 @@ export interface TabSessionEvents {
   info: [url: string, title: string];
   loading: [loading: boolean, progress: number];
   navigated: [url: string];
+  /** The page changed its address without loading (history API or fragment). */
+  navigatedInPage: [url: string];
   history: [canGoBack: boolean, canGoForward: boolean];
   security: [state: SecurityState];
   dialog: [dialog: JsDialog | undefined];
@@ -358,6 +363,7 @@ export class TabSession {
     s.on('Page.navigatedWithinDocument', (event) => {
       if (event.frameId !== this.mainFrameId) return;
       this.url = event.url;
+      this.events.emit('navigatedInPage', event.url);
       void this.refreshHistory();
     });
     s.on('Page.javascriptDialogOpening', (event) => {
@@ -654,6 +660,19 @@ export class TabSession {
     } finally {
       void this.send('Runtime.releaseObject', { objectId: result.objectId }).catch(() => {});
     }
+  }
+
+  /** The scrolling section at a point (document CSS pixels), to anchor a drawing to. */
+  async sectionAt(x: number, y: number): Promise<Section | undefined> {
+    const found = await this.call<{ id?: unknown; at?: unknown } | null>(SECTION_AT_FUNCTION, x, y);
+    if (typeof found?.id !== 'string') return undefined;
+    const at = sanitizeAnchors({ [found.id]: found.at })[found.id];
+    return at && { id: found.id, at };
+  }
+
+  /** Where the sections (selectors) drawings are anchored to are now; gone ones are left out. */
+  async measureSections(ids: string[]): Promise<Anchors> {
+    return sanitizeAnchors(await this.call<unknown>(MEASURE_SECTIONS_FUNCTION, ids));
   }
 
   async selectedText(): Promise<string> {

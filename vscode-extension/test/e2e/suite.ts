@@ -20,6 +20,9 @@ interface DebugTab {
   internalPage?: string;
   live: boolean;
   private: boolean;
+  /** Ids of the tab's drawings, and where their sections are (JSON). */
+  drawings: string[];
+  sections: string;
   emulation: { enabled: boolean; device?: { width: number; height: number } };
 }
 
@@ -96,6 +99,9 @@ const tabOf = (panel: DebugPanel | undefined) =>
   panel?.tabs.find((tab) => tab.id === panel.activeTabId);
 const activeTab = (s: DebugState) => tabOf(s.panels[0]);
 
+/** The fixture `/pane` page's next step (see `startServer`). */
+let paneStep = '';
+
 function startServer(): Promise<Server> {
   const page = (title: string) =>
     `<!doctype html><title>${title}</title><body style="font:16px sans-serif"><h1>${title}</h1><a href="/two">two</a></body>`;
@@ -112,6 +118,27 @@ function startServer(): Promise<Server> {
       // Logs an error, throws, and requests a missing file.
       response.end(
         `<!doctype html><title>errors</title><img src="/missing.png"><script>console.error('boom from fixture'); setTimeout(() => { throw new Error('uncaught fixture failure'); });</script>`,
+      );
+      return;
+    }
+    if (request.url === '/pane-step') {
+      response.end(paneStep);
+      paneStep = '';
+      return;
+    }
+    if (request.url === '/pane' || request.url === '/pane/other') {
+      // A section that scrolls by itself. The page takes its next step from the test
+      // (`paneStep`): scroll the section, change route like a single-page app, or leave.
+      response.end(
+        `<!doctype html><title>pane</title><div id="pane" style="position:absolute;left:100px;top:100px;width:300px;height:200px;overflow:auto">${'<p>line</p>'.repeat(60)}</div><script>
+        setInterval(async () => {
+          const step = await (await fetch('/pane-step')).text();
+          if (step === 'scroll') document.getElementById('pane').scrollTop = 150;
+          if (step === 'route') history.pushState({}, '', '/pane/other');
+          if (step === 'back') history.back();
+          if (step === 'leave') location.href = '/two';
+        }, 100);
+        </script>`,
       );
       return;
     }
@@ -474,6 +501,39 @@ export async function run(): Promise<void> {
       const height = png.readUInt32BE(20);
       assert.ok(Math.abs(width / height - 184 / 134) < 0.02, `${width}x${height}`);
       assert.ok(width >= 184 && width <= 184 * 3, `${width}x${height}`);
+    });
+
+    await test('drawings belong to their page, and follow the section they are on', async () => {
+      const style = { color: '#ff3b30', width: 4, opacity: 1, dash: 'solid', fill: false };
+      const sectionY = (s: DebugState) => {
+        const sections = activeTab(s)?.sections;
+        return sections ? (JSON.parse(sections) as Record<string, { y: number }>)['#pane']?.y : -1;
+      };
+      await exec('vscodeBrowser.openUrl', `${base}/pane`);
+      await waitFor(
+        'the pane page',
+        (s) => activeTab(s)?.title === 'pane' && !activeTab(s)?.loading,
+      );
+      await exec('vscodeBrowser.debug.setAnnotations', [
+        { id: 'on-page', kind: 'rect', start: [500, 50], end: [600, 100], style },
+        { id: 'on-pane', kind: 'rect', start: [120, 120], end: [200, 160], style, anchor: '#pane' },
+      ]);
+      // The host measures the section the drawing is on, and again when it scrolls.
+      await waitFor('the pane measured', (s) => sectionY(s) === 0);
+      paneStep = 'scroll';
+      await waitFor('the pane scrolled', (s) => sectionY(s) === 150);
+      // A single-page app's route change shows that page's drawings (none); back brings them back.
+      paneStep = 'route';
+      await waitFor('no drawings on the route', (s) => activeTab(s)?.drawings.length === 0);
+      paneStep = 'back';
+      await waitFor('the drawings back', (s) => activeTab(s)?.drawings.length === 2);
+      // The same across documents.
+      paneStep = 'leave';
+      await waitFor('page two', (s) => activeTab(s)?.title === 'Page Two');
+      assert.deepEqual(activeTab(await state())?.drawings, []);
+      await exec('vscodeBrowser.goBack');
+      await waitFor('the drawings back again', (s) => activeTab(s)?.drawings.length === 2);
+      await exec('vscodeBrowser.debug.setAnnotations', []);
     });
 
     await test('copies console errors and failed requests for AI agents', async () => {

@@ -17,6 +17,7 @@ import { SessionStore } from './features/sessions';
 import { registerTerminalLinks } from './features/terminalLinks';
 import { initAgentTerminals } from './features/terminalSend';
 import { ZoomStore } from './features/zoom';
+import { DrawingStore } from './features/drawings';
 import { BrowserPanel, type Services } from './panel/BrowserPanel';
 import { CONTEXT_VIEW_ID, ContextViewProvider } from './sidebar/ContextView';
 import { SHORTCUTS_VIEW_ID, ShortcutsViewProvider } from './sidebar/ShortcutsView';
@@ -31,6 +32,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const storage = context.globalStorageUri.fsPath;
   const bookmarks = new BookmarksStore(storage, context.globalState);
   const history = new HistoryStore(storage);
+  const drawings = new DrawingStore(storage);
   const extensions = new ExtensionsManager(storage, () => engineHost!.start(), logger);
   engineHost.setLaunchHook((engine) => extensions.installAll(engine));
   const services: Services = {
@@ -42,6 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
     extensions,
     sessions: new SessionStore(context.workspaceState),
     zoom: new ZoomStore(context.globalState),
+    drawings,
     logger,
   };
 
@@ -90,6 +93,7 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBarItem,
     bookmarks,
     history,
+    drawings,
     extensions,
     registerCommands(services),
     ...registerLanguageModelTools(agent),

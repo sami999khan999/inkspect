@@ -1,9 +1,10 @@
-import type { Bounds, Shape } from '../annotations';
+import type { Anchors, Bounds, Shape } from '../annotations';
 import { drawShapes } from './render';
 
 /**
  * Draws shapes onto a screenshot. `area` is the part of the document (CSS pixels) the image
  * shows; the image may be at a higher resolution (device pixel ratio) or scaled down.
+ * `anchors` places shapes drawn on scrolling sections (see `RenderOptions.anchors`).
  * Returns the PNG as base64.
  */
 export async function compositeScreenshot(
@@ -11,6 +12,7 @@ export async function compositeScreenshot(
   mimeType: string,
   area: Bounds,
   shapes: Shape[],
+  anchors?: Anchors,
 ): Promise<string> {
   const bitmap = await createImageBitmap(
     new Blob([image as Uint8Array<ArrayBuffer>], { type: mimeType }),
@@ -27,6 +29,7 @@ export async function compositeScreenshot(
       {
         // Redactions sample the screenshot itself.
         pixelSource: canvas,
+        anchors,
       },
     );
   }

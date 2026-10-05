@@ -56,6 +56,9 @@ export function SendModal(props: SendModalProps) {
   const projectRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const ordered = orderTargets(targets, defaultTarget);
+  // The agent Enter sends to: the default until an arrow key picks another.
+  const [chosen, setChosen] = useState<string>();
+  const activeId = ordered.some((t) => t.id === chosen) ? chosen : ordered[0]?.id;
   const busy = props.status?.tone === 'busy';
   const key = (id: string) => map[id]?.[0];
 
@@ -66,6 +69,60 @@ export function SendModal(props: SendModalProps) {
     ref.current?.focus();
     return () => before?.focus?.();
   }, []);
+
+  // The page behind doesn't scroll while the dialog is open, and focus can't leave it (Tab, or a
+  // script moving it): both are undone when it closes.
+  useEffect(() => {
+    const dialog = ref.current;
+    const backdrop = dialog?.parentElement;
+    if (!dialog || !backdrop) return;
+    const root = dialog.getRootNode() as Document | ShadowRoot;
+    const host = root instanceof ShadowRoot ? root.host : undefined;
+    const doc = dialog.ownerDocument;
+    const html = doc.documentElement;
+    const was = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: doc.body.style.overflow,
+      paddingRight: html.style.paddingRight,
+    };
+    const gap = doc.defaultView ? doc.defaultView.innerWidth - html.clientWidth : 0;
+    html.style.overflow = 'hidden';
+    doc.body.style.overflow = 'hidden';
+    if (gap > 0) html.style.paddingRight = `${gap}px`;
+    // Wheel and touch over the backdrop would scroll the page; inside the dialog they scroll it.
+    const stopScroll = (event: Event) => {
+      if (!dialog.contains(event.target as Node) || dialog.scrollHeight <= dialog.clientHeight) {
+        event.preventDefault();
+      }
+    };
+    backdrop.addEventListener('wheel', stopScroll, { passive: false });
+    backdrop.addEventListener('touchmove', stopScroll, { passive: false });
+    const keep = (event: FocusEvent) => {
+      const target = event.target as Node | null;
+      // From inside a closed shadow root, focus shows as the host element.
+      if (!target || target === host || dialog.contains(target)) return;
+      if ((target as Element).closest?.('[data-ink-popup]')) return;
+      (dialog.querySelector<HTMLElement>(FOCUSABLE) ?? dialog).focus();
+    };
+    doc.addEventListener('focusin', keep, true);
+    return () => {
+      html.style.overflow = was.htmlOverflow;
+      doc.body.style.overflow = was.bodyOverflow;
+      html.style.paddingRight = was.paddingRight;
+      backdrop.removeEventListener('wheel', stopScroll);
+      backdrop.removeEventListener('touchmove', stopScroll);
+      doc.removeEventListener('focusin', keep, true);
+    };
+  }, []);
+
+  /** Moves the selection through the agents (arrow keys), wrapping at the ends. */
+  const move = (step: number) => {
+    if (!ordered.length) return;
+    const at = ordered.findIndex((t) => t.id === activeId);
+    const next = ordered[(at + step + ordered.length) % ordered.length]!;
+    setChosen(next.id);
+    ref.current?.querySelector<HTMLElement>(`[data-target="${CSS.escape(next.id)}"]`)?.focus();
+  };
 
   const openThreads = () => {
     const rect = threadButton.current?.getBoundingClientRect();
@@ -83,15 +140,6 @@ export function SendModal(props: SendModalProps) {
 
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.defaultPrevented) return;
-    // While it saves or sends, Esc still closes it (it stays saved; a send carries on).
-    if (busy) {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-      return;
-    }
-    const native = event.nativeEvent;
     if (event.key === 'Tab') {
       // Focus stays in the dialog.
       const items = [...(ref.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])];
@@ -101,6 +149,23 @@ export function SendModal(props: SendModalProps) {
       const next = event.shiftKey ? (at <= 0 ? items.length - 1 : at - 1) : (at + 1) % items.length;
       items[next]!.focus();
       event.preventDefault();
+      return;
+    }
+    // While it saves or sends, Esc still closes it (it stays saved; a send carries on).
+    if (busy) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    const native = event.nativeEvent;
+    // Up and Down pick the agent (Enter sends to it); menus and lists take their own arrows.
+    const inList = (event.target as HTMLElement).closest('[role="menu"], [role="listbox"], input');
+    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !inList && ordered.length) {
+      event.preventDefault();
+      event.stopPropagation();
+      move(event.key === 'ArrowDown' ? 1 : -1);
       return;
     }
     // Number keys pick an agent; with Shift, an agentmux one also comes to the front.
@@ -120,7 +185,7 @@ export function SendModal(props: SendModalProps) {
     if (onButton) return;
     const action = actionForChord(map, ['send'], chordFromEvent(native))?.id;
     const run: Record<string, (() => void) | undefined> = {
-      'send.default': ordered[0] ? () => onSend(ordered[0]!.id, { open: false }) : undefined,
+      'send.default': activeId ? () => onSend(activeId, { open: false }) : undefined,
       'send.newThread': harnesses.length ? openThreads : undefined,
       'send.project': props.onProject
         ? () => projectRef.current?.querySelector('button')?.click()
@@ -153,13 +218,6 @@ export function SendModal(props: SendModalProps) {
         onKeyDown={onKeyDown}
       >
         <div className="ink-modal-head">
-          {!!props.images?.length && (
-            <div className="ink-modal-thumbs" aria-hidden="true">
-              {props.images.slice(0, 4).map((src, index) => (
-                <img key={index} src={src} alt="" />
-              ))}
-            </div>
-          )}
           <div className="ink-modal-heading">
             <div className="ink-modal-title">
               <span className="codicon codicon-pass-filled" aria-hidden="true" />
@@ -193,25 +251,52 @@ export function SendModal(props: SendModalProps) {
           <IconButton icon="close" label="Close (it stays saved)" onClick={onClose} />
         </div>
 
-        <div className="ink-modal-label">Send to</div>
+        {!!props.images?.length && (
+          <div className="ink-modal-thumbs" aria-hidden="true">
+            {props.images.slice(0, 4).map((src, index, shown) => (
+              <span key={index} className="ink-modal-thumb">
+                <img src={src} alt="" />
+                {index === shown.length - 1 && props.images!.length > shown.length && (
+                  <span className="ink-modal-more">+{props.images!.length - shown.length}</span>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="ink-modal-label">
+          Send to
+          {ordered.length > 0 && <span className="ink-modal-count">{ordered.length}</span>}
+        </div>
         {ordered.length ? (
           <ul className="ink-modal-targets" role="list">
             {ordered.map((target, index) => (
-              <li key={target.id} className={cx('ink-modal-target', index === 0 && 'default')}>
+              <li
+                key={target.id}
+                className={cx('ink-modal-target', target.id === activeId && 'default')}
+              >
                 <button
                   type="button"
                   className="ink-modal-send"
+                  data-target={target.id}
+                  aria-current={target.id === activeId ? 'true' : undefined}
                   disabled={busy}
                   onClick={() => onSend(target.id, { open: false })}
                   aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
                 >
-                  {index < 9 && <span className="ink-modal-number">{index + 1}</span>}
-                  <span className={`codicon codicon-${targetIcon(target)}`} aria-hidden="true" />
-                  <span className="ink-modal-agent">{target.label}</span>
-                  <span className="ink-modal-where">{target.detail}</span>
-                  {index === 0 && key('send.default') && (
-                    <KeyCaps binding={key('send.default')!} size="sm" />
-                  )}
+                  <span className="ink-modal-icon" aria-hidden="true">
+                    <span className={`codicon codicon-${targetIcon(target)}`} />
+                  </span>
+                  <span className="ink-modal-text">
+                    <span className="ink-modal-agent">{target.label}</span>
+                    <span className="ink-modal-where">{target.detail}</span>
+                  </span>
+                  <span className="ink-modal-keys">
+                    {index < 9 && <span className="ink-modal-number">{index + 1}</span>}
+                    {target.id === activeId && key('send.default') && (
+                      <KeyCaps binding={key('send.default')!} size="sm" />
+                    )}
+                  </span>
                 </button>
                 {target.kind === 'tmux' && (
                   <IconButton
