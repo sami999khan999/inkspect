@@ -12,4 +12,4 @@ coverage/
 .vscode-browser/
 .cache/
 # The built browser extensions (load unpacked from there); outside dist/ so codesync copies them.
-browser-extension/*-extension-build/
+release/

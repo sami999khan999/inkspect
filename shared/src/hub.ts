@@ -34,6 +34,7 @@ export const HUB_FEATURES = [
   'send.prompt',
   'items.group',
   'item.content',
+  'agentmux.start',
 ] as const;
 /**
  * How much of an item `item.content` returns at a time: browsers take at most 1 MB per message
@@ -269,6 +270,8 @@ export type BrowserToHub =
    * `CONTENT_SLICE` bytes from `offset`.
    */
   | { type: 'item.content'; req: string; project: string; id: string; offset: number }
+  /** Starts a new agentmux thread in a project, sending nothing (it then lists as a target). */
+  | { type: 'agentmux.start'; req: string; project: string; harness: Harness }
   /** Shows items as one group, sent together (as VS Code's Group does). */
   | { type: 'items.group'; req: string; project: string; ids: string[] }
   /** Splits a group back into single items. */
@@ -297,6 +300,8 @@ export type HubToBrowser =
     }
   | { type: 'item.sent'; req: string; ok: boolean; sentTo?: string; error?: string }
   | { type: 'items'; req: string; ok: boolean; items: ItemMeta[]; error?: string }
+  /** The thread `agentmux.start` started: its target id. */
+  | { type: 'started'; req: string; ok: boolean; target?: string; error?: string }
   /** A slice of an item's content (base64); `size` is the whole content's, in bytes. */
   | {
       type: 'content';
@@ -421,6 +426,7 @@ const BROWSER_TO_HUB: Record<BrowserToHub['type'], Record<string, Check>> = {
     id: matches(ITEM_ID),
     offset: (v) => Number.isSafeInteger(v) && (v as number) >= 0,
   },
+  'agentmux.start': { req, project: projectPath, harness: oneOf(...HARNESSES) },
   'items.group': { req, project: projectPath, ids: itemIds },
   'items.ungroup': { req, project: projectPath, group: id },
   'project.pin': { req, project: projectPath, pinned: isBoolean },
@@ -489,6 +495,12 @@ const HUB_TO_BROWSER: Record<HubToBrowser['type'], Record<string, Check>> = {
     req,
     ok: isBoolean,
     items: arrayOf(isItemMeta, 500),
+    error: optional(shortString(1000)),
+  },
+  started: {
+    req,
+    ok: isBoolean,
+    target: optional(shortString(200)),
     error: optional(shortString(1000)),
   },
   content: {

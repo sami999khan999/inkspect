@@ -462,6 +462,22 @@ async function handle(
         ? { ok: true, sentTo: reply.sentTo }
         : { ok: false, error: reply.error ?? 'Nothing was sent.' };
     }
+    case 'startThread': {
+      const reply = await bridge.hubRequest<Extract<HubToBrowser, { type: 'started' }>>(
+        {
+          type: 'agentmux.start',
+          req: crypto.randomUUID(),
+          project: message.project,
+          harness: message.harness,
+        },
+        // agentmux takes up to a minute to start a thread, then its agent has 20 seconds.
+        90_000,
+      );
+      if (!reply) return { ok: false, error: 'The browser helper did not answer.' };
+      return reply.ok
+        ? { ok: true, target: reply.target }
+        : { ok: false, error: reply.error ?? 'The thread did not start.' };
+    }
     case 'moveSaved': {
       const reply = await bridge.hubRequest<Extract<HubToBrowser, { type: 'done' }>>({
         type: 'items.move',

@@ -139,19 +139,27 @@ export function SavedList(props: SavedListProps) {
         anchor,
         tidyMenu(
           ordered.flatMap((t): MenuState['items'] => {
+            const send = () => props.onSend(ids, t.id);
             const name = t.kind === 'chat' ? t.label : `${t.label} (${targetDetail(t)})`;
-            const send = {
-              label: name,
-              icon: targetIcon(t),
-              onSelect: () => props.onSend(ids, t.id),
-            };
-            if (!openInAgentmux || t.kind !== 'tmux') return [send];
+            if (!openInAgentmux || t.kind !== 'tmux') {
+              return [{ label: name, icon: targetIcon(t), onSelect: send }];
+            }
+            // An agentmux thread: its name, then its two actions beneath it.
             return [
               { separator: true },
-              { ...send, label: `Send to ${name}` },
+              { heading: t.label, detail: targetDetail(t), icon: targetIcon(t) },
+              {
+                label: 'Send',
+                icon: 'send',
+                indent: true,
+                ariaLabel: `Send to ${name}`,
+                onSelect: send,
+              },
               {
                 label: 'Send and open in agentmux',
                 icon: 'link-external',
+                indent: true,
+                ariaLabel: `Send to ${name} and open it in agentmux`,
                 onSelect: () => openInAgentmux(ids, t.id),
               },
               { separator: true },
@@ -266,7 +274,8 @@ export function SavedList(props: SavedListProps) {
               Send
             </Button>
           )}
-          {props.onGroup && (
+          {/* Grouping joins cards: one group card on its own is a group already. */}
+          {props.onGroup && selectedRows.length > 1 && (
             <Button
               size="sm"
               variant="ghost"

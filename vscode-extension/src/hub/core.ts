@@ -28,7 +28,7 @@ import { listenerFolder, localPort, projectOfFolder } from './devServer';
 import { inboxFolder, type HubPaths } from './paths';
 import { collectProjects, siteOf, suggestProject } from './projects';
 import { readProjectState } from './projectState';
-import { sendItems, type SendOptions, type SendResult } from './router';
+import { sendItems, startThread, type SendOptions, type SendResult } from './router';
 import { readState, writeState, type HubState } from './state';
 import {
   emptyTrash,
@@ -129,6 +129,8 @@ export class HubCore {
           return { type: 'thumb', req };
         case 'item.content':
           return { type: 'content', req, ok: false, error: text };
+        case 'agentmux.start':
+          return { type: 'started', req, ok: false, error: text };
         default:
           return { type: 'done', req, ok: false, error: text };
       }
@@ -162,6 +164,18 @@ export class HubCore {
       }
       case 'item.thumb':
         return { type: 'thumb', req, ...(known ? this.thumbOf(message.project, message.id) : {}) };
+      case 'agentmux.start': {
+        if (!known) return { type: 'started', req, ok: false, error: GONE };
+        const project = (await this.projects()).find((p) => p.path === message.project);
+        const thread = await startThread(
+          { harnesses: project?.harnesses ?? [], sockets: this.tmuxSockets },
+          message.project,
+          message.harness,
+        );
+        // The next look finds it as one of the project's targets.
+        this.projectsChanged();
+        return { type: 'started', req, ok: true, target: thread.id };
+      }
       case 'item.content': {
         if (!known) return { type: 'content', req, ok: false, error: GONE };
         return {

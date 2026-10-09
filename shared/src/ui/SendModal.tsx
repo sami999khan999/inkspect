@@ -27,6 +27,11 @@ export interface SendModalProps {
   defaultTarget?: string;
   /** Agents a new agentmux thread can run (only where agentmux has the project open). */
   harnesses?: readonly Harness[];
+  /**
+   * Starts a new agentmux thread without sending to it; the dialog stays open and lists it.
+   * Without it, picking one starts the thread and sends there.
+   */
+  onNewThread?: (harness: Harness) => void;
   /** What shows when there is nowhere to send ("No agent is running for this project."). */
   emptyText?: string;
   /**
@@ -75,6 +80,7 @@ export function SendModal(props: SendModalProps) {
   const [chosen, setChosen] = useState<string>();
   const activeId = ordered.some((t) => t.id === chosen) ? chosen : ordered[0]?.id;
   const busy = props.status?.tone === 'busy';
+  const hasThreads = ordered.some((t) => t.kind === 'tmux');
   const allClosed = ordered.length > 0 && ordered.every((t) => t.closed);
   const starting = sending ? parseTargetId(sending) : undefined;
   const statusText =
@@ -155,7 +161,12 @@ export function SendModal(props: SendModalProps) {
       items: harnesses.map((harness) => ({
         label: HARNESS_LABELS[harness],
         icon: 'terminal-tmux',
-        onSelect: () => onSend(agentmuxNewTarget(harness), { open: false }),
+        onSelect: () => {
+          if (!props.onNewThread) return onSend(agentmuxNewTarget(harness), { open: false });
+          // The new thread becomes the chosen one once it is listed.
+          setChosen(undefined);
+          props.onNewThread(harness);
+        },
       })),
     });
   };
@@ -257,7 +268,9 @@ export function SendModal(props: SendModalProps) {
           <div className="ink-modal-heading">
             <div className="ink-modal-title">
               <span className="codicon codicon-pass-filled" aria-hidden="true" />
-              {props.title}
+              <span className="ink-modal-title-text" title={props.title}>
+                {props.title}
+              </span>
             </div>
             {props.project && (
               <div className="ink-modal-project" ref={projectRef}>
@@ -351,13 +364,16 @@ export function SendModal(props: SendModalProps) {
                     )}
                   </span>
                 </button>
-                {target.kind === 'tmux' && (
+                {target.kind === 'tmux' ? (
                   <IconButton
                     icon="link-external"
                     label={`Send and open ${target.detail} in agentmux`}
                     disabled={busy}
                     onClick={() => onSend(target.id, { open: true })}
                   />
+                ) : (
+                  // Keeps every row as wide as those with the button.
+                  hasThreads && <span className="ink-modal-open-space" aria-hidden="true" />
                 )}
               </li>
             ))}
@@ -393,7 +409,7 @@ export function SendModal(props: SendModalProps) {
             className={cx('ink-modal-status', props.status && `tone-${props.status.tone}`)}
             role="status"
           >
-            {statusText ?? 'Esc keeps it saved without sending.'}
+            {statusText ?? 'Esc keeps it saved.'}
           </span>
           {props.onCopy && (
             <Button size="sm" variant="ghost" icon="copy" disabled={busy} onClick={props.onCopy}>

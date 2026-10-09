@@ -60,7 +60,7 @@ shared/                     @inkspect/shared: pure TS used by both products
 vscode-extension/           the VS Code extension (imports @inkspect/shared)
 browser-extension/
   manifest/                 base.json + chrome.json + firefox.json overlays
-  scripts/build.mjs         Vite multi-entry build → dist/chrome, dist/firefox
+  scripts/build.mjs         multi-entry build → release/chrome-extension-build, release/firefox-extension-build
   src/background/           service worker: commands, bridge client, screenshots, bookmarks sync
   src/content/              toolbar (React in Shadow DOM), inspector, drawing, region select
   src/main-world/           page-context helpers (frameworks, console hooks)
@@ -177,7 +177,7 @@ browser-extension/
   - The collector is now one real function. VS Code sends it over CDP via `toString()` (checked on development and minified builds); the extension calls it directly.
   - **[vscode]** The old paths re-export from the shared package, so imports didn't change.
 - [x] Build: esbuild multi-entry (background, content, main-world, options), classic scripts, CSS inlined as text.
-  - `scripts/build.mjs` merges `manifest/base.json` with the `chrome.json` / `firefox.json` overlays into `dist/chrome` and `dist/firefox`.
+  - `scripts/build.mjs` merges `manifest/base.json` with the `chrome.json` / `firefox.json` overlays into `release/chrome-extension-build` and `release/firefox-extension-build` at the repository root.
   - `--watch`, `--production`, and `--test` (host access and an open shadow root for the end-to-end tests).
 - [x] ESLint, strict TypeScript, Vitest and Prettier per workspace.
 - [x] CI: typecheck, lint and unit tests for all workspaces; the extension's end-to-end tests; zipped Chrome and Firefox builds as artifacts.

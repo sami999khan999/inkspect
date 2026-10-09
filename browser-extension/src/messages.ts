@@ -3,6 +3,7 @@
 // browser shares objects between worlds.
 import type { CaptureToSave, Project } from '@inkspect/shared/hub';
 import type { DeviceSettings, NetworkPreset } from '@inkspect/shared/devices';
+import type { Harness } from '@inkspect/shared/targets';
 
 export type BridgeState = 'connected' | 'connecting' | 'unpaired' | 'offline';
 
@@ -82,7 +83,9 @@ export type ToBackground =
       prompt?: string;
     }
   /** Moves saved captures to another project. */
-  | { type: 'moveSaved'; project: string; to: string; ids: string[] };
+  | { type: 'moveSaved'; project: string; to: string; ids: string[] }
+  /** Starts a new agentmux thread in a project (nothing is sent to it). */
+  | { type: 'startThread'; project: string; harness: Harness };
 
 export type BackgroundReply =
   | {
@@ -96,6 +99,8 @@ export type BackgroundReply =
       ids?: string[];
       /** The agent a send went to. */
       sentTo?: string;
+      /** The target id of a thread `startThread` started. */
+      target?: string;
     }
   | { ok: false; error: string };
 

@@ -33,6 +33,21 @@ export interface SendContext {
 
 export type SendResult = { ok: true; sentTo: string } | { ok: false; error: string };
 
+/**
+ * Starts a new agentmux thread running `harness` in a project and returns it once its agent
+ * runs. Nothing is sent to it. Throws when agentmux can't start that agent there.
+ */
+export async function startThread(
+  ctx: Pick<SendContext, 'harnesses' | 'sockets'>,
+  project: string,
+  harness: Harness,
+): Promise<PaneTarget> {
+  if (!ctx.harnesses.includes(harness)) {
+    throw new Error(`agentmux can't start ${HARNESS_LABELS[harness]} here.`);
+  }
+  return newAgentmuxThread(project, harness, ctx.sockets);
+}
+
 export interface SendOptions {
   /** Also show the agentmux thread and bring its window to the front. */
   open?: boolean;
@@ -69,11 +84,8 @@ export async function sendItems(
   let sent: SendResult;
   let remembered = id;
   if (parsed.kind === 'agentmux-new') {
-    if (!ctx.harnesses.includes(parsed.harness)) {
-      return { ok: false, error: `agentmux can't start ${HARNESS_LABELS[parsed.harness]} here.` };
-    }
     try {
-      const thread = await newAgentmuxThread(project, parsed.harness, ctx.sockets);
+      const thread = await startThread(ctx, project, parsed.harness);
       await pasteIntoPane(thread.socket, thread.paneId, partsOf(project, items, { prompt }));
       remembered = thread.id;
       sent = { ok: true, sentTo: thread.label };

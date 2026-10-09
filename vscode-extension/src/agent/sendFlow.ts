@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import type { HubTarget } from '@inkspect/shared/hub';
+import { HARNESS_LABELS } from '@inkspect/shared/targets';
 import { errorMessage } from '../browser/logger';
+import { startThread } from '../hub/router';
 import { moveItems } from '../hub/store';
 import type { HostToWebview, SavedOffer, WebviewToHost } from '../shared/protocol';
 import { orderTargets, sentText, targetDetail } from '@inkspect/shared/sendModal';
@@ -77,6 +79,7 @@ export class SendFlow implements vscode.Disposable {
     items: ContextItem[],
     project: string,
     id: string = randomUUID(),
+    chosen?: string,
   ): Promise<SavedOffer> {
     const context = await sendContextFor(project);
     const images: SavedOffer['images'] = [];
@@ -106,7 +109,8 @@ export class SendFlow implements vscode.Disposable {
       projects: await knownProjects(project),
       images,
       targets,
-      defaultTarget: context.defaultTarget,
+      defaultTarget:
+        chosen && targets.some((t) => t.id === chosen) ? chosen : context.defaultTarget,
       harnesses: [...context.harnesses],
     };
   }
@@ -161,6 +165,28 @@ export class SendFlow implements vscode.Disposable {
           return;
         }
         post({ type: 'saved', offer: await this.offer(items, to, message.offerId) });
+        return;
+      }
+      case 'newThread': {
+        const harness = message.harness;
+        if (!harness) return;
+        const label = HARNESS_LABELS[harness];
+        status('busy', `Starting a new ${label} thread in agentmux…`);
+        try {
+          const thread = await startThread(
+            await sendContextFor(offer.project),
+            offer.project,
+            harness,
+          );
+          // The dialog stays open and lists the new thread, chosen; nothing is sent to it.
+          post({
+            type: 'saved',
+            offer: await this.offer(offer.items, offer.project, message.offerId, thread.id),
+          });
+          status('ok', `${label} started in agentmux. Enter sends to it.`);
+        } catch (error) {
+          status('error', errorMessage(error));
+        }
         return;
       }
       case 'close':

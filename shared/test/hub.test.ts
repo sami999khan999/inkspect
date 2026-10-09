@@ -36,6 +36,21 @@ describe('hub protocol', () => {
     expect(parseBrowserToHub(encodeHub({ ...ungroup, group: '../x' }))).toBeUndefined();
   });
 
+  it('checks thread starts and their answers', () => {
+    const start = {
+      type: 'agentmux.start' as const,
+      req: 'r',
+      project: '/p',
+      harness: 'codex' as const,
+    };
+    expect(parseBrowserToHub(encodeHub(start))).toEqual(start);
+    expect(
+      parseBrowserToHub(JSON.parse(encodeHub(start).replace('codex', 'bash'))),
+    ).toBeUndefined();
+    const started = { type: 'started' as const, req: 'r', ok: true, target: 'tmux:agents:%3' };
+    expect(parseHubToBrowser(encodeHub(started))).toEqual(started);
+  });
+
   it('checks content requests and their slices', () => {
     const ask = {
       type: 'item.content' as const,

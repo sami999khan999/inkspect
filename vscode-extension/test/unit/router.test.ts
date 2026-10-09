@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { HubTarget, ItemMeta } from '@inkspect/shared/hub';
 import { availableHarnesses, findProgram, focusWindowByClass } from '../../src/hub/agentmux';
 import { readProjectState, writeLastTarget } from '../../src/hub/projectState';
-import { sendItems, type SendContext } from '../../src/hub/router';
+import { sendItems, startThread, type SendContext } from '../../src/hub/router';
 import { readItem, writeItem } from '../../src/hub/store';
 
 const temps: string[] = [];
@@ -40,6 +40,14 @@ function context(over: Partial<SendContext> = {}) {
   };
   return { ctx, delivered };
 }
+
+describe('starting an agentmux thread', () => {
+  it("refuses an agent agentmux can't start there (and sends nothing)", async () => {
+    await expect(
+      startThread({ harnesses: ['claude'], sockets: [] }, '/p', 'codex'),
+    ).rejects.toThrow(/can't start Codex here/);
+  });
+});
 
 describe('sending saved items', () => {
   it('hands the prompt to VS Code targets', async () => {

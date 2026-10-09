@@ -1146,6 +1146,14 @@ export function App() {
             targets={saved.offer.targets}
             defaultTarget={saved.offer.defaultTarget}
             harnesses={saved.offer.harnesses}
+            onNewThread={(harness) =>
+              postToHost({
+                type: 'savedAction',
+                offerId: saved.offer.id,
+                action: 'newThread',
+                harness,
+              })
+            }
             onSend={(target, { open, prompt }) =>
               postToHost({
                 type: 'savedAction',

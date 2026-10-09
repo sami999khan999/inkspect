@@ -1323,7 +1323,9 @@ const realBrowser = await puppeteer.launch({
   defaultViewport: { width: 1200, height: 800 },
   args: ['--no-first-run'],
 });
-const realId = await realBrowser.installExtension(join(root, 'chrome-extension-build'));
+const realId = await realBrowser.installExtension(
+  join(root, '..', 'release', 'chrome-extension-build'),
+);
 // The settings page opens on install and would take focus from the page.
 await (
   await (await realBrowser.waitForTarget((t) => t.url().includes('options.html'))).page()

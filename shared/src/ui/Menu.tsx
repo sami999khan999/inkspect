@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { listenOutsidePress, pressedOpener } from './popover';
+import { listenOutsidePress, pressedOpener, viewportSize } from './popover';
 
 export type MenuItem =
   | {
@@ -9,11 +9,17 @@ export type MenuItem =
       image?: string;
       shortcut?: string;
       disabled?: boolean;
+      /** Under a heading: indented beneath it. */
+      indent?: boolean;
+      /** The accessible name when the label alone needs its heading ("Send" to whom). */
+      ariaLabel?: string;
       onSelect: () => void;
       /** Items of a submenu, opened on hover or with the Right arrow (built when opened). */
       submenu?: () => MenuItem[];
     }
-  | { separator: true };
+  | { separator: true }
+  /** A title over the items after it (the agent that "Send" and "Send and open" go to). */
+  | { heading: string; icon?: string; detail?: string };
 
 export interface MenuState {
   x: number;
@@ -99,15 +105,17 @@ function MenuList({ items, x, y, onClose, focusFirst, parent, onBack, above }: M
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
+    const view = viewportSize();
+    element.style.maxWidth = `${view.width - 8}px`;
     const rect = element.getBoundingClientRect();
     let left = x;
-    if (parent && x + rect.width > innerWidth - 4) left = parent.left - rect.width + 2;
+    if (parent && x + rect.width > view.width - 4) left = parent.left - rect.width + 2;
     let top = y;
-    if (above !== undefined && y + rect.height > innerHeight - 4 && above - rect.height - 2 >= 4) {
+    if (above !== undefined && y + rect.height > view.height - 4 && above - rect.height - 2 >= 4) {
       top = above - rect.height - 2;
     }
-    element.style.left = `${Math.max(4, Math.min(left, innerWidth - rect.width - 4))}px`;
-    element.style.top = `${Math.max(4, Math.min(top, innerHeight - rect.height - 4))}px`;
+    element.style.left = `${Math.max(4, Math.min(left, view.width - rect.width - 4))}px`;
+    element.style.top = `${Math.max(4, Math.min(top, view.height - rect.height - 4))}px`;
     if (focusFirst) {
       element
         .querySelector<HTMLButtonElement>(':scope > button:not(:disabled)')
@@ -164,6 +172,12 @@ function MenuList({ items, x, y, onClose, focusFirst, parent, onBack, above }: M
       {items.map((item, index) =>
         'separator' in item ? (
           <div key={index} className="menu-separator" role="separator" />
+        ) : 'heading' in item ? (
+          <div key={index} className="menu-heading" role="presentation">
+            {item.icon && <span className={`codicon codicon-${item.icon}`} aria-hidden="true" />}
+            <span className="menu-heading-label">{item.heading}</span>
+            {item.detail && <span className="menu-heading-detail">{item.detail}</span>}
+          </div>
         ) : (
           <button
             key={index}
@@ -172,7 +186,8 @@ function MenuList({ items, x, y, onClose, focusFirst, parent, onBack, above }: M
             data-index={index}
             aria-haspopup={item.submenu ? 'menu' : undefined}
             aria-expanded={item.submenu ? open?.index === index : undefined}
-            className={`menu-item${open?.index === index ? ' expanded' : ''}`}
+            className={`menu-item${open?.index === index ? ' expanded' : ''}${item.indent ? ' indented' : ''}`}
+            aria-label={item.ariaLabel}
             disabled={item.disabled}
             onPointerEnter={(event) => {
               clearTimeout(hoverTimer.current);

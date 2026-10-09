@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **New agentmux thread only starts it:** picking an agent under New agentmux thread starts the thread and lists it in the send dialog, chosen; nothing is sent until you send. Needs a browser helper or VS Code Browser that knows it.
+- **Send to… is grouped by agent:** each agentmux thread is a heading (its name and thread) with Send and Send and open in agentmux beneath it, and the menu stays inside a narrow panel that scrolls.
+- **Group only joins cards:** selecting a single group card no longer offers Group.
+- **Send dialog polish:** the title stays on one line (hover shows it whole), key caps keep a gap from their button's label (Copy, Download, New agentmux thread), every agent row is as wide as the others, and the footer note is shorter.
+- **Builds go to `release/`** at the repository root: load `release/chrome-extension-build` (or `release/firefox-extension-build`) unpacked.
 - **Copy in the side panel:** each saved item has Copy, as in VS Code: a screenshot goes on the clipboard as an image, anything else as its text. Large images come from the browser helper in pieces. Needs a browser helper or VS Code Browser that knows it.
 - **Group in the side panel:** select two or more saved items and Group them into one card, sent together, as in VS Code (Ungroup splits them again). Needs a browser helper or VS Code Browser that knows it.
 - **Send to… has two rows per agentmux thread:** one only sends, the other sends and opens the thread in agentmux.

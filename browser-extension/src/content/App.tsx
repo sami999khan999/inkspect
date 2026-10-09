@@ -409,6 +409,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     capture: saveAndOffer,
     sendTo,
     moveTo,
+    newThread,
     copyAgain,
     download,
     close: closeOffer,
@@ -1195,6 +1196,11 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           targets={offer.targets}
           defaultTarget={offer.defaultTarget}
           harnesses={offer.harnesses}
+          onNewThread={
+            offer.project && link.features?.includes('agentmux.start')
+              ? (harness) => void newThread(harness)
+              : undefined
+          }
           emptyText={offer.empty}
           onSend={(target, { open, prompt }) => void sendTo(target, open, prompt)}
           canPrompt={!!link.features?.includes('send.prompt')}

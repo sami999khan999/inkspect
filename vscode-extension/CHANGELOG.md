@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **New agentmux thread only starts it:** in the send dialog, the new thread is started and listed, chosen; nothing is sent to it until you send.
+- **Send to… is grouped by agent:** each agentmux thread is a heading (its name and thread) with Send and Send and open in agentmux beneath it, and the menu stays inside a narrow panel that scrolls.
+- **Group only joins cards:** selecting a single group card no longer offers Group.
+- **Send dialog polish:** the title stays on one line (hover shows it whole), key caps keep a gap from their button's label (Copy, Download, New agentmux thread), every agent row is as wide as the others, and the footer note is shorter.
 - **Send to… has two rows per agentmux thread** in the Saved list: one only sends, the other sends and opens the thread in agentmux. The browser helper can now group and ungroup saved items, and hand an item's picture or text to the browser's side panel for Copy (in slices, under the browser's 1 MB message limit).
 - **A prompt with the send:** the send dialog has a box for a few words to the agent (I focuses it). It is pasted before the captures, and in chat it goes above them. Enter sends, Shift+Enter adds a line.
 - **Closed agentmux is said so:** when no window shows agentmux (it and the kittys beside VS Code are closed), its threads are listed last, dimmed, as "agentmux is closed", and Send goes to an open agent instead. Sending to one of them opens agentmux first, and the dialog says so, so nothing is pasted where nobody sees it.

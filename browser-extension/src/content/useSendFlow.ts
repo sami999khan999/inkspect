@@ -5,7 +5,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { CaptureKind } from '@inkspect/shared/bridge';
 import type { HubTarget, Project } from '@inkspect/shared/hub';
 import { sentText } from '@inkspect/shared/sendModal';
-import type { Harness } from '@inkspect/shared/targets';
+import { HARNESS_LABELS, type Harness } from '@inkspect/shared/targets';
 import { toBackground, type BridgeStatus } from '../messages';
 import { thumbnailOf } from './capture';
 import { copyImage, copyText, screenshotName } from './page';
@@ -205,6 +205,39 @@ export function useSendFlow(link: BridgeStatus) {
     [update],
   );
 
+  /** Starts a new agentmux thread; the dialog stays open and lists it, chosen (nothing is sent). */
+  const newThread = useCallback(
+    async (harness: Harness) => {
+      const shown = current.current;
+      if (!shown?.project) return;
+      const mine = run.current;
+      const label = HARNESS_LABELS[harness];
+      update({ status: { tone: 'busy', text: `Starting a new ${label} thread in agentmux…` } });
+      const started = await toBackground({
+        type: 'startThread',
+        project: shown.project.path,
+        harness,
+      });
+      if (run.current !== mine || !current.current) return;
+      if (!started.ok) {
+        update({ status: { tone: 'error', text: started.error } });
+        return;
+      }
+      const found = await toBackground({ type: 'projects', url: location.href });
+      if (run.current !== mine || !current.current) return;
+      const projects = found.ok ? (found.projects ?? shown.projects) : shown.projects;
+      const project = projects.find((p) => p.path === shown.project?.path);
+      update({
+        projects,
+        targets: project?.targets ?? shown.targets,
+        defaultTarget: started.target ?? project?.defaultTarget,
+        harnesses: project?.harnesses ?? shown.harnesses,
+        status: { tone: 'ok', text: `${label} started in agentmux. Enter sends to it.` },
+      });
+    },
+    [update],
+  );
+
   const copyAgain = useCallback(async () => {
     const shown = current.current;
     if (!shown) return;
@@ -240,5 +273,5 @@ export function useSendFlow(link: BridgeStatus) {
     setOffer(null);
   }, [setOffer]);
 
-  return { offer, capture, sendTo, moveTo, copyAgain, download, close };
+  return { offer, capture, sendTo, moveTo, newThread, copyAgain, download, close };
 }
