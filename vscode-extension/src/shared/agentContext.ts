@@ -27,6 +27,8 @@ export interface AgentTarget {
   kind: 'terminal' | 'tmux' | 'chat';
   label: string;
   detail: string;
+  /** agentmux isn't open (see HubTarget.closed). */
+  closed?: boolean;
 }
 
 export type HostToContextView =

@@ -320,15 +320,18 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     setToast({ id: Date.now(), message, ...options, tone });
   }, []);
 
-  // The debugger's part of the responsive view (Chrome): user agent, touch, network, CPU, media.
-  // Only what the debugger uses: the size changes all the time while dragging.
+  // The responsive view's emulation (Chrome): user agent, touch, network, CPU, media. Only what
+  // it uses: the size changes all the time while dragging.
   const agentUserAgent = responsive?.userAgent;
   const agentTouch = responsive?.touch ?? false;
   useEffect(() => {
     if (__BROWSER__ !== 'chrome') return;
     const agent =
-      viewing && emulation.agent && agentUserAgent
-        ? { userAgent: agentUserAgent, touch: agentTouch }
+      viewing && (emulation.agent || emulation.touch)
+        ? {
+            userAgent: emulation.agent ? agentUserAgent : undefined,
+            touch: emulation.touch && agentTouch,
+          }
         : undefined;
     const request = viewing
       ? {
@@ -1193,7 +1196,8 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           defaultTarget={offer.defaultTarget}
           harnesses={offer.harnesses}
           emptyText={offer.empty}
-          onSend={(target, { open }) => void sendTo(target, open)}
+          onSend={(target, { open, prompt }) => void sendTo(target, open, prompt)}
+          canPrompt={!!link.features?.includes('send.prompt')}
           onCopy={() => void copyAgain()}
           onDownload={download}
           onClose={closeOffer}

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Send to… has two rows per agentmux thread** in the Saved list: one only sends, the other sends and opens the thread in agentmux. The browser helper can now group and ungroup saved items, and hand an item's picture or text to the browser's side panel for Copy (in slices, under the browser's 1 MB message limit).
+- **A prompt with the send:** the send dialog has a box for a few words to the agent (I focuses it). It is pasted before the captures, and in chat it goes above them. Enter sends, Shift+Enter adds a line.
+- **Closed agentmux is said so:** when no window shows agentmux (it and the kittys beside VS Code are closed), its threads are listed last, dimmed, as "agentmux is closed", and Send goes to an open agent instead. Sending to one of them opens agentmux first, and the dialog says so, so nothing is pasted where nobody sees it.
+- **The Saved view follows the browser:** captures the browser saves, removes, restores or moves now show up at once (the store's folder renames were missed), with a check every few seconds for anything a file watcher misses.
+- **Saved cards:** the checkbox appears over the icon or thumbnail, so hovering a card no longer moves its content. The separate agentmux button is gone: **Send to…** lists every agent, then "Send and show in agentmux" for each thread.
+- **Menus and lists fit narrow views:** they stay inside a slim sidebar, long names are cut, and a menu with no room below opens above its button.
+- **The send dialog no longer grows** for a moment when the New agentmux thread menu opens, and says when it is starting a new thread.
+
 - **Console drawer:** a long file name no longer squeezes the message into a narrow column (it is cut instead).
 - **Drawings belong to their page:** each page keeps its own drawings. Going to another page (a single-page app's route change too) shows that page's, and coming back brings them back, also after a restart (`vscodeBrowser.drawing.clearOnNavigation` off keeps the same drawings on every page, as before). Private tabs keep them in memory only.
 - **Drawings stay on scrolling sections:** a drawing on a part of the page that scrolls by itself (a sidebar, a list, a chat) moves with it when it scrolls and is hidden outside it, on screen and in screenshots.

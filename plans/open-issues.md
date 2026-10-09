@@ -18,6 +18,9 @@ What is known and not done yet, across both products: found by the review of Sep
 - [ ] **Search by shortcut** misses macOS ⌫ ⌦ ⇥ and "?" (typed as Shift+/).
 - [ ] **Screen recording as GIF**: not done (WebM needs no encoder; agents read video paths). *(From the VS Code plan.)*
 
+- [ ] **Responsive view without the debugger: scripts see the browser's own user agent.** The device's user agent goes only on the frame's page request (a `declarativeNetRequest` session rule); `navigator.userAgent`, `userAgentData` and the frame's subresource requests keep the real one unless the debugger is attached for another setting. A MAIN-world patch at document start in the frame would need `webNavigation` or registered content scripts.
+- [ ] **The send dialog can close while a new agentmux thread starts** (reported, not reproduced). Nothing besides Esc, its close button, a backdrop click and a finished send closes it in either product; log `closeSaved` / `setOffer(null)` and `run.current` changes to find what does.
+
 ## Keyboard shortcuts
 
 - [ ] **Web apps lose keys inside VS Code Browser.** Its dispatcher takes browser keys before the page (Ctrl+D, Ctrl+L, Ctrl+U, Ctrl+H, Ctrl+Shift+L, Ctrl+R, F5...), where Chrome lets pages override most of them. Keep a short reserved list (tabs, address bar, reload, back/forward, F12) and let pages handle the rest first, or add a setting.

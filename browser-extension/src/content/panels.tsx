@@ -73,8 +73,10 @@ export interface EmulationOptions {
   cpu: number;
   colorScheme: EmulationRequest['colorScheme'];
   print: boolean;
-  /** The device's user agent and touch. */
+  /** The device's user agent (sent with the frame's page request; no debugger). */
   agent: boolean;
+  /** The device's touch input (needs the debugger). */
+  touch: boolean;
 }
 
 export const DEFAULT_EMULATION_OPTIONS: EmulationOptions = {
@@ -83,6 +85,7 @@ export const DEFAULT_EMULATION_OPTIONS: EmulationOptions = {
   colorScheme: 'default',
   print: false,
   agent: true,
+  touch: false,
 };
 
 /** Emulation for the responsive view; changes apply at once. */
@@ -103,7 +106,10 @@ export function EmulationPanel({
         <p className="note">These need Chrome, Edge or Brave. The size works everywhere.</p>
       )}
       <Switch checked={value.agent} disabled={!canEmulate} onChange={(agent) => set({ agent })}>
-        Device user agent and touch
+        Device user agent
+      </Switch>
+      <Switch checked={value.touch} disabled={!canEmulate} onChange={(touch) => set({ touch })}>
+        Touch input
       </Switch>
       <div className="row">
         <Field label="Network">
@@ -151,7 +157,8 @@ export function EmulationPanel({
       </Switch>
       {canEmulate && (
         <p className="note">
-          Chrome shows a “started debugging this browser” bar while any of these are on.
+          Chrome shows a “started debugging this browser” bar while touch, network, CPU, color
+          scheme or print media is on. The user agent doesn&apos;t need it.
         </p>
       )}
     </PanelFrame>

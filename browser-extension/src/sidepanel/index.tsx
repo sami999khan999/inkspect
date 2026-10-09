@@ -11,6 +11,7 @@ import {
   type Project,
 } from '@inkspect/shared/hub';
 import { projectDetail, savedViewOf } from '@inkspect/shared/saved';
+import { sentText, targetDetail } from '@inkspect/shared/sendModal';
 import themeCss from '@inkspect/shared/ui/theme.css';
 import uiCss from '@inkspect/shared/ui/ui.css';
 import { IconButton } from '@inkspect/shared/ui/IconButton';
@@ -40,13 +41,71 @@ async function fetchProjects(): Promise<Projects | undefined> {
   return hub<Projects>({ type: 'projects.get', url: tab?.url?.slice(0, 4096) });
 }
 
+/** A project's items; undefined when the helper didn't answer (the list shown stays). */
 const fetchItems = (project: string) =>
   hub<Extract<HubToBrowser, { type: 'items' }>>({ type: 'items.get', project }).then((reply) =>
-    reply?.ok ? reply.items : [],
+    reply?.ok ? reply.items : undefined,
   );
 
+type Content = Extract<HubToBrowser, { type: 'content' }>;
+
+/** An item's content, fetched slice by slice (a native message can't carry a large image). */
+async function fetchContent(
+  project: string,
+  id: string,
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; mimeType: string }> {
+  let bytes: Uint8Array<ArrayBuffer> = new Uint8Array(0);
+  let mimeType = 'text/plain';
+  for (let offset = 0; ;) {
+    const reply = await hub<Content>({ type: 'item.content', project, id, offset });
+    if (!reply?.ok || reply.size === undefined || !reply.data) {
+      throw new Error(reply?.error ?? 'The browser helper did not answer.');
+    }
+    if (offset === 0) bytes = new Uint8Array(reply.size);
+    mimeType = reply.mimeType ?? mimeType;
+    const slice = Uint8Array.from(atob(reply.data), (c) => c.charCodeAt(0));
+    if (!slice.length && offset < reply.size) throw new Error('The copy came back short.');
+    bytes.set(slice, offset);
+    offset += slice.length;
+    if (offset >= reply.size) return { bytes, mimeType };
+  }
+}
+
+/** Puts an item's picture, else its text, on the clipboard (as VS Code's Copy does). */
+async function copyContent(project: string, id: string): Promise<void> {
+  const { bytes, mimeType } = await fetchContent(project, id);
+  if (mimeType === 'text/plain') {
+    await navigator.clipboard.writeText(new TextDecoder().decode(bytes));
+    return;
+  }
+  let png = new Blob([bytes], { type: mimeType });
+  // The clipboard takes images as PNG only.
+  if (mimeType !== 'image/png') {
+    const bitmap = await createImageBitmap(png);
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
+    png = await canvas.convertToBlob({ type: 'image/png' });
+  }
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+}
+
+/** How often the list looks at the store while the panel is visible. */
+const REFRESH_MS = 2_000;
+/** Removed items wait this long in the store's trash (the hub's TRASH_MS), so Undo does too. */
+const UNDO_MS = 15_000;
+
 /** One project's Saved list: its captures, kept in step with its store. */
-function ProjectSaved({ project, canUndo }: { project: Project; canUndo: boolean }) {
+function ProjectSaved({
+  project,
+  canUndo,
+  canGroup,
+  canCopy,
+}: {
+  project: Project;
+  canUndo: boolean;
+  canGroup: boolean;
+  canCopy: boolean;
+}) {
   const [items, setItems] = useState<ItemMeta[] | undefined>();
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [note, setNote] = useState<{ text: string; tone: 'ok' | 'error' }>();
@@ -55,20 +114,34 @@ function ProjectSaved({ project, canUndo }: { project: Project; canUndo: boolean
   const targets = project.targets ?? [];
   const target = targets.find((t) => t.id === project.defaultTarget);
 
-  // The list follows the project's store (captures from VS Code, sends, removals).
+  // The list follows the project's store (captures from VS Code, sends, removals): while the
+  // panel is visible, and at once when it comes back into view.
   useEffect(() => {
     let current = true;
-    const refresh = () =>
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
       void fetchItems(project.path).then((next) => {
-        if (current) setItems(next);
+        if (current && next) setItems(next);
       });
+    };
     refresh();
-    const timer = setInterval(refresh, 4_000);
+    const timer = setInterval(refresh, REFRESH_MS);
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
     return () => {
       current = false;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
     };
   }, [project.path]);
+
+  // Undo lasts as long as the store keeps what was removed.
+  useEffect(() => {
+    if (!undo) return;
+    const timer = setTimeout(() => setUndo(undefined), UNDO_MS);
+    return () => clearTimeout(timer);
+  }, [undo]);
 
   // Thumbnails, each fetched once.
   useEffect(() => {
@@ -91,9 +164,13 @@ function ProjectSaved({ project, canUndo }: { project: Project; canUndo: boolean
     };
   }, [items, thumbnails, project.path]);
 
-  const reload = () => void fetchItems(project.path).then(setItems);
+  const reload = () =>
+    void fetchItems(project.path).then((next) => {
+      if (next) setItems(next);
+    });
   const send = async (ids: string[], to?: string, open = false) => {
     setNote(undefined);
+    const chosen = targets.find((t) => t.id === (to ?? project.defaultTarget));
     const reply = await hub<Extract<HubToBrowser, { type: 'item.sent' }>>({
       type: 'item.send',
       project: project.path,
@@ -103,7 +180,7 @@ function ProjectSaved({ project, canUndo }: { project: Project; canUndo: boolean
     });
     setNote(
       reply?.ok
-        ? { text: `Sent to ${reply.sentTo ?? 'the agent'}.`, tone: 'ok' }
+        ? { text: `${sentText(chosen, reply.sentTo ?? 'the agent')}.`, tone: 'ok' }
         : { text: reply?.error ?? 'The browser helper did not answer.', tone: 'error' },
     );
     reload();
@@ -114,6 +191,18 @@ function ProjectSaved({ project, canUndo }: { project: Project; canUndo: boolean
     reload();
   };
 
+  const copy = (id: string) => {
+    setNote(undefined);
+    void copyContent(project.path, id).then(
+      () => setNote({ text: 'Copied.', tone: 'ok' }),
+      (error: unknown) =>
+        setNote({ text: `Could not copy: ${(error as Error).message}`, tone: 'error' }),
+    );
+  };
+  const regroup = (
+    request: { type: 'items.group'; ids: string[] } | { type: 'items.ungroup'; group: string },
+  ) => void hub({ ...request, project: project.path }).then(reload);
+
   const views = useMemo(() => (items ?? []).map(savedViewOf), [items]);
   if (!items) return <div className="sp-empty">Loading…</div>;
   return (
@@ -121,7 +210,7 @@ function ProjectSaved({ project, canUndo }: { project: Project; canUndo: boolean
       <div className="sp-target" title={project.path}>
         {live
           ? target
-            ? `Send goes to ${target.label} · ${target.detail}`
+            ? `Send goes to ${target.label} · ${targetDetail(target)}`
             : 'No agent is running here.'
           : 'Nothing is open here: captures are kept, sending is off.'}
       </div>
@@ -139,6 +228,9 @@ function ProjectSaved({ project, canUndo }: { project: Project; canUndo: boolean
         onSend={(ids, to) => void send(ids, to)}
         onOpenInAgentmux={(ids, to) => void send(ids, to, true)}
         onRemove={(ids) => void remove(ids)}
+        onCopy={canCopy ? copy : undefined}
+        onGroup={canGroup ? (ids) => regroup({ type: 'items.group', ids }) : undefined}
+        onUngroup={canGroup ? (group) => regroup({ type: 'items.ungroup', group }) : undefined}
         undo={
           undo && {
             label: undo.length === 1 ? 'Removed 1 item' : `Removed ${undo.length} items`,
@@ -254,6 +346,8 @@ function SidePanel() {
             key={shown.path}
             project={shown}
             canUndo={!!status.features?.includes('item.restore')}
+            canGroup={!!status.features?.includes('items.group')}
+            canCopy={!!status.features?.includes('item.content')}
           />
         </>
       )}

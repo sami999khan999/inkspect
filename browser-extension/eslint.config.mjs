@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint';
 
 export default defineConfig(
   // .cache/ holds the Chrome for Testing that the end-to-end tests download.
-  { ignores: ['dist/', 'node_modules/', 'out/', '.cache/'] },
+  { ignores: ['dist/', '*-extension-build/', 'node_modules/', 'out/', '.cache/'] },
   js.configs.recommended,
   tseslint.configs.recommended,
   {

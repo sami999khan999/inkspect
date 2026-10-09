@@ -264,7 +264,7 @@ export class HubClient implements vscode.Disposable {
         const items = savedItems(message.project, message.ids);
         try {
           const sent = items.length
-            ? await deliverLocal(message.target, message.project, items)
+            ? await deliverLocal(message.target, message.project, items, message.prompt)
             : ({ ok: false, error: 'Those captures are gone.' } as const);
           this.post(
             sent.ok

@@ -127,6 +127,22 @@ describe('agents in agentmux threads', () => {
     expect(chooseDefault([chat])).toBe(chat.id);
     expect(chooseDefault([])).toBeUndefined();
   });
+
+  it('marks agents closed when no terminal shows their tmux server, and defaults to open ones', () => {
+    const shown = paneTargets(PANES, PROCESSES, [
+      { socket: 'agents', pid: 501, session: 'inkspect·2' },
+    ]);
+    expect(shown.map((t) => t.closed)).toEqual([undefined, undefined]);
+    const closed = paneTargets(PANES, PROCESSES, []);
+    expect(closed.map((t) => t.closed)).toEqual([true, true]);
+    // Unknown (no client list): not marked.
+    expect(paneTargets(PANES, PROCESSES).some((t) => t.closed)).toBe(false);
+    const chat = { id: 'vscode:w:chat', kind: 'chat' as const, label: 'VS Code chat', detail: '' };
+    // The last target is closed: an open one wins.
+    expect(chooseDefault([...closed, chat], { last: 'tmux:agents:%36' })).toBe(chat.id);
+    // Nothing open: the closed ones are still offered.
+    expect(chooseDefault(closed, { last: 'tmux:agents:%36' })).toBe('tmux:agents:%36');
+  });
 });
 
 describe('pasting into a tmux pane', () => {
@@ -155,6 +171,21 @@ describe('pasting into a tmux pane', () => {
       text: 'x'.repeat(25_000),
     });
     expect(partsOf(project, [long])[0]).toMatch(/context\.md$/);
+  });
+
+  it('pastes the prompt written with a send first', () => {
+    const project = temp();
+    const element = writeItem(project, {
+      kind: 'element',
+      title: 'Element',
+      source: 'browser',
+      text: '## button',
+    });
+    expect(partsOf(project, [element], { prompt: '  Make it blue.  ' })).toEqual([
+      'Make it blue.',
+      '## button',
+    ]);
+    expect(partsOf(project, [element], { prompt: '   ' })).toEqual(['## button']);
   });
 
   let hasTmux = true;

@@ -4,6 +4,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { CaptureKind } from '@inkspect/shared/bridge';
 import type { HubTarget, Project } from '@inkspect/shared/hub';
+import { sentText } from '@inkspect/shared/sendModal';
 import type { Harness } from '@inkspect/shared/targets';
 import { toBackground, type BridgeStatus } from '../messages';
 import { thumbnailOf } from './capture';
@@ -140,7 +141,7 @@ export function useSendFlow(link: BridgeStatus) {
   );
 
   const sendTo = useCallback(
-    async (target: string, open: boolean) => {
+    async (target: string, open: boolean, prompt?: string) => {
       const sending = current.current;
       if (!sending) return;
       const mine = run.current;
@@ -153,6 +154,7 @@ export function useSendFlow(link: BridgeStatus) {
               ids: sending.ids,
               target,
               open,
+              prompt,
             })
           : ({ ok: false, error: 'Not saved, so nothing can be sent.' } as const);
       // Closed meanwhile, or another capture took its place.
@@ -161,7 +163,8 @@ export function useSendFlow(link: BridgeStatus) {
         update({ status: { tone: 'error', text: reply.error } });
         return;
       }
-      update({ status: { tone: 'ok', text: `Sent to ${reply.sentTo ?? 'the agent'}` } });
+      const chosen = sending.targets.find((t) => t.id === target);
+      update({ status: { tone: 'ok', text: sentText(chosen, reply.sentTo ?? 'the agent') } });
       // It shows a moment, then closes.
       setTimeout(() => {
         if (run.current === mine && current.current?.status?.tone === 'ok') setOffer(null);

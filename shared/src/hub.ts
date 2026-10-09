@@ -24,9 +24,27 @@ export const HUB_VERSION = 1;
 /**
  * What a hub answers beyond the first version, in its `status` (a newer browser build may meet
  * an older hub until VS Code replaces it): moving and restoring items, sends that show the
- * agentmux thread, new agentmux threads.
+ * agentmux thread, new agentmux threads, a prompt written with the send.
  */
-export const HUB_FEATURES = ['items.move', 'item.restore', 'send.open', 'agentmux.new'] as const;
+export const HUB_FEATURES = [
+  'items.move',
+  'item.restore',
+  'send.open',
+  'agentmux.new',
+  'send.prompt',
+  'items.group',
+  'item.content',
+] as const;
+/**
+ * How much of an item `item.content` returns at a time: browsers take at most 1 MB per message
+ * from their native messaging host, and base64 adds a third.
+ */
+export const CONTENT_SLICE = 512 * 1024;
+/** What `item.content` answers: an item's text (UTF-8) or its picture. */
+export const CONTENT_TYPES = ['text/plain', 'image/png', 'image/jpeg'] as const;
+export type ContentType = (typeof CONTENT_TYPES)[number];
+/** The longest prompt the send dialog sends with the captures. */
+export const MAX_PROMPT = 8000;
 /** The native messaging host's name, as browsers know it. */
 export const HUB_HOST_NAME = 'dev.inkspect.hub';
 /**
@@ -149,6 +167,11 @@ export interface HubTarget {
   label: string;
   /** Where it runs: "agentmux · inkspect·1", "VS Code terminal · zsh"... */
   detail: string;
+  /**
+   * agentmux isn't open (no window shows its threads): a paste would land unseen, so a send to
+   * it opens agentmux first, and the default goes to an open target.
+   */
+  closed?: boolean;
 }
 
 /** A folder Inkspect knows as a project, and why. */
@@ -220,7 +243,7 @@ export type BrowserToHub =
     }
   /**
    * Sends saved items of a project to a target ('default' or unset: its default target);
-   * `open` also shows the agentmux thread and brings it to the front.
+   * `open` also shows the agentmux thread and brings it to the front; `prompt` goes first.
    */
   | {
       type: 'item.send';
@@ -229,6 +252,7 @@ export type BrowserToHub =
       ids: string[];
       target?: string;
       open?: boolean;
+      prompt?: string;
     }
   /** Moves saved items to another project (the capture was saved in the wrong one). */
   | { type: 'items.move'; req: string; project: string; ids: string[]; to: string }
@@ -240,6 +264,15 @@ export type BrowserToHub =
   | { type: 'item.remove'; req: string; project: string; ids: string[] }
   /** Puts back items removed a moment ago (they wait in the store's trash). */
   | { type: 'item.restore'; req: string; project: string; ids: string[] }
+  /**
+   * What Copy puts on the clipboard (as VS Code's Copy does): the item's picture, else its text;
+   * `CONTENT_SLICE` bytes from `offset`.
+   */
+  | { type: 'item.content'; req: string; project: string; id: string; offset: number }
+  /** Shows items as one group, sent together (as VS Code's Group does). */
+  | { type: 'items.group'; req: string; project: string; ids: string[] }
+  /** Splits a group back into single items. */
+  | { type: 'items.ungroup'; req: string; project: string; group: string }
   /** Keeps a project in the list even when nothing is open there. */
   | { type: 'project.pin'; req: string; project: string; pinned: boolean };
 
@@ -264,9 +297,20 @@ export type HubToBrowser =
     }
   | { type: 'item.sent'; req: string; ok: boolean; sentTo?: string; error?: string }
   | { type: 'items'; req: string; ok: boolean; items: ItemMeta[]; error?: string }
+  /** A slice of an item's content (base64); `size` is the whole content's, in bytes. */
+  | {
+      type: 'content';
+      req: string;
+      ok: boolean;
+      mimeType?: ContentType;
+      size?: number;
+      data?: string;
+      error?: string;
+    }
   /** `data`: base64, or missing when the item has no picture small enough. */
   | { type: 'thumb'; req: string; data?: string; mimeType?: string }
-  /** The answer to `item.remove`, `item.restore`, `items.move` and `project.pin`. */
+  /** The answer to `item.remove`, `item.restore`, `items.move`, `items.group`, `items.ungroup`
+      and `project.pin`. */
   | { type: 'done'; req: string; ok: boolean; error?: string };
 
 export type VsCodeToHub =
@@ -291,7 +335,14 @@ export type HubToVsCode =
   | { type: 'gone'; browser: string }
   | { type: 'pong' }
   /** Send these items of a project to one of this window's targets (a terminal agent, chat). */
-  | { type: 'run.send'; req: string; project: string; ids: string[]; target: string };
+  | {
+      type: 'run.send';
+      req: string;
+      project: string;
+      ids: string[];
+      target: string;
+      prompt?: string;
+    };
 
 /** Every hub message, for `encodeHub`. */
 export type HubMessage = HubAuth | BrowserToHub | HubToBrowser | VsCodeToHub | HubToVsCode;
@@ -334,7 +385,9 @@ const hubTarget = shape({
   kind: oneOf('tmux', 'terminal', 'chat'),
   label: shortString(100),
   detail: shortString(300),
+  closed: optional(isBoolean),
 });
+const prompt = optional(shortString(MAX_PROMPT));
 const itemIds = arrayOf(matches(ITEM_ID), 60);
 
 const BROWSER_TO_HUB: Record<BrowserToHub['type'], Record<string, Check>> = {
@@ -355,12 +408,21 @@ const BROWSER_TO_HUB: Record<BrowserToHub['type'], Record<string, Check>> = {
     ids: itemIds,
     target: optional(shortString(200)),
     open: optional(isBoolean),
+    prompt,
   },
   'items.move': { req, project: projectPath, ids: itemIds, to: projectPath },
   'items.get': { req, project: projectPath },
   'item.thumb': { req, project: projectPath, id: matches(ITEM_ID) },
   'item.remove': { req, project: projectPath, ids: itemIds },
   'item.restore': { req, project: projectPath, ids: itemIds },
+  'item.content': {
+    req,
+    project: projectPath,
+    id: matches(ITEM_ID),
+    offset: (v) => Number.isSafeInteger(v) && (v as number) >= 0,
+  },
+  'items.group': { req, project: projectPath, ids: itemIds },
+  'items.ungroup': { req, project: projectPath, group: id },
   'project.pin': { req, project: projectPath, pinned: isBoolean },
 };
 
@@ -429,6 +491,14 @@ const HUB_TO_BROWSER: Record<HubToBrowser['type'], Record<string, Check>> = {
     items: arrayOf(isItemMeta, 500),
     error: optional(shortString(1000)),
   },
+  content: {
+    req,
+    ok: isBoolean,
+    mimeType: optional(oneOf(...CONTENT_TYPES)),
+    size: optional(isNumber),
+    data: optional(base64),
+    error: optional(shortString(1000)),
+  },
   thumb: { req, data: optional(base64), mimeType: optional(oneOf('image/jpeg', 'image/png')) },
   done: { req, ok: isBoolean, error: optional(shortString(1000)) },
 };
@@ -461,7 +531,7 @@ const HUB_TO_VSCODE: Record<HubToVsCode['type'], Record<string, Check>> = {
   link: { browser: id, data },
   gone: { browser: id },
   pong: {},
-  'run.send': { req, project: projectPath, ids: itemIds, target: shortString(200) },
+  'run.send': { req, project: projectPath, ids: itemIds, target: shortString(200), prompt },
 };
 
 /** A connection's first frame, or undefined. */

@@ -42,6 +42,20 @@ function context(over: Partial<SendContext> = {}) {
 }
 
 describe('sending saved items', () => {
+  it('hands the prompt to VS Code targets', async () => {
+    const project = temp();
+    const item = writeItem(project, { kind: 'text', title: 'A', source: 'vscode', text: 'x' });
+    const prompts: (string | undefined)[] = [];
+    const { ctx } = context({
+      deliver: async (_target, _project, _items, prompt) => {
+        prompts.push(prompt);
+        return { ok: true, sentTo: 'VS Code chat' };
+      },
+    });
+    await sendItems(ctx, project, [item.id], 'chat', { prompt: 'Fix this' });
+    expect(prompts).toEqual(['Fix this']);
+  });
+
   it('sends to the default, records it on the items and as the last target', async () => {
     const project = temp();
     const item = writeItem(project, { kind: 'text', title: 'A', source: 'vscode', text: 'x' });

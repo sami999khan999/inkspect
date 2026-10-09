@@ -23,10 +23,13 @@ export interface PaneTarget extends HubTarget {
  * The agents running in agentmux threads. agentmux starts an agent as `sh -c '<agent>; exec
  * $SHELL'`: an agent is recognized under the pane's process, else by the thread's `@harness`
  * while `sh` still runs it. A thread back at its shell is no target (never type into a shell).
+ * With `clients`, threads on a tmux server no terminal shows (agentmux and the kittys beside
+ * VS Code are all closed) are marked `closed`.
  */
 export function paneTargets(
   panes: readonly TmuxPane[],
   processes: readonly ProcessInfo[],
+  clients?: readonly TmuxClient[],
 ): PaneTarget[] {
   return agentPanes(panes).flatMap((pane): PaneTarget[] => {
     const agent = agentUnder(processes, pane.panePid);
@@ -46,6 +49,7 @@ export function paneTargets(
         paneId: pane.paneId,
         session: pane.session,
         activity: pane.activity,
+        ...(clients && !clients.some((c) => c.socket === pane.socket) ? { closed: true } : {}),
       },
     ];
   });
@@ -153,12 +157,15 @@ export function pairedProjects(
 /**
  * Where a project's Send goes: the target it used last (if it still runs), else the agent beside
  * its VS Code window, else an agent in its VS Code terminals, else its agentmux agent used most
- * recently, else VS Code chat.
+ * recently, else VS Code chat. Open targets win over closed ones.
  */
 export function chooseDefault(
-  targets: readonly HubTarget[],
+  all: readonly HubTarget[],
   options: { last?: string; paired?: string; preferredTerminal?: string } = {},
 ): string | undefined {
+  // An agent nobody can see (agentmux closed) is the default only when nothing else is open.
+  const open = all.filter((t) => !t.closed);
+  const targets = open.length ? open : all;
   const has = (id: string | undefined) => !!id && targets.some((t) => t.id === id);
   if (has(options.last)) return options.last;
   if (has(options.paired)) return options.paired;

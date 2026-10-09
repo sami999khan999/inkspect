@@ -2,13 +2,33 @@
 // first, then the others, the first nine with a number key. Pure.
 import type { HubTarget } from './hub';
 
-/** The targets in the dialog's order: the default first, the rest as given. */
+/**
+ * The targets in the dialog's order: the default first, then the open ones as given, then those
+ * agentmux can't show right now (closed).
+ */
 export function orderTargets(
   targets: readonly HubTarget[],
   defaultTarget: string | undefined,
 ): HubTarget[] {
   const first = targets.find((t) => t.id === defaultTarget);
-  return first ? [first, ...targets.filter((t) => t !== first)] : [...targets];
+  const rest = targets.filter((t) => t !== first);
+  return [
+    ...(first ? [first] : []),
+    ...rest.filter((t) => !t.closed),
+    ...rest.filter((t) => t.closed),
+  ];
+}
+
+/** Where a target runs, as the dialog shows it (a closed agentmux says so). */
+export function targetDetail(target: HubTarget): string {
+  return target.closed ? `${target.detail} · agentmux is closed` : target.detail;
+}
+
+/** The send dialog's status after a send went to `target`. */
+export function sentText(target: HubTarget | undefined, sentTo: string): string {
+  return target?.closed
+    ? `agentmux was closed: opened it and sent to ${sentTo}`
+    : `Sent to ${sentTo}`;
 }
 
 /** The target a number key (1-9) picks, if any. */

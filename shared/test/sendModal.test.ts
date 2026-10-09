@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HubTarget } from '../src/hub';
-import { orderTargets, targetForKey, targetIcon } from '../src/sendModal';
+import { orderTargets, sentText, targetDetail, targetForKey, targetIcon } from '../src/sendModal';
 
 const t = (id: string, kind: HubTarget['kind'] = 'tmux'): HubTarget => ({
   id,
@@ -15,6 +15,19 @@ describe('the send dialog', () => {
     expect(orderTargets(targets, 'b').map((x) => x.id)).toEqual(['b', 'a', 'c']);
     expect(orderTargets(targets, 'gone').map((x) => x.id)).toEqual(['a', 'b', 'c']);
     expect(orderTargets(targets, undefined).map((x) => x.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('lists agents agentmux cannot show after the open ones, and says so', () => {
+    const closed = { ...t('a'), detail: 'agentmux · x·1', closed: true };
+    const targets = [closed, t('b'), t('c', 'chat')];
+    expect(orderTargets(targets, undefined).map((x) => x.id)).toEqual(['b', 'c', 'a']);
+    expect(orderTargets(targets, 'a').map((x) => x.id)).toEqual(['a', 'b', 'c']);
+    expect(targetDetail(closed)).toBe('agentmux · x·1 · agentmux is closed');
+    expect(sentText(closed, 'Claude Code')).toBe(
+      'agentmux was closed: opened it and sent to Claude Code',
+    );
+    expect(sentText(t('b'), 'Codex')).toBe('Sent to Codex');
+    expect(sentText(undefined, 'Codex')).toBe('Sent to Codex');
   });
 
   it('gives the first nine a number key', () => {

@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import type { HubTarget } from '../hub';
-import { orderTargets, targetForKey, targetIcon } from '../sendModal';
+import { MAX_PROMPT, type HubTarget } from '../hub';
+import { orderTargets, targetDetail, targetForKey, targetIcon } from '../sendModal';
 import { actionForChord, chordFromEvent, type ShortcutMap } from '../shortcuts';
-import { agentmuxNewTarget, HARNESS_LABELS, type Harness } from '../targets';
+import { agentmuxNewTarget, HARNESS_LABELS, parseTargetId, type Harness } from '../targets';
 import { Button } from './Button';
 import { IconButton } from './IconButton';
 import { KeyCaps } from './KeyCaps';
 import { Menu, type MenuState } from './Menu';
 import { cx } from './popover';
 import { Select } from './Select';
+import { TextArea } from './TextArea';
 
 export interface SendModalProps {
   /** What was saved ("Screenshot saved"). */
@@ -28,8 +29,13 @@ export interface SendModalProps {
   harnesses?: readonly Harness[];
   /** What shows when there is nowhere to send ("No agent is running for this project."). */
   emptyText?: string;
-  /** `open`: also show the agentmux thread and bring it to the front. */
-  onSend: (target: string, options: { open: boolean }) => void;
+  /**
+   * `open`: also show the agentmux thread and bring it to the front. `prompt`: what the user
+   * wrote for the agent, pasted before the captures.
+   */
+  onSend: (target: string, options: { open: boolean; prompt?: string }) => void;
+  /** Offers the prompt field (false: the hub answering is too old to carry it). */
+  canPrompt?: boolean;
   onCopy?: () => void;
   onDownload?: () => void;
   /** The download button's label ("Download", "Reveal in folder"). */
@@ -50,8 +56,17 @@ const FOCUSABLE = 'button:not([disabled]), [href], input, [tabindex]:not([tabind
  * copy or download. Centered, it holds the focus until it closes.
  */
 export function SendModal(props: SendModalProps) {
-  const { targets, defaultTarget, harnesses = [], onSend, onClose, map } = props;
+  const { targets, defaultTarget, harnesses = [], onClose, map, canPrompt = true } = props;
   const ref = useRef<HTMLDivElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [prompt, setPrompt] = useState('');
+  // The target of the send under way (a new agentmux thread takes a while: the dialog says so).
+  const [sending, setSending] = useState<string>();
+  const onSend = (target: string, options: { open: boolean }) => {
+    setSending(target);
+    const asked = prompt.trim();
+    props.onSend(target, asked ? { ...options, prompt: asked } : options);
+  };
   const threadButton = useRef<HTMLButtonElement>(null);
   const projectRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -60,6 +75,12 @@ export function SendModal(props: SendModalProps) {
   const [chosen, setChosen] = useState<string>();
   const activeId = ordered.some((t) => t.id === chosen) ? chosen : ordered[0]?.id;
   const busy = props.status?.tone === 'busy';
+  const allClosed = ordered.length > 0 && ordered.every((t) => t.closed);
+  const starting = sending ? parseTargetId(sending) : undefined;
+  const statusText =
+    busy && starting?.kind === 'agentmux-new'
+      ? `Starting a new ${HARNESS_LABELS[starting.harness]} thread in agentmux…`
+      : props.status?.text;
   const key = (id: string) => map[id]?.[0];
 
   // The dialog takes the focus as it opens (and gives it back when it closes).
@@ -130,6 +151,7 @@ export function SendModal(props: SendModalProps) {
     setMenu({
       x: rect.left,
       y: rect.bottom + 4,
+      anchor: rect,
       items: harnesses.map((harness) => ({
         label: HARNESS_LABELS[harness],
         icon: 'terminal-tmux',
@@ -160,6 +182,19 @@ export function SendModal(props: SendModalProps) {
       return;
     }
     const native = event.nativeEvent;
+    // Typing a prompt: Enter sends it to the chosen agent (Shift+Enter: a new line), Esc closes;
+    // every other key is text.
+    if (event.target === promptRef.current) {
+      if (event.key === 'Enter' && !event.shiftKey && !native.isComposing) {
+        event.preventDefault();
+        if (activeId) onSend(activeId, { open: false });
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+      event.stopPropagation();
+      return;
+    }
     // Up and Down pick the agent (Enter sends to it); menus and lists take their own arrows.
     const inList = (event.target as HTMLElement).closest('[role="menu"], [role="listbox"], input');
     if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !inList && ordered.length) {
@@ -187,6 +222,7 @@ export function SendModal(props: SendModalProps) {
     const run: Record<string, (() => void) | undefined> = {
       'send.default': activeId ? () => onSend(activeId, { open: false }) : undefined,
       'send.newThread': harnesses.length ? openThreads : undefined,
+      'send.prompt': canPrompt ? () => promptRef.current?.focus() : undefined,
       'send.project': props.onProject
         ? () => projectRef.current?.querySelector('button')?.click()
         : undefined,
@@ -264,6 +300,19 @@ export function SendModal(props: SendModalProps) {
           </div>
         )}
 
+        {canPrompt && (
+          <TextArea
+            ref={promptRef}
+            className="ink-modal-prompt"
+            aria-label="Prompt for the agent"
+            placeholder="Add a prompt (optional). Enter sends, Shift+Enter adds a line."
+            value={prompt}
+            maxLength={MAX_PROMPT}
+            disabled={busy}
+            onChange={(event) => setPrompt(event.target.value)}
+          />
+        )}
+
         <div className="ink-modal-label">
           Send to
           {ordered.length > 0 && <span className="ink-modal-count">{ordered.length}</span>}
@@ -273,7 +322,11 @@ export function SendModal(props: SendModalProps) {
             {ordered.map((target, index) => (
               <li
                 key={target.id}
-                className={cx('ink-modal-target', target.id === activeId && 'default')}
+                className={cx(
+                  'ink-modal-target',
+                  target.id === activeId && 'default',
+                  target.closed && 'closed',
+                )}
               >
                 <button
                   type="button"
@@ -289,7 +342,7 @@ export function SendModal(props: SendModalProps) {
                   </span>
                   <span className="ink-modal-text">
                     <span className="ink-modal-agent">{target.label}</span>
-                    <span className="ink-modal-where">{target.detail}</span>
+                    <span className="ink-modal-where">{targetDetail(target)}</span>
                   </span>
                   <span className="ink-modal-keys">
                     {index < 9 && <span className="ink-modal-number">{index + 1}</span>}
@@ -314,6 +367,11 @@ export function SendModal(props: SendModalProps) {
             {props.emptyText ?? 'No agent is running for this project.'}
           </div>
         )}
+        {allClosed && (
+          <div className="ink-modal-note">
+            agentmux is closed and no VS Code agent is open. Sending opens agentmux first.
+          </div>
+        )}
         {harnesses.length > 0 && (
           <Button
             ref={threadButton}
@@ -335,7 +393,7 @@ export function SendModal(props: SendModalProps) {
             className={cx('ink-modal-status', props.status && `tone-${props.status.tone}`)}
             role="status"
           >
-            {props.status?.text ?? 'Esc keeps it saved without sending.'}
+            {statusText ?? 'Esc keeps it saved without sending.'}
           </span>
           {props.onCopy && (
             <Button size="sm" variant="ghost" icon="copy" disabled={busy} onClick={props.onCopy}>

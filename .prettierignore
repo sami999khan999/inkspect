@@ -6,3 +6,4 @@ package-lock.json
 plans/
 out/
 .vscode-browser/
+*-extension-build/

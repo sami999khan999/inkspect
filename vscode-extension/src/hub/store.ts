@@ -3,7 +3,7 @@
 // its own, and both read every item, so the store is plain files: each item is written in a
 // temporary folder and renamed into place, and there is no shared index to lose updates in.
 // Node only (no `vscode`).
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import {
   copyFileSync,
   cpSync,
@@ -15,6 +15,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -195,6 +196,31 @@ export function readItems(project: string): ItemMeta[] {
     .sort((a, b) => b.time - a.time || (b.id < a.id ? -1 : 1));
 }
 
+/**
+ * A cheap fingerprint of a project's items (their ids and when each `item.json` last changed):
+ * it differs whenever an item is added, removed, restored, moved or updated.
+ */
+export function storeSignature(project: string): string {
+  const items = storeFolder(project, 'items');
+  if (!items) return '';
+  let names: string[];
+  try {
+    names = readdirSync(items).filter((name) => ITEM_ID.test(name));
+  } catch {
+    return '';
+  }
+  return names
+    .sort()
+    .map((id) => {
+      try {
+        return `${id}:${statSync(join(items, id, 'item.json')).mtimeMs}`;
+      } catch {
+        return id;
+      }
+    })
+    .join('|');
+}
+
 /** Changes an item's metadata (its files stay). Returns the new metadata. */
 export function updateItem(
   project: string,
@@ -279,6 +305,31 @@ export function moveItems(from: string, to: string, ids: readonly string[]): str
     moved.push(id);
   }
   return moved;
+}
+
+/**
+ * Groups items by hand (Group in the Saved list): they get a new group, placed where the newest
+ * of them is. Returns the group, or undefined for fewer than two items.
+ */
+export function groupItems(project: string, ids: readonly string[]): string | undefined {
+  const members = readItems(project)
+    .filter((i) => ids.includes(i.id))
+    .sort((a, b) => a.time - b.time || (a.id < b.id ? -1 : 1));
+  if (members.length < 2) return undefined;
+  const group = randomUUID();
+  const newest = Math.max(...members.map((m) => m.time));
+  members.forEach((member, index) =>
+    updateItem(project, member.id, (meta) => ({ ...meta, group, groupIndex: index, time: newest })),
+  );
+  return group;
+}
+
+/** Splits a group back into single items. */
+export function ungroupItems(project: string, group: string): void {
+  for (const item of readItems(project)) {
+    if (item.group !== group) continue;
+    updateItem(project, item.id, (meta) => ({ ...meta, group: undefined, groupIndex: undefined }));
+  }
 }
 
 /** Brings removed items back from the trash. */

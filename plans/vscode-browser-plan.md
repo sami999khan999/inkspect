@@ -654,6 +654,13 @@ Whatever is captured is saved at once, then one centered dialog says where it go
 **The picker** (both products)
 - [x] Click captures details, Alt+click captures an element screenshot (only that), Shift+click adds, Enter captures all; Ctrl/Ctrl+Shift+click sends removed. `PickerHint` on one line; `SelectionBar`: Capture, Screenshot, ×.
 
+**Follow-ups (October 2026)**
+- [x] A prompt in the send dialog (`TextArea` in the kit, `send.prompt` key), carried by `savedAction`, hub `item.send` / `run.send` (`send.prompt` in `HUB_FEATURES`) and the window relay; `partsOf()` pastes it first.
+- [x] `HubTarget.closed`: agentmux threads on a tmux server with no client. Listed last, never the default while something is open; the router opens agentmux before pasting into one.
+- [x] The Saved view's watcher takes every change under `.inkspect/items/`, plus a 3 s `storeSignature()` check.
+- [x] Saved cards: checkbox over the icon (no layout shift), one Send to… menu (the agentmux button is gone). Menus and select lists fit narrow views and open above their button when there is no room below. `.menu-root` takes no layout space.
+- [ ] The send dialog sometimes closes while a new agentmux thread starts: not reproduced, and no code path besides Esc, its close button, a backdrop click and a finished send closes it. It now says "Starting a new … thread in agentmux…" while it waits.
+
 - [ ] Not done yet: the send dialog shows at most 4 thumbnails, and can't leave out some of several captures (remove them from the Saved list instead); the hub's `hub.json` can be written by the daemon and a WebSocket-serving window at once (last writer wins).
 
 ---

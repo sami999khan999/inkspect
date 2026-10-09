@@ -143,7 +143,13 @@ export class AgentTerminals implements vscode.Disposable {
     const counts = new Map<string, number>();
     for (const { agent } of agents) counts.set(agent.label, (counts.get(agent.label) ?? 0) + 1);
     return [
-      ...this.panes.map(({ id, label, detail }) => ({ id, kind: 'tmux' as const, label, detail })),
+      ...this.panes.map(({ id, label, detail, closed }) => ({
+        id,
+        kind: 'tmux' as const,
+        label,
+        detail,
+        ...(closed ? { closed } : {}),
+      })),
       ...agents.map(({ terminal, agent }) => ({
         id: this.idOf(terminal),
         kind: 'terminal' as const,
@@ -277,26 +283,28 @@ export class AgentTerminals implements vscode.Disposable {
     if (sockets.length && folders.size) {
       const all = await listPanes(sockets);
       agentmuxOpen = agentPanes(all).some((p) => folders.has(p.project!));
-      panes = paneTargets(all, processes).filter((p) => folders.has(p.project));
+      const clients = await listClients(sockets);
+      panes = paneTargets(all, processes, clients).filter((p) => folders.has(p.project));
       const pairs = readKittyPairs(process.env.XDG_RUNTIME_DIR).filter((p) =>
         folders.has(p.folder),
       );
       if (pairs.length && panes.length) {
-        const clients = await listClients(sockets);
         for (const folder of folders) {
           paired ??= pairedTarget(folder, pairs, processes, clients, panes)?.id;
         }
       }
     }
     const before = JSON.stringify([
-      this.panes.map((p) => [p.id, p.label]),
+      this.panes.map((p) => [p.id, p.label, p.closed]),
       this.pairedPane,
       this.agentmuxOpen,
     ]);
     this.panes = panes;
     this.pairedPane = paired;
     this.agentmuxOpen = agentmuxOpen;
-    return JSON.stringify([panes.map((p) => [p.id, p.label]), paired, agentmuxOpen]) !== before;
+    return (
+      JSON.stringify([panes.map((p) => [p.id, p.label, p.closed]), paired, agentmuxOpen]) !== before
+    );
   }
 
   /**

@@ -77,13 +77,15 @@ interface RunRequest {
   ids: string[];
   /** The target as that window knows it (`terminal:3`, `chat`). */
   target: string;
+  /** What the user wrote with the send. */
+  prompt?: string;
 }
 
 /** Runs a relayed send here: the items go to this window's own agent. */
 async function runHere(request: RunRequest): Promise<RelayResult> {
   const items = savedItems(request.project, request.ids);
   if (!items.length) return { ok: false, error: 'Those captures are gone.' };
-  const sent = await deliverLocal(request.target, request.project, items);
+  const sent = await deliverLocal(request.target, request.project, items, request.prompt);
   contextTray()?.load();
   return sent.ok ? { ok: true, sentTo: sent.sentTo } : { ok: false, error: sent.error };
 }
@@ -184,8 +186,8 @@ export class BridgeServer implements vscode.Disposable {
           const others = this.relay.windows().filter((w) => w.id !== WINDOW_ID);
           return [{ id: WINDOW_ID, focusedAt: this.relay.focused, ...windowInfo() }, ...others];
         },
-        runInWindow: (window, project, ids, target) =>
-          this.relay.dispatch({ project, ids: [...ids], target }, window),
+        runInWindow: (window, project, ids, target, prompt) =>
+          this.relay.dispatch({ project, ids: [...ids], target, prompt }, window),
         log: (line) => this.logger.info(`Browser link: ${line}`),
       },
     );

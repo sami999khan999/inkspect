@@ -32,7 +32,7 @@ export interface BridgeStatus {
  */
 export interface EmulationRequest {
   /** The device's user agent and touch; undefined keeps the browser's own. */
-  agent?: Pick<DeviceSettings, 'userAgent' | 'touch'>;
+  agent?: Partial<Pick<DeviceSettings, 'userAgent' | 'touch'>>;
   network: NetworkPreset;
   cpu: number;
   colorScheme: 'default' | 'light' | 'dark';
@@ -73,7 +73,14 @@ export type ToBackground =
       send?: string;
     }
   /** Sends saved captures of a project (`open`: also show the agentmux thread). */
-  | { type: 'sendSaved'; project: string; ids: string[]; target: string; open?: boolean }
+  | {
+      type: 'sendSaved';
+      project: string;
+      ids: string[];
+      target: string;
+      open?: boolean;
+      prompt?: string;
+    }
   /** Moves saved captures to another project. */
   | { type: 'moveSaved'; project: string; to: string; ids: string[] };
 

@@ -431,6 +431,7 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
   // with that number (fixed keys, like the drawing colors).
   { id: 'send.default', label: 'Send to the default agent', scope: 'send', keys: ['enter'] },
   { id: 'send.newThread', label: 'New agentmux thread', scope: 'send', keys: ['n'] },
+  { id: 'send.prompt', label: 'Write a prompt', scope: 'send', keys: ['i'] },
   { id: 'send.project', label: 'Change project', scope: 'send', keys: ['p'] },
   { id: 'send.copy', label: 'Copy', scope: 'send', keys: ['c'] },
   { id: 'send.download', label: 'Download', scope: 'send', keys: ['d'] },
@@ -701,6 +702,7 @@ export const TOOLBAR_ACTION_IDS: ReadonlySet<string> = new Set([
   'shot.drawing',
   'send.default',
   'send.newThread',
+  'send.prompt',
   'send.project',
   'send.copy',
   'send.download',

@@ -1,4 +1,4 @@
-// Builds the extension for each browser into dist/<browser>/ (load it unpacked from there).
+// Builds the extension for each browser into <browser>-extension-build/ (load it unpacked from there).
 //   node scripts/build.mjs [--watch] [--browser chrome|firefox] [--production] [--test]
 // --test builds dist/<browser>-test for the end-to-end tests: host access to all pages (tests
 // can't press the shortcut that grants activeTab) and an open shadow root.
@@ -36,7 +36,7 @@ function writeStatic(browser, outdir) {
 
 const contexts = [];
 for (const browser of browsers) {
-  const outdir = join(root, 'dist', test ? `${browser}-test` : browser);
+  const outdir = test ? join(root, 'dist', `${browser}-test`) : join(root, `${browser}-extension-build`);
   rmSync(outdir, { recursive: true, force: true });
   mkdirSync(outdir, { recursive: true });
   writeStatic(browser, outdir);
@@ -71,7 +71,7 @@ for (const browser of browsers) {
 
 if (watch) {
   await Promise.all(contexts.map((c) => c.watch()));
-  console.log(`Watching (${browsers.join(', ')}). Load dist/<browser> unpacked.`);
+  console.log(`Watching (${browsers.join(', ')}). Load <browser>-extension-build unpacked.`);
 } else {
   await Promise.all(contexts.map((c) => c.rebuild()));
   await Promise.all(contexts.map((c) => c.dispose()));

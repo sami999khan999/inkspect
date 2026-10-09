@@ -72,10 +72,13 @@ const PANEL_REQUESTS = new Set([
   'projects.get',
   'items.get',
   'item.thumb',
+  'item.content',
   'item.remove',
   'item.restore',
   'item.send',
   'items.move',
+  'items.group',
+  'items.ungroup',
   'project.pin',
 ]);
 function isPanelRequest(value: unknown): value is PanelRequest {
@@ -449,6 +452,7 @@ async function handle(
           ids: message.ids,
           target: message.target,
           open: message.open,
+          ...(message.prompt ? { prompt: message.prompt } : {}),
         },
         // A send can wait for VS Code (choosing a terminal); the helper gives up after 2 minutes.
         130_000,
@@ -568,22 +572,23 @@ async function command(
 }
 
 /**
- * The responsive view's emulation through the debugger (Chrome shows its "debugging this browser"
- * bar): the device's user agent and touch, network, CPU and media. Not the size: the debugger's
- * device metrics always draw the page at the tab's top-left, so the size comes from the
- * responsive view's centered frame instead.
+ * The responsive view's emulation. The device's user agent goes with the frame's requests (a
+ * session rule, see frameUserAgent): no debugger, so no bar. Touch, network, CPU and media need
+ * the debugger (Chrome shows its "debugging this browser" bar), attached only while one is on.
+ * Not the size: the debugger's device metrics always draw the page at the tab's top-left, so the
+ * size comes from the responsive view's centered frame instead.
  */
 async function emulate(tabId: number, request: EmulationRequest): Promise<void> {
   if (__BROWSER__ !== 'chrome') throw new Error('Emulation needs Chrome, Edge or Brave.');
   const device = request.agent;
-  const userAgent = device
+  const userAgent = device?.userAgent
     ? deviceUserAgent(
         device.userAgent,
         /Chrome\/([\d.]+)/.exec(navigator.userAgent)?.[1] ?? '130.0.0.0',
       )
     : undefined;
+  await frameUserAgent(tabId, userAgent, device?.userAgent);
   const idle =
-    !userAgent &&
     !device?.touch &&
     request.network === 'none' &&
     request.cpu === 1 &&
@@ -604,7 +609,8 @@ async function emulate(tabId: number, request: EmulationRequest): Promise<void> 
     enabled: !!device?.touch,
     ...(device?.touch ? { maxTouchPoints: 5 } : {}),
   });
-  // An empty string restores the browser's own user agent.
+  // Attached anyway: the user agent for scripts and every request too. An empty string restores
+  // the browser's own.
   await command(tabId, 'Emulation.setUserAgentOverride', { userAgent: userAgent ?? '' });
   const network = NETWORK_CONDITIONS[request.network];
   await command(tabId, 'Network.emulateNetworkConditions', {
@@ -636,6 +642,57 @@ if (__BROWSER__ === 'chrome') {
 
 /** One session rule per tab; ids stay clear of any other rules. */
 const framingRuleId = (tabId: number) => 1_000_000 + (tabId % 1_000_000);
+const userAgentRuleId = (tabId: number) => 2_000_000 + (tabId % 1_000_000);
+/** The origin each tab's responsive view frames. */
+const framedOrigins = new Map<number, string>();
+/** The user agent each tab's view asked for (it can ask before its frame's origin is known). */
+const frameAgents = new Map<number, { userAgent: string; kind?: string }>();
+
+/**
+ * The device's user agent on the responsive view's page request (and its client hints), in this
+ * tab only, without the debugger. Scripts in the frame still read the browser's own
+ * `navigator.userAgent` unless the debugger is attached for another setting.
+ */
+async function frameUserAgent(
+  tabId: number,
+  userAgent: string | undefined,
+  kind: string | undefined,
+): Promise<void> {
+  const id = userAgentRuleId(tabId);
+  if (userAgent) frameAgents.set(tabId, { userAgent, kind });
+  else frameAgents.delete(tabId);
+  const origin = framedOrigins.get(tabId);
+  if (!userAgent || !origin) {
+    await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [id] });
+    return;
+  }
+  const mobile = kind === 'iphone' || kind === 'android';
+  const platform = kind === 'android' ? 'Android' : 'iOS';
+  const set = 'set' as chrome.declarativeNetRequest.HeaderOperation;
+  const requestHeaders = [
+    { header: 'user-agent', operation: set, value: userAgent },
+    { header: 'sec-ch-ua-mobile', operation: set, value: mobile ? '?1' : '?0' },
+    { header: 'sec-ch-ua-platform', operation: set, value: `"${platform}"` },
+  ];
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [id],
+    addRules: [
+      {
+        id,
+        priority: 1,
+        action: {
+          type: 'modifyHeaders' as chrome.declarativeNetRequest.RuleActionType,
+          requestHeaders,
+        },
+        condition: {
+          tabIds: [tabId],
+          urlFilter: `|${origin}/`,
+          resourceTypes: ['sub_frame' as chrome.declarativeNetRequest.ResourceType],
+        },
+      },
+    ],
+  });
+}
 
 /**
  * The responsive view shows the page in a frame of its own tab. Many sites forbid being framed
@@ -645,6 +702,10 @@ const framingRuleId = (tabId: number) => 1_000_000 + (tabId % 1_000_000);
 async function allowFraming(tabId: number, url: string): Promise<void> {
   const origin = new URL(url).origin;
   if (!/^https?:$/.test(new URL(url).protocol)) return;
+  framedOrigins.set(tabId, origin);
+  // Before the frame loads: its page request carries the device's user agent.
+  const agent = frameAgents.get(tabId);
+  if (agent) await frameUserAgent(tabId, agent.userAgent, agent.kind);
   const id = framingRuleId(tabId);
   await chrome.declarativeNetRequest.updateSessionRules({
     removeRuleIds: [id],
@@ -676,7 +737,11 @@ async function allowFraming(tabId: number, url: string): Promise<void> {
 }
 
 async function endFraming(tabId: number): Promise<void> {
-  await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [framingRuleId(tabId)] });
+  framedOrigins.delete(tabId);
+  frameAgents.delete(tabId);
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [framingRuleId(tabId), userAgentRuleId(tabId)],
+  });
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => void endFraming(tabId).catch(() => {}));

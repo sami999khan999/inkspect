@@ -378,6 +378,8 @@ export type WebviewToHost =
       target?: string;
       open?: boolean;
       project?: string;
+      /** What the user wrote for the agent with a send. */
+      prompt?: string;
     }
   /** The webview received keyboard focus (so commands target this browser window). */
   | { type: 'focus' }
@@ -656,6 +658,7 @@ const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
     target: optional((v) => typeof v === 'string' && v.length <= 200),
     open: optional(isBoolean),
     project: optional((v) => typeof v === 'string' && v.length <= 4096),
+    prompt: optional((v) => typeof v === 'string' && v.length <= 8000),
   },
   focus: {},
   viewport: { width: isNumber, height: isNumber, dpr: isNumber },

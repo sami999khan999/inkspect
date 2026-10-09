@@ -324,6 +324,8 @@ browser-extension/
 - [x] **One pairing card** (`ui/PairCard.tsx`, `ui/CodeInput.tsx`) on the settings page, in the popup and in the toolbar's VS Code panel; `LinkGraph` shows the answering window.
 - [x] End-to-end: both links save into a real project store (the fake VS Code runs the real HubCore), sends reach the window's agents, Change project moves a capture to the Inbox, the side panel sends, removes and undoes.
 
+- [x] **Follow-ups:** a prompt in the send dialog (when the hub lists `send.prompt`); closed agentmux threads marked and never the default; the side panel refreshes every 2 s while visible and on focus, keeps its list on a failed fetch, and Undo expires with the trash; the responsive view sends the device's user agent through a session rule (no debugger), with touch as its own switch, so the debugging bar shows only for touch, network, CPU, color scheme and print.
+
 ## Phase 10: Browser coverage
 
 - [x] **Firefox build:** MV3 background scripts, a gecko id, no `debugger`, and the "Resize window" device mode only.

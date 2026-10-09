@@ -18,6 +18,8 @@ export type MenuItem =
 export interface MenuState {
   x: number;
   y: number;
+  /** The button it hangs from: with no room below, the menu opens above it (not over it). */
+  anchor?: { top: number };
   items: MenuItem[];
 }
 
@@ -62,7 +64,14 @@ export function Menu({ menu, onClose }: MenuProps) {
 
   return (
     <div ref={ref} className="menu-root" onContextMenu={(event) => event.preventDefault()}>
-      <MenuList items={menu.items} x={menu.x} y={menu.y} onClose={onClose} focusFirst />
+      <MenuList
+        items={menu.items}
+        x={menu.x}
+        y={menu.y}
+        above={menu.anchor?.top}
+        onClose={onClose}
+        focusFirst
+      />
     </div>
   );
 }
@@ -77,9 +86,11 @@ interface MenuListProps {
   parent?: DOMRect;
   /** Closes this submenu and returns focus to its item. */
   onBack?: () => void;
+  /** Where it opens above when there is no room below (the top of its button). */
+  above?: number;
 }
 
-function MenuList({ items, x, y, onClose, focusFirst, parent, onBack }: MenuListProps) {
+function MenuList({ items, x, y, onClose, focusFirst, parent, onBack, above }: MenuListProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<{ index: number; rect: DOMRect } | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -91,14 +102,18 @@ function MenuList({ items, x, y, onClose, focusFirst, parent, onBack }: MenuList
     const rect = element.getBoundingClientRect();
     let left = x;
     if (parent && x + rect.width > innerWidth - 4) left = parent.left - rect.width + 2;
+    let top = y;
+    if (above !== undefined && y + rect.height > innerHeight - 4 && above - rect.height - 2 >= 4) {
+      top = above - rect.height - 2;
+    }
     element.style.left = `${Math.max(4, Math.min(left, innerWidth - rect.width - 4))}px`;
-    element.style.top = `${Math.max(4, Math.min(y, innerHeight - rect.height - 4))}px`;
+    element.style.top = `${Math.max(4, Math.min(top, innerHeight - rect.height - 4))}px`;
     if (focusFirst) {
       element
         .querySelector<HTMLButtonElement>(':scope > button:not(:disabled)')
         ?.focus({ preventScroll: true });
     }
-  }, [x, y, parent, focusFirst]);
+  }, [x, y, parent, focusFirst, above]);
 
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
 

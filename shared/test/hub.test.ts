@@ -25,6 +25,42 @@ describe('hub protocol', () => {
     expect(parseHubToVsCode(encodeHub(link))).toEqual(link);
   });
 
+  it('checks the group requests', () => {
+    const project = '/home/me/shop';
+    const ids = ['20261009-120000-abcdef', '20261009-120001-abcdef'];
+    const group = { type: 'items.group' as const, req: 'r1', project, ids };
+    expect(parseBrowserToHub(encodeHub(group))).toEqual(group);
+    const ungroup = { type: 'items.ungroup' as const, req: 'r2', project, group: 'a-1' };
+    expect(parseBrowserToHub(encodeHub(ungroup))).toEqual(ungroup);
+    expect(parseBrowserToHub(encodeHub({ ...group, ids: ['../x'] }))).toBeUndefined();
+    expect(parseBrowserToHub(encodeHub({ ...ungroup, group: '../x' }))).toBeUndefined();
+  });
+
+  it('checks content requests and their slices', () => {
+    const ask = {
+      type: 'item.content' as const,
+      req: 'r',
+      project: '/home/me/shop',
+      id: '20261009-120000-abcdef',
+      offset: 0,
+    };
+    expect(parseBrowserToHub(encodeHub(ask))).toEqual(ask);
+    expect(parseBrowserToHub(encodeHub({ ...ask, offset: -1 }))).toBeUndefined();
+    expect(parseBrowserToHub(encodeHub({ ...ask, offset: 0.5 }))).toBeUndefined();
+    const slice = {
+      type: 'content' as const,
+      req: 'r',
+      ok: true,
+      mimeType: 'image/png' as const,
+      size: 3,
+      data: 'AQID',
+    };
+    expect(parseHubToBrowser(encodeHub(slice))).toEqual(slice);
+    expect(
+      parseHubToBrowser(JSON.parse(encodeHub(slice).replace('image/png', 'text/html'))),
+    ).toBeUndefined();
+  });
+
   it('checks the first frame of a connection', () => {
     expect(parseHubAuth(encodeHub({ type: 'auth', token: 't', role: 'vscode' }))).toEqual({
       type: 'auth',

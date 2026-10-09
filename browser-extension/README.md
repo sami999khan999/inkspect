@@ -6,11 +6,11 @@ A toolbar for working with AI agents on any page, and your bookmarks in sync wit
 
 ```sh
 npm install                        # at the repository root
-npm run build -w browser-extension # → browser-extension/dist/chrome and dist/firefox
+npm run build -w browser-extension # → browser-extension/chrome-extension-build and firefox-extension-build
 ```
 
-- **Chrome / Edge / Brave / Vivaldi / Opera:** open `chrome://extensions` (`edge://extensions`...), turn on **Developer mode**, click **Load unpacked** and choose `browser-extension/dist/chrome`.
-- **Firefox:** open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on…** and choose `browser-extension/dist/firefox/manifest.json`. Temporary add-ons are removed when Firefox restarts.
+- **Chrome / Edge / Brave / Vivaldi / Opera:** open `chrome://extensions` (`edge://extensions`...), turn on **Developer mode**, click **Load unpacked** and choose `browser-extension/chrome-extension-build`.
+- **Firefox:** open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on…** and choose `browser-extension/firefox-extension-build/manifest.json`. Temporary add-ons are removed when Firefox restarts.
 
 The extension reaches a page only when you open the toolbar on it (`activeTab`); it has no access to sites otherwise. Chrome also asks for `debugger`, used only by the responsive view's emulation.
 
@@ -63,7 +63,7 @@ Press **Alt+Shift+K** or click the extension's button. A toolbar floats over the
 ## Development
 
 ```sh
-npm run watch -w browser-extension      # rebuild dist/chrome on change (reload the extension after)
+npm run watch -w browser-extension      # rebuild chrome-extension-build on change (reload the extension after)
 npm run typecheck -w browser-extension
 npm test -w browser-extension           # unit tests
 npm run test:e2e:browser                # Chrome for Testing + the unpacked extension (headless)

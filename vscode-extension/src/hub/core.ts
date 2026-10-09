@@ -3,12 +3,14 @@
 // WebSocket link. Node only (no `vscode`).
 import { readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import type {
-  BrowserToHub,
-  HubTarget,
-  HubToBrowser,
-  HubWindow,
-  Project,
+import {
+  CONTENT_SLICE,
+  type BrowserToHub,
+  type ContentType,
+  type HubTarget,
+  type HubToBrowser,
+  type HubWindow,
+  type Project,
 } from '@inkspect/shared/hub';
 import { parseTargetId } from '@inkspect/shared/targets';
 import type { ProcessInfo } from '../agent/agentDetect';
@@ -30,13 +32,16 @@ import { sendItems, type SendOptions, type SendResult } from './router';
 import { readState, writeState, type HubState } from './state';
 import {
   emptyTrash,
+  groupItems,
   itemFile,
   moveItems,
   readItem,
   readItems,
+  readItemText,
   removeItems,
   restoreItems,
   TRASH_MS,
+  ungroupItems,
   writeItem,
 } from './store';
 import { listPanes, type TmuxPane } from './tmux';
@@ -54,6 +59,7 @@ export interface CoreHost {
     project: string,
     ids: readonly string[],
     target: string,
+    prompt?: string,
   ): Promise<{ ok: boolean; sentTo?: string; error?: string }>;
   log(line: string): void;
 }
@@ -69,6 +75,8 @@ export interface CoreOptions {
 }
 
 const GONE = 'That project is not open anywhere any more.';
+/** The largest item Copy fetches from the hub (in slices). */
+const MAX_COPY = 50 * 1024 * 1024;
 
 /**
  * The projects (VS Code windows' folders, agentmux threads, saved and pinned ones, the Inbox),
@@ -119,6 +127,8 @@ export class HubCore {
           return { type: 'items', req, ok: false, items: [], error: text };
         case 'item.thumb':
           return { type: 'thumb', req };
+        case 'item.content':
+          return { type: 'content', req, ok: false, error: text };
         default:
           return { type: 'done', req, ok: false, error: text };
       }
@@ -138,6 +148,7 @@ export class HubCore {
           req,
           ...(await this.send(message.project, message.ids, message.target, {
             open: message.open,
+            prompt: message.prompt,
           })),
         };
     }
@@ -151,6 +162,14 @@ export class HubCore {
       }
       case 'item.thumb':
         return { type: 'thumb', req, ...(known ? this.thumbOf(message.project, message.id) : {}) };
+      case 'item.content': {
+        if (!known) return { type: 'content', req, ok: false, error: GONE };
+        return {
+          type: 'content',
+          req,
+          ...this.contentOf(message.project, message.id, message.offset),
+        };
+      }
     }
     if (!known) return { type: 'done', req, ok: false, error: GONE };
     switch (message.type) {
@@ -169,6 +188,12 @@ export class HubCore {
         this.remember(message.to, moved?.url);
         break;
       }
+      case 'items.group':
+        groupItems(message.project, message.ids);
+        break;
+      case 'items.ungroup':
+        ungroupItems(message.project, message.group);
+        break;
       case 'project.pin': {
         const pinned = this.state.pinned.filter((p) => p !== message.project);
         this.state = {
@@ -218,10 +243,10 @@ export class HubCore {
       undefined,
       this.options.inbox ?? inboxFolder(this.options.paths),
     );
-    const agents = paneTargets(panes, processes);
+    const clients = sockets.length ? await listClients(sockets) : [];
+    const agents = paneTargets(panes, processes, clients);
     const harnesses = availableHarnesses();
     const pairs = readKittyPairs(process.env.XDG_RUNTIME_DIR);
-    const clients = pairs.length ? await listClients(sockets) : [];
     this.seen = { windows, panes, paired: pairedProjects(pairs, processes, clients, panes) };
     for (const project of projects) {
       const own = agents.filter((t) => t.project === project.path);
@@ -237,7 +262,13 @@ export class HubCore {
           })),
         );
       project.targets = [
-        ...own.map(({ id, kind, label, detail }) => ({ id, kind, label, detail })),
+        ...own.map(({ id, kind, label, detail, closed }) => ({
+          id,
+          kind,
+          label,
+          detail,
+          ...(closed ? { closed } : {}),
+        })),
         ...inWindows,
       ];
       project.defaultTarget = chooseDefault([...own, ...inWindows], {
@@ -289,7 +320,7 @@ export class HubCore {
         defaultTarget: project.defaultTarget,
         sockets: this.tmuxSockets,
         harnesses: project.harnesses ?? [],
-        deliver: (id, _project, items): Promise<SendResult> => {
+        deliver: (id, _project, items, prompt): Promise<SendResult> => {
           const parsed = parseTargetId(id);
           if (parsed?.kind !== 'vscode') {
             return Promise.resolve({ ok: false, error: 'Unknown target.' });
@@ -300,6 +331,7 @@ export class HubCore {
               path,
               items.map((i) => i.id),
               parsed.target,
+              prompt,
             )
             .then((r) =>
               r.ok
@@ -330,6 +362,37 @@ export class HubCore {
     return {
       data: readFileSync(path).toString('base64'),
       mimeType: /\.png$/i.test(path) ? 'image/png' : 'image/jpeg',
+    };
+  }
+
+  /**
+   * A slice of what Copy copies: the item's picture (PNG or JPEG), else its text, else its
+   * file's path or its title (as VS Code's Copy).
+   */
+  private contentOf(
+    project: string,
+    id: string,
+    offset: number,
+  ): Omit<Extract<HubToBrowser, { type: 'content' }>, 'type' | 'req'> {
+    const meta = readItem(project, id);
+    if (!meta) return { ok: false, error: 'This item is gone.' };
+    const file = itemFile(project, meta, 'file');
+    const image = file?.match(/\.(png|jpe?g)$/i);
+    let bytes: Buffer;
+    let mimeType: ContentType;
+    if (file && image) {
+      bytes = readFileSync(file);
+      mimeType = image[1].toLowerCase() === 'png' ? 'image/png' : 'image/jpeg';
+    } else {
+      bytes = Buffer.from(readItemText(project, meta) ?? file ?? meta.title, 'utf8');
+      mimeType = 'text/plain';
+    }
+    if (bytes.length > MAX_COPY) return { ok: false, error: 'Too large to copy from here.' };
+    return {
+      ok: true,
+      mimeType,
+      size: bytes.length,
+      data: bytes.subarray(offset, offset + CONTENT_SLICE).toString('base64'),
     };
   }
 

@@ -9,10 +9,10 @@ import {
   timeAgo,
   type SavedItemView,
 } from '../saved';
-import { orderTargets, targetIcon } from '../sendModal';
+import { orderTargets, targetDetail, targetIcon } from '../sendModal';
 import { Button } from './Button';
 import { IconButton } from './IconButton';
-import { Menu, type MenuState } from './Menu';
+import { Menu, tidyMenu, type MenuState } from './Menu';
 import { cx } from './popover';
 import { Segmented } from './Segmented';
 import { Checkbox } from './Switch';
@@ -125,40 +125,40 @@ export function SavedList(props: SavedListProps) {
 
   const menuAt = (anchor: HTMLElement, entries: MenuState['items']) => {
     const rect = anchor.getBoundingClientRect();
-    setMenu({
-      x: Math.max(4, Math.min(rect.left, window.innerWidth - 224)),
-      y: rect.bottom + 2,
-      items: entries,
-    });
+    setMenu({ x: rect.left, y: rect.bottom + 2, anchor: rect, items: entries });
   };
+  const openInAgentmux = props.onOpenInAgentmux;
   const actions: CardActions = {
     target,
-    canChoose: sending && targets.length > 1,
+    // One chooser: every agent; an agentmux thread has a second row that also shows it.
+    canChoose: sending && (targets.length > 1 || (!!openInAgentmux && threads.length > 0)),
     sending,
-    canOpenThread: !!props.onOpenInAgentmux && sending && threads.length > 0,
     send: (ids) => props.onSend(ids),
     choose: (ids, anchor) =>
       menuAt(
         anchor,
-        ordered.map((t) => ({
-          label: t.kind === 'chat' ? t.label : `${t.label} (${t.detail})`,
-          icon: targetIcon(t),
-          onSelect: () => props.onSend(ids, t.id),
-        })),
+        tidyMenu(
+          ordered.flatMap((t): MenuState['items'] => {
+            const name = t.kind === 'chat' ? t.label : `${t.label} (${targetDetail(t)})`;
+            const send = {
+              label: name,
+              icon: targetIcon(t),
+              onSelect: () => props.onSend(ids, t.id),
+            };
+            if (!openInAgentmux || t.kind !== 'tmux') return [send];
+            return [
+              { separator: true },
+              { ...send, label: `Send to ${name}` },
+              {
+                label: 'Send and open in agentmux',
+                icon: 'link-external',
+                onSelect: () => openInAgentmux(ids, t.id),
+              },
+              { separator: true },
+            ];
+          }),
+        ),
       ),
-    openThread: (ids, anchor) => {
-      const open = props.onOpenInAgentmux;
-      if (!open) return;
-      if (threads.length === 1) return open(ids, threads[0]!.id);
-      menuAt(
-        anchor,
-        threads.map((t) => ({
-          label: `${t.label} (${t.detail})`,
-          icon: 'terminal-tmux',
-          onSelect: () => open(ids, t.id),
-        })),
-      );
-    },
     copy: props.onCopy,
     open: props.onOpen,
     remove: props.onRemove,
@@ -326,10 +326,8 @@ interface CardActions {
   target?: HubTarget;
   canChoose: boolean;
   sending: boolean;
-  canOpenThread: boolean;
   send: (ids: string[]) => void;
   choose: (ids: string[], anchor: HTMLElement) => void;
-  openThread: (ids: string[], anchor: HTMLElement) => void;
   copy?: (id: string) => void;
   open?: (id: string) => void;
   remove: (ids: string[]) => void;
@@ -352,7 +350,7 @@ function selectable(onSelect: () => void) {
   };
 }
 
-/** Send, a chevron for another agent, and Open in agentmux: shared by single and group cards. */
+/** Send, and a chevron for another agent (or to show an agentmux thread): shared by both cards. */
 function SendControls({
   ids,
   label,
@@ -395,14 +393,6 @@ function SendControls({
           />
         )}
       </span>
-      {actions.canOpenThread && (
-        <IconButton
-          icon="terminal-tmux"
-          label="Open in agentmux"
-          disabled={disabled}
-          onClick={(event) => actions.openThread(ids, event.currentTarget)}
-        />
-      )}
     </span>
   );
 }
@@ -448,6 +438,12 @@ function ItemCard({
         }
       }}
     >
+      <Checkbox
+        className="saved-card-select"
+        checked={selected}
+        label={`Select ${item.title}`}
+        onChange={onSelect}
+      />
       {picture &&
         (open ? (
           <button
@@ -464,12 +460,6 @@ function ItemCard({
           </div>
         ))}
       <div className="saved-card-head">
-        <Checkbox
-          className="saved-card-select"
-          checked={selected}
-          label={`Select ${item.title}`}
-          onChange={onSelect}
-        />
         {!picture && (
           <span className="saved-card-icon" aria-hidden="true">
             <span className={`codicon codicon-${KIND_ICONS[item.kind]}`} />
@@ -596,13 +586,13 @@ function GroupCard({
         }
       }}
     >
+      <Checkbox
+        className="saved-card-select"
+        checked={selected}
+        label={`Select ${title}`}
+        onChange={onSelect}
+      />
       <div className="saved-card-head">
-        <Checkbox
-          className="saved-card-select"
-          checked={selected}
-          label={`Select ${title}`}
-          onChange={onSelect}
-        />
         <span className="saved-card-icon" aria-hidden="true">
           <span className="codicon codicon-layers" />
         </span>
