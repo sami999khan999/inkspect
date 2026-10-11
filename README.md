@@ -18,7 +18,7 @@ npm run build        # build every package
 npm run typecheck && npm run lint && npm test
 npm run test:e2e     # VS Code extension integration tests
 npm run test:e2e:browser  # browser extension end-to-end tests (Chrome for Testing)
-npm run package      # vscode-extension/*.vsix
+npm run package      # vscode-extension/release/*.vsix (committed)
 ```
 
 Press **F5** and choose **Run VS Code Extension** to try the VS Code extension.

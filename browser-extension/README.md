@@ -5,12 +5,14 @@ A toolbar for working with AI agents on any page, and your bookmarks in sync wit
 ## Install (unpacked)
 
 ```sh
-npm install                        # at the repository root
-npm run build -w browser-extension # → release/chrome-extension-build and release/firefox-extension-build
+npm install                             # at the repository root
+npm run build:prod -w browser-extension # → browser-extension/release (Chrome) and dist/firefox-extension-build
 ```
 
-- **Chrome / Edge / Brave / Vivaldi / Opera:** open `chrome://extensions` (`edge://extensions`...), turn on **Developer mode**, click **Load unpacked** and choose `release/chrome-extension-build`.
-- **Firefox:** open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on…** and choose `release/firefox-extension-build/manifest.json`. Temporary add-ons are removed when Firefox restarts.
+`browser-extension/release/` is committed, so Chrome-family browsers can skip the build. After a change, run `npm run build:prod -w browser-extension` and commit `release/` with it.
+
+- **Chrome / Edge / Brave / Vivaldi / Opera:** open `chrome://extensions` (`edge://extensions`...), turn on **Developer mode**, click **Load unpacked** and choose `browser-extension/release`.
+- **Firefox:** open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on…** and choose `browser-extension/dist/firefox-extension-build/manifest.json`. Temporary add-ons are removed when Firefox restarts.
 
 The extension reaches a page only when you open the toolbar on it (`activeTab`); it has no access to sites otherwise. Chrome also asks for `debugger`, used only by the responsive view's emulation.
 
@@ -63,7 +65,7 @@ Press **Alt+Shift+K** or click the extension's button. A toolbar floats over the
 ## Development
 
 ```sh
-npm run watch -w browser-extension      # rebuild release/chrome-extension-build on change (reload the extension after)
+npm run watch -w browser-extension      # rebuild browser-extension/release on change (reload the extension after)
 npm run typecheck -w browser-extension
 npm test -w browser-extension           # unit tests
 npm run test:e2e:browser                # Chrome for Testing + the unpacked extension (headless)

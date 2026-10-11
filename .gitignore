@@ -5,11 +5,9 @@ coverage/
 .vscode-test/
 *.vsix
 # The built VS Code extension is kept in the repository, ready to install.
-!vscode-extension/vscode-browser-*.vsix
+!vscode-extension/release/*.vsix
 *.log
 .DS_Store
 # Screenshots and context files the extension writes into a workspace.
 .vscode-browser/
 .cache/
-# The built browser extensions (load unpacked from there); outside dist/ so codesync copies them.
-release/
