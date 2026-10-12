@@ -1146,13 +1146,22 @@ export function App() {
             targets={saved.offer.targets}
             defaultTarget={saved.offer.defaultTarget}
             harnesses={saved.offer.harnesses}
-            onSend={(target, { open }) =>
+            onNewThread={(harness) =>
+              postToHost({
+                type: 'savedAction',
+                offerId: saved.offer.id,
+                action: 'newThread',
+                harness,
+              })
+            }
+            onSend={(target, { open, prompt }) =>
               postToHost({
                 type: 'savedAction',
                 offerId: saved.offer.id,
                 action: 'send',
                 target,
                 open,
+                prompt,
               })
             }
             onCopy={() =>

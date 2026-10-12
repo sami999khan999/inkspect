@@ -25,6 +25,15 @@ export function useAnchoredPosition(
   }, [anchor, popup, open, align, gap, matchWidth]);
 }
 
+/**
+ * The visible part of the window: `innerWidth` and `100vw` count the page's scrollbars, so a popup
+ * placed by them can end up under one (a narrow side panel that scrolls).
+ */
+export function viewportSize(): { width: number; height: number } {
+  const root = document.documentElement;
+  return { width: root.clientWidth || innerWidth, height: root.clientHeight || innerHeight };
+}
+
 /** Positions `element` (fixed) next to `anchor`; see useAnchoredPosition. */
 function placePopup(
   anchor: HTMLElement,
@@ -33,15 +42,17 @@ function placePopup(
 ): void {
   const a = anchor.getBoundingClientRect();
   if (matchWidth) element.style.minWidth = `${a.width}px`;
-  const p = element.getBoundingClientRect();
+  const view = viewportSize();
   const margin = 4;
+  element.style.maxWidth = `${view.width - 2 * margin}px`;
+  const p = element.getBoundingClientRect();
   const below = a.bottom + gap;
-  const fitsBelow = below + p.height <= innerHeight - margin;
+  const fitsBelow = below + p.height <= view.height - margin;
   const above = a.top - gap - p.height;
   const top = fitsBelow || above < margin ? below : above;
   const left = align === 'end' ? a.right - p.width : a.left;
-  element.style.top = `${Math.max(margin, Math.min(top, innerHeight - p.height - margin))}px`;
-  element.style.left = `${Math.max(margin, Math.min(left, innerWidth - p.width - margin))}px`;
+  element.style.top = `${Math.max(margin, Math.min(top, view.height - p.height - margin))}px`;
+  element.style.left = `${Math.max(margin, Math.min(left, view.width - p.width - margin))}px`;
   element.dataset.side = top === below ? 'bottom' : 'top';
 }
 

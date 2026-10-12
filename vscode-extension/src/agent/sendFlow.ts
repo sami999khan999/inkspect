@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import type { HubTarget } from '@inkspect/shared/hub';
+import { HARNESS_LABELS } from '@inkspect/shared/targets';
 import { errorMessage } from '../browser/logger';
+import { startThread } from '../hub/router';
 import { moveItems } from '../hub/store';
 import type { HostToWebview, SavedOffer, WebviewToHost } from '../shared/protocol';
+import { orderTargets, sentText, targetDetail } from '@inkspect/shared/sendModal';
 import { sendContextFor, sendSaved } from './chat';
 import type { ContextItem, ContextTray } from './contextTray';
 import { knownProjects, nameOf } from './projects';
@@ -27,7 +30,10 @@ const KIND_PLURALS: Record<string, string> = {
 export class SendFlow implements vscode.Disposable {
   private pending: ContextItem[] = [];
   private timer?: ReturnType<typeof setTimeout>;
-  private readonly offers = new Map<string, { items: ContextItem[]; project: string }>();
+  private readonly offers = new Map<
+    string,
+    { items: ContextItem[]; project: string; targets: readonly HubTarget[] }
+  >();
   /** The last dialog offered (the integration tests read it). */
   lastOffer?: SavedOffer;
   private readonly disposables: vscode.Disposable[] = [];
@@ -73,6 +79,7 @@ export class SendFlow implements vscode.Disposable {
     items: ContextItem[],
     project: string,
     id: string = randomUUID(),
+    chosen?: string,
   ): Promise<SavedOffer> {
     const context = await sendContextFor(project);
     const images: SavedOffer['images'] = [];
@@ -80,9 +87,18 @@ export class SendFlow implements vscode.Disposable {
       const thumbnail = await this.tray.thumbnailOf(item);
       if (thumbnail) images.push(thumbnail);
     }
-    this.offers.set(id, { items, project });
     const kinds = new Set(items.map((i) => i.kind));
     const kind = [...kinds][0]!;
+    const targets = context.targets.map(
+      ({ id: target, kind: k, label, detail, closed }): HubTarget => ({
+        id: target,
+        kind: k,
+        label,
+        detail,
+        ...(closed ? { closed } : {}),
+      }),
+    );
+    this.offers.set(id, { items, project, targets });
     return {
       id,
       title:
@@ -92,13 +108,9 @@ export class SendFlow implements vscode.Disposable {
       project: { path: project, name: nameOf(project) },
       projects: await knownProjects(project),
       images,
-      targets: context.targets.map(({ id: target, kind: k, label, detail }): HubTarget => ({
-        id: target,
-        kind: k,
-        label,
-        detail,
-      })),
-      defaultTarget: context.defaultTarget,
+      targets,
+      defaultTarget:
+        chosen && targets.some((t) => t.id === chosen) ? chosen : context.defaultTarget,
       harnesses: [...context.harnesses],
     };
   }
@@ -112,9 +124,19 @@ export class SendFlow implements vscode.Disposable {
     switch (message.action) {
       case 'send': {
         status('busy', 'Sending…');
-        const sent = await sendSaved(offer.items, message.target, { open: message.open });
+        const sent = await sendSaved(offer.items, message.target, {
+          open: message.open,
+          prompt: message.prompt,
+        });
         if (sent) {
-          status('ok', `Sent to ${sent}`, true);
+          status(
+            'ok',
+            sentText(
+              offer.targets.find((t) => t.id === message.target),
+              sent,
+            ),
+            true,
+          );
           this.offers.delete(message.offerId);
         } else status('error', 'Not sent. See the message in VS Code.');
         return;
@@ -145,6 +167,28 @@ export class SendFlow implements vscode.Disposable {
         post({ type: 'saved', offer: await this.offer(items, to, message.offerId) });
         return;
       }
+      case 'newThread': {
+        const harness = message.harness;
+        if (!harness) return;
+        const label = HARNESS_LABELS[harness];
+        status('busy', `Starting a new ${label} thread in agentmux…`);
+        try {
+          const thread = await startThread(
+            await sendContextFor(offer.project),
+            offer.project,
+            harness,
+          );
+          // The dialog stays open and lists the new thread, chosen; nothing is sent to it.
+          post({
+            type: 'saved',
+            offer: await this.offer(offer.items, offer.project, message.offerId, thread.id),
+          });
+          status('ok', `${label} started in agentmux. Enter sends to it.`);
+        } catch (error) {
+          status('error', errorMessage(error));
+        }
+        return;
+      }
       case 'close':
         this.offers.delete(message.offerId);
         return;
@@ -156,11 +200,9 @@ export class SendFlow implements vscode.Disposable {
     const project = items[0]?.project;
     if (!project) return undefined;
     const context = await sendContextFor(project);
-    const ordered = [...context.targets].sort(
-      (a, b) => Number(b.id === context.defaultTarget) - Number(a.id === context.defaultTarget),
-    );
+    const ordered = orderTargets(context.targets, context.defaultTarget);
     const pick = await vscode.window.showQuickPick(
-      ordered.map((t) => ({ label: t.label, description: t.detail, id: t.id })),
+      ordered.map((t) => ({ label: t.label, description: targetDetail(t), id: t.id })),
       { title: 'Send to', placeHolder: 'Which agent gets it?' },
     );
     return pick && sendSaved(items, pick.id);

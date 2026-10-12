@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { listenOutsidePress, pressedOpener } from './popover';
+import { listenOutsidePress, pressedOpener, viewportSize } from './popover';
 
 export type MenuItem =
   | {
@@ -9,15 +9,23 @@ export type MenuItem =
       image?: string;
       shortcut?: string;
       disabled?: boolean;
+      /** Under a heading: indented beneath it. */
+      indent?: boolean;
+      /** The accessible name when the label alone needs its heading ("Send" to whom). */
+      ariaLabel?: string;
       onSelect: () => void;
       /** Items of a submenu, opened on hover or with the Right arrow (built when opened). */
       submenu?: () => MenuItem[];
     }
-  | { separator: true };
+  | { separator: true }
+  /** A title over the items after it (the agent that "Send" and "Send and open" go to). */
+  | { heading: string; icon?: string; detail?: string };
 
 export interface MenuState {
   x: number;
   y: number;
+  /** The button it hangs from: with no room below, the menu opens above it (not over it). */
+  anchor?: { top: number };
   items: MenuItem[];
 }
 
@@ -62,7 +70,14 @@ export function Menu({ menu, onClose }: MenuProps) {
 
   return (
     <div ref={ref} className="menu-root" onContextMenu={(event) => event.preventDefault()}>
-      <MenuList items={menu.items} x={menu.x} y={menu.y} onClose={onClose} focusFirst />
+      <MenuList
+        items={menu.items}
+        x={menu.x}
+        y={menu.y}
+        above={menu.anchor?.top}
+        onClose={onClose}
+        focusFirst
+      />
     </div>
   );
 }
@@ -77,9 +92,11 @@ interface MenuListProps {
   parent?: DOMRect;
   /** Closes this submenu and returns focus to its item. */
   onBack?: () => void;
+  /** Where it opens above when there is no room below (the top of its button). */
+  above?: number;
 }
 
-function MenuList({ items, x, y, onClose, focusFirst, parent, onBack }: MenuListProps) {
+function MenuList({ items, x, y, onClose, focusFirst, parent, onBack, above }: MenuListProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<{ index: number; rect: DOMRect } | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -88,17 +105,23 @@ function MenuList({ items, x, y, onClose, focusFirst, parent, onBack }: MenuList
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
+    const view = viewportSize();
+    element.style.maxWidth = `${view.width - 8}px`;
     const rect = element.getBoundingClientRect();
     let left = x;
-    if (parent && x + rect.width > innerWidth - 4) left = parent.left - rect.width + 2;
-    element.style.left = `${Math.max(4, Math.min(left, innerWidth - rect.width - 4))}px`;
-    element.style.top = `${Math.max(4, Math.min(y, innerHeight - rect.height - 4))}px`;
+    if (parent && x + rect.width > view.width - 4) left = parent.left - rect.width + 2;
+    let top = y;
+    if (above !== undefined && y + rect.height > view.height - 4 && above - rect.height - 2 >= 4) {
+      top = above - rect.height - 2;
+    }
+    element.style.left = `${Math.max(4, Math.min(left, view.width - rect.width - 4))}px`;
+    element.style.top = `${Math.max(4, Math.min(top, view.height - rect.height - 4))}px`;
     if (focusFirst) {
       element
         .querySelector<HTMLButtonElement>(':scope > button:not(:disabled)')
         ?.focus({ preventScroll: true });
     }
-  }, [x, y, parent, focusFirst]);
+  }, [x, y, parent, focusFirst, above]);
 
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
 
@@ -149,6 +172,12 @@ function MenuList({ items, x, y, onClose, focusFirst, parent, onBack }: MenuList
       {items.map((item, index) =>
         'separator' in item ? (
           <div key={index} className="menu-separator" role="separator" />
+        ) : 'heading' in item ? (
+          <div key={index} className="menu-heading" role="presentation">
+            {item.icon && <span className={`codicon codicon-${item.icon}`} aria-hidden="true" />}
+            <span className="menu-heading-label">{item.heading}</span>
+            {item.detail && <span className="menu-heading-detail">{item.detail}</span>}
+          </div>
         ) : (
           <button
             key={index}
@@ -157,7 +186,8 @@ function MenuList({ items, x, y, onClose, focusFirst, parent, onBack }: MenuList
             data-index={index}
             aria-haspopup={item.submenu ? 'menu' : undefined}
             aria-expanded={item.submenu ? open?.index === index : undefined}
-            className={`menu-item${open?.index === index ? ' expanded' : ''}`}
+            className={`menu-item${open?.index === index ? ' expanded' : ''}${item.indent ? ' indented' : ''}`}
+            aria-label={item.ariaLabel}
             disabled={item.disabled}
             onPointerEnter={(event) => {
               clearTimeout(hoverTimer.current);

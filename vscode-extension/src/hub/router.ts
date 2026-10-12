@@ -21,16 +21,38 @@ export interface SendContext {
   /** Agents a new agentmux thread can run (empty: agentmux isn't available for this project). */
   harnesses: readonly Harness[];
   /** Sends to a VS Code target (`vscode:<window>:…` or this window's own `terminal:<n>`/`chat`). */
-  deliver?: (target: string, project: string, items: readonly ItemMeta[]) => Promise<SendResult>;
+  deliver?: (
+    target: string,
+    project: string,
+    items: readonly ItemMeta[],
+    prompt?: string,
+  ) => Promise<SendResult>;
   /** The id to remember for a target (VS Code turns its own ids into `vscode:<window>:…`). */
   globalId?: (target: string) => string;
 }
 
 export type SendResult = { ok: true; sentTo: string } | { ok: false; error: string };
 
+/**
+ * Starts a new agentmux thread running `harness` in a project and returns it once its agent
+ * runs. Nothing is sent to it. Throws when agentmux can't start that agent there.
+ */
+export async function startThread(
+  ctx: Pick<SendContext, 'harnesses' | 'sockets'>,
+  project: string,
+  harness: Harness,
+): Promise<PaneTarget> {
+  if (!ctx.harnesses.includes(harness)) {
+    throw new Error(`agentmux can't start ${HARNESS_LABELS[harness]} here.`);
+  }
+  return newAgentmuxThread(project, harness, ctx.sockets);
+}
+
 export interface SendOptions {
   /** Also show the agentmux thread and bring its window to the front. */
   open?: boolean;
+  /** What the user wrote with the send: pasted before the items. */
+  prompt?: string;
 }
 
 /**
@@ -46,6 +68,7 @@ export async function sendItems(
   options: SendOptions = {},
 ): Promise<SendResult> {
   const items = ids.flatMap((id) => readItem(project, id) ?? []);
+  const { prompt } = options;
   if (!items.length) return { ok: false, error: 'Those captures are gone.' };
   let id = target;
   if (id === 'default') id = ctx.defaultTarget ?? '';
@@ -61,12 +84,9 @@ export async function sendItems(
   let sent: SendResult;
   let remembered = id;
   if (parsed.kind === 'agentmux-new') {
-    if (!ctx.harnesses.includes(parsed.harness)) {
-      return { ok: false, error: `agentmux can't start ${HARNESS_LABELS[parsed.harness]} here.` };
-    }
     try {
-      const thread = await newAgentmuxThread(project, parsed.harness, ctx.sockets);
-      await pasteIntoPane(thread.socket, thread.paneId, partsOf(project, items));
+      const thread = await startThread(ctx, project, parsed.harness);
+      await pasteIntoPane(thread.socket, thread.paneId, partsOf(project, items, { prompt }));
       remembered = thread.id;
       sent = { ok: true, sentTo: thread.label };
     } catch (error) {
@@ -77,7 +97,7 @@ export async function sendItems(
     if (!chosen) return { ok: false, error: 'That agent is not running any more.' };
     if (parsed.kind === 'tmux') {
       try {
-        await pasteIntoPane(parsed.socket, parsed.pane, partsOf(project, items));
+        await pasteIntoPane(parsed.socket, parsed.pane, partsOf(project, items, { prompt }));
       } catch (error) {
         return {
           ok: false,
@@ -85,9 +105,12 @@ export async function sendItems(
         };
       }
       sent = { ok: true, sentTo: chosen.label };
-      if (options.open) await showInAgentmux(chosen as PaneTarget, ctx.sockets).catch(() => {});
+      // No window shows agentmux: open it, so the paste isn't left where nobody sees it.
+      if (options.open || chosen.closed) {
+        await showInAgentmux(chosen as PaneTarget, ctx.sockets).catch(() => {});
+      }
     } else if (ctx.deliver) {
-      sent = await ctx.deliver(id, project, items);
+      sent = await ctx.deliver(id, project, items, prompt);
     } else {
       return { ok: false, error: 'That agent is in a VS Code window that is not reachable.' };
     }

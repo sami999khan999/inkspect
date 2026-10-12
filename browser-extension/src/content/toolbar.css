@@ -78,6 +78,8 @@
 .inkspect {
   position: fixed;
   inset: 0;
+  /* Sizes in cqw/cqh are of the window less the page's scrollbars (100vw counts them). */
+  container-type: size;
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
   color: var(--vscode-foreground);
@@ -131,7 +133,7 @@
 
 .bar {
   width: max-content;
-  max-width: calc(100vw - 16px);
+  max-width: calc(100cqw - 16px);
   border: 1px solid var(--ink-border-strong);
   border-radius: var(--ink-radius-lg);
   background: var(--vscode-editorWidget-background);
@@ -171,10 +173,12 @@
 
 .bar-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 2px;
-  height: 40px;
-  padding: 0 4px 0 8px;
+  min-height: 40px;
+  padding: 4px 4px 4px 8px;
 }
 
 .bar-brand {
@@ -196,13 +200,25 @@
   flex-shrink: 0;
 }
 
-/* The drawing tools: the bar's second row. */
+/* The drawing tools: the bar's second row, wrapped into centered lines in a narrow window. */
 .bar .draw-toolbar {
   justify-content: center;
+  row-gap: 4px;
   border-top: 1px solid var(--ink-border-subtle);
   border-bottom: none;
   border-radius: 0 0 var(--ink-radius-lg) var(--ink-radius-lg);
   background: transparent;
+}
+
+/* In a very narrow window, a group wraps too. */
+.bar .draw-group {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Wrapped, Stop drawing stays beside Screenshot rather than alone at the far edge. */
+.bar .draw-close {
+  margin-left: 0;
 }
 
 @keyframes bar-in {
@@ -260,7 +276,7 @@
   flex-direction: column;
   align-items: stretch;
   gap: 0;
-  width: min(460px, calc(100vw - 32px));
+  width: min(460px, calc(100cqw - 32px));
   max-width: none;
   padding: 0;
   overflow: hidden;
@@ -341,7 +357,7 @@
   top: calc(100% + 8px);
   left: 0;
   width: 370px;
-  max-width: calc(100vw - 16px);
+  max-width: calc(100cqw - 16px);
 }
 
 .float.align-right .panel-dock {
@@ -562,7 +578,7 @@
   position: fixed;
   left: 50%;
   bottom: 16px;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100cqw - 32px);
   transform: translateX(-50%);
 }
 

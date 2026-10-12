@@ -10,7 +10,7 @@ import {
   getAgentTerminals,
   pasteIntoTerminal,
 } from '../features/terminalSend';
-import { chooseDefault, paneTargets } from '../hub/agents';
+import { chooseDefault, listClients, paneTargets } from '../hub/agents';
 import { availableHarnesses } from '../hub/agentmux';
 import { readProjectState } from '../hub/projectState';
 import { sendItems, type SendContext, type SendOptions, type SendResult } from '../hub/router';
@@ -57,12 +57,14 @@ export async function deliverLocal(
   target: string,
   project: string,
   items: readonly ItemMeta[],
+  prompt?: string,
 ): Promise<SendResult> {
   const id = localTarget(target);
   if (id === CHAT_TARGET) {
     const { text, files } = chatContentOf(project, items);
+    const asked = prompt?.trim();
     await sendToChat(
-      text,
+      asked ? `${asked}\n\n${text}` : text,
       files.map((f) => vscode.Uri.file(f)),
     );
     return { ok: true, sentTo: 'VS Code chat' };
@@ -74,7 +76,7 @@ export async function deliverLocal(
   pasteIntoTerminal(
     terminal,
     agent,
-    partsOf(project, items, { acceptsPaste: acceptsPaste(agent) }),
+    partsOf(project, items, { acceptsPaste: acceptsPaste(agent), prompt }),
   );
   return { ok: true, sentTo: agent.label };
 }
@@ -133,11 +135,12 @@ export async function sendContextFor(project: string): Promise<SendContext> {
       globalId: globalTarget,
     };
   }
-  const [panes, processes] = await Promise.all([
+  const [panes, processes, clients] = await Promise.all([
     listPanes(sockets),
     listProcesses().catch(() => []),
+    listClients(sockets),
   ]);
-  const targets = paneTargets(panes, processes).filter((t) => t.project === project);
+  const targets = paneTargets(panes, processes, clients).filter((t) => t.project === project);
   const open = agentPanes(panes).some((p) => p.project === project);
   return {
     targets,

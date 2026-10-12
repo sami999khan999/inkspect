@@ -231,6 +231,13 @@
   font-size: 14px;
 }
 
+/* A label with key caps after it ("Copy C") keeps them apart. */
+.button-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .button.primary {
   background: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
@@ -379,6 +386,33 @@ body.vscode-high-contrast .button.accent {
 }
 
 .text-field input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--ink-muted));
+}
+
+/* Several lines (TextArea): the field grows with the text up to about six lines, then scrolls. */
+.text-field.multiline {
+  align-items: stretch;
+  height: auto;
+  padding: 5px 8px;
+}
+
+.text-field textarea {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  max-height: calc(6 * 1.4em);
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.4;
+  resize: none;
+  field-sizing: content;
+}
+
+.text-field textarea::placeholder {
   color: var(--vscode-input-placeholderForeground, var(--ink-muted));
 }
 
@@ -560,6 +594,7 @@ body.vscode-high-contrast .button.accent {
 .select-list {
   position: fixed;
   z-index: 1000;
+  max-width: calc(100vw - 8px);
   max-height: min(340px, 60vh);
   padding: 4px;
   overflow-y: auto;
@@ -610,9 +645,17 @@ body.vscode-high-contrast .button.accent {
 
 .select-option-label {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+/* The detail gives way first when the list is narrow. */
 .select-option-detail {
+  flex-shrink: 1000;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   margin-left: 16px;
   opacity: 0.65;
   font-size: var(--ink-font-sm);
@@ -793,6 +836,8 @@ body.vscode-high-contrast .button.accent {
 .slider-track {
   position: relative;
   width: 84px;
+  /* Room for the thumb, which hangs half off each end. */
+  margin: 0 7px;
   height: 18px;
   cursor: pointer;
   touch-action: none;
@@ -1107,8 +1152,9 @@ body.vscode-high-contrast .button.accent {
   position: fixed;
   /* Above the send dialog (900), like select lists and the color picker. */
   z-index: 1000;
-  min-width: 200px;
-  max-width: 420px;
+  /* Narrow views (a slim sidebar) keep the whole menu on screen. */
+  min-width: min(200px, calc(100vw - 8px));
+  max-width: min(420px, calc(100vw - 8px));
   padding: 4px;
   animation: ink-pop-in var(--ink-normal) var(--ink-ease);
 }
@@ -1123,6 +1169,12 @@ body.vscode-high-contrast .button.accent {
   max-height: min(420px, calc(100vh - 8px));
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+/* The menu's wrapper takes no place where it is rendered (a flex column with a gap, like the send
+   dialog, would otherwise grow while the menu is open). */
+.menu-root {
+  display: contents;
 }
 
 /* Submenus open without the pop animation, so they don't jump while the pointer moves. */
@@ -1181,6 +1233,42 @@ body.vscode-high-contrast .button.accent {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* A title over the items after it (an agent, then what can be done with it). Not focusable. */
+.menu-heading {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  cursor: default;
+}
+
+.menu-heading-label {
+  flex-shrink: 0;
+  max-width: 60%;
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.menu-heading-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: var(--ink-font-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Items under a heading start where its label does, so they read as its actions. */
+.menu-item.indented {
+  padding-left: 32px;
 }
 
 .menu-shortcut {
@@ -1784,12 +1872,6 @@ body.vscode-high-contrast .key-button:hover {
   background: rgba(255, 255, 255, 0.12);
 }
 
-.selection-bar .button-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .selection-bar .keycap {
   border-color: rgba(255, 255, 255, 0.3);
   background: rgba(255, 255, 255, 0.16);
@@ -1970,7 +2052,21 @@ body.vscode-high-contrast .thumb-picker-item.on .thumb-picker-image {
   font-weight: 600;
 }
 
+/* One line: a long title (an element's classes) ends in an ellipsis rather than widen the
+   dialog; hovering shows it whole. */
+.ink-modal-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ink-modal-detail {
+  overflow-wrap: anywhere;
+}
+
 .ink-modal-title .codicon {
+  flex-shrink: 0;
   color: var(--ink-success);
 }
 
@@ -2026,6 +2122,11 @@ body.vscode-high-contrast .thumb-picker-item.on .thumb-picker-image {
   display: flex;
   align-items: center;
   gap: var(--ink-space-1);
+}
+
+.ink-modal-open-space {
+  flex-shrink: 0;
+  width: var(--ink-control);
 }
 
 .ink-modal-send {
@@ -2128,6 +2229,22 @@ body.vscode-high-contrast .thumb-picker-item.on .thumb-picker-image {
 
 .ink-modal-thread {
   align-self: flex-start;
+}
+
+/* agentmux isn't open: its agents stay listed, dimmed (a send opens agentmux first). */
+.ink-modal-target.closed:not(.default) .ink-modal-send {
+  border-style: dashed;
+  background: transparent;
+}
+
+.ink-modal-target.closed:not(.default) .ink-modal-icon,
+.ink-modal-target.closed:not(.default) .ink-modal-agent {
+  opacity: 0.6;
+}
+
+.ink-modal-note {
+  color: var(--ink-muted);
+  font-size: var(--ink-font-sm);
 }
 
 .ink-modal-empty {
@@ -2558,18 +2675,40 @@ body.vscode-high-contrast .saved-card:focus-visible {
   border-color: var(--vscode-contrastActiveBorder, var(--ink-focus));
 }
 
-/* Selecting cards (to send, remove or group several): a checkbox in the head, shown on hover,
-   on focus, and on every card while anything is selected. */
+/* Selecting cards (to send, remove or group several): a checkbox over the card's top-left corner
+   (the kind icon or the thumbnail), shown on hover, on focus, and on every card while anything is
+   selected. It takes no room, so showing it moves nothing. */
+.saved-card {
+  position: relative;
+}
+
 .saved-card-select {
-  display: none;
-  margin-top: 6px;
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  z-index: 1;
+  padding: 2px;
+  border-radius: var(--ink-radius-sm);
+  background: var(--card-bg);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity var(--ink-fast) var(--ink-ease);
 }
 
 .saved-card:hover .saved-card-select,
 .saved-card:focus-within .saved-card-select,
 .saved.selecting .saved-card-select,
 .saved-card.selected .saved-card-select {
-  display: inline-flex;
+  visibility: visible;
+  opacity: 1;
+}
+
+/* The kind icon gives its place to the checkbox. */
+.saved-card:hover .saved-card-icon > .codicon,
+.saved-card:focus-within .saved-card-icon > .codicon,
+.saved.selecting .saved-card-icon > .codicon,
+.saved-card.selected .saved-card-icon > .codicon {
+  visibility: hidden;
 }
 
 .saved-card.selected {

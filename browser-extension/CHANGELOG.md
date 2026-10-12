@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **New agentmux thread only starts it:** picking an agent under New agentmux thread starts the thread and lists it in the send dialog, chosen; nothing is sent until you send. Needs a browser helper or VS Code Browser that knows it.
+- **Send to… is grouped by agent:** each agentmux thread is a heading (its name and thread) with Send and Send and open in agentmux beneath it, and the menu stays inside a narrow panel that scrolls.
+- **Group only joins cards:** selecting a single group card no longer offers Group.
+- **Send dialog polish:** the title stays on one line (hover shows it whole), key caps keep a gap from their button's label (Copy, Download, New agentmux thread), every agent row is as wide as the others, and the footer note is shorter.
+- **Builds go to `release/`** at the repository root: load `release/chrome-extension-build` (or `release/firefox-extension-build`) unpacked.
+- **Copy in the side panel:** each saved item has Copy, as in VS Code: a screenshot goes on the clipboard as an image, anything else as its text. Large images come from the browser helper in pieces. Needs a browser helper or VS Code Browser that knows it.
+- **Group in the side panel:** select two or more saved items and Group them into one card, sent together, as in VS Code (Ungroup splits them again). Needs a browser helper or VS Code Browser that knows it.
+- **Send to… has two rows per agentmux thread:** one only sends, the other sends and opens the thread in agentmux.
+- **A prompt with the send:** the send dialog has a box for a few words to the agent (I focuses it), pasted before the captures. It needs a browser helper or VS Code Browser that knows it (the box is hidden otherwise).
+- **No "started debugging this browser" bar in the responsive view by default:** the device's user agent is now sent with the frame's page request without the debugger. Touch has its own switch (off by default); touch, network, CPU, color scheme and print media still need the debugger and show the bar while they are on.
+- **Closed agentmux is said so:** threads no window shows are listed last as "agentmux is closed", Send goes to an open agent instead, and sending to one opens agentmux first.
+- **The side panel stays in step:** it looks again every 2 seconds while it is visible and as soon as it comes back into view, keeps its list when the helper doesn't answer once, and Undo goes away when the removed items do (15 seconds).
+- **Saved cards:** the checkbox no longer moves the card's content on hover, and **Send to…** is the one place to pick an agent or to send and show an agentmux thread.
+- **The toolbar fits narrow windows:** its buttons and the drawing tools wrap into centered rows instead of being cut off at the right, and Stop drawing stays next to Screenshot.
+- **Menus and lists fit the narrow side panel**, and the send dialog no longer grows while its New agentmux thread menu is open.
+
 - **Readable console:** styled logs (`%c`) show their text instead of their CSS, and `%s`/`%d` placeholders are filled in, as in DevTools. A long file name no longer squeezes the message into a narrow column (it is cut instead, and shown decoded: `[root].js`, not `%5Broot%5D.js`).
 - **Docked in the responsive view:** while it is open, the toolbar is a full-width bar across the top, with the view right under it, and can't be dragged; closing the view puts it back where it was.
 - **The toolbar stays open when the page reloads** (or the tab goes to another page of the same site): it comes back by itself.

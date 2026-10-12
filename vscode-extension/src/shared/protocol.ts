@@ -7,7 +7,7 @@ import type { ClearRange, HistoryItem, Suggestion } from './history';
 import type { ShortcutOverrides } from './shortcuts';
 import type { A11yScan, MeasureBox } from './tools';
 import type { HubTarget } from '@inkspect/shared/hub';
-import type { Harness } from '@inkspect/shared/targets';
+import { HARNESSES, type Harness } from '@inkspect/shared/targets';
 
 // Messages exchanged between the extension host (src/panel) and the webview (webview/src).
 // Both sides import this file, so every message type is defined exactly once.
@@ -374,10 +374,14 @@ export type WebviewToHost =
   | {
       type: 'savedAction';
       offerId: string;
-      action: 'send' | 'copy' | 'reveal' | 'project' | 'close';
+      /** `newThread`: start an agentmux thread running `harness`, sending nothing. */
+      action: 'send' | 'copy' | 'reveal' | 'project' | 'newThread' | 'close';
       target?: string;
+      harness?: Harness;
       open?: boolean;
       project?: string;
+      /** What the user wrote for the agent with a send. */
+      prompt?: string;
     }
   /** The webview received keyboard focus (so commands target this browser window). */
   | { type: 'focus' }
@@ -652,10 +656,12 @@ const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
   ready: {},
   savedAction: {
     offerId: (v) => typeof v === 'string' && v.length <= 64,
-    action: oneOf('send', 'copy', 'reveal', 'project', 'close'),
+    action: oneOf('send', 'copy', 'reveal', 'project', 'newThread', 'close'),
     target: optional((v) => typeof v === 'string' && v.length <= 200),
+    harness: optional(oneOf(...HARNESSES)),
     open: optional(isBoolean),
     project: optional((v) => typeof v === 'string' && v.length <= 4096),
+    prompt: optional((v) => typeof v === 'string' && v.length <= 8000),
   },
   focus: {},
   viewport: { width: isNumber, height: isNumber, dpr: isNumber },

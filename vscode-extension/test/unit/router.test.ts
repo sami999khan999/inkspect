@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { HubTarget, ItemMeta } from '@inkspect/shared/hub';
 import { availableHarnesses, findProgram, focusWindowByClass } from '../../src/hub/agentmux';
 import { readProjectState, writeLastTarget } from '../../src/hub/projectState';
-import { sendItems, type SendContext } from '../../src/hub/router';
+import { sendItems, startThread, type SendContext } from '../../src/hub/router';
 import { readItem, writeItem } from '../../src/hub/store';
 
 const temps: string[] = [];
@@ -41,7 +41,29 @@ function context(over: Partial<SendContext> = {}) {
   return { ctx, delivered };
 }
 
+describe('starting an agentmux thread', () => {
+  it("refuses an agent agentmux can't start there (and sends nothing)", async () => {
+    await expect(
+      startThread({ harnesses: ['claude'], sockets: [] }, '/p', 'codex'),
+    ).rejects.toThrow(/can't start Codex here/);
+  });
+});
+
 describe('sending saved items', () => {
+  it('hands the prompt to VS Code targets', async () => {
+    const project = temp();
+    const item = writeItem(project, { kind: 'text', title: 'A', source: 'vscode', text: 'x' });
+    const prompts: (string | undefined)[] = [];
+    const { ctx } = context({
+      deliver: async (_target, _project, _items, prompt) => {
+        prompts.push(prompt);
+        return { ok: true, sentTo: 'VS Code chat' };
+      },
+    });
+    await sendItems(ctx, project, [item.id], 'chat', { prompt: 'Fix this' });
+    expect(prompts).toEqual(['Fix this']);
+  });
+
   it('sends to the default, records it on the items and as the last target', async () => {
     const project = temp();
     const item = writeItem(project, { kind: 'text', title: 'A', source: 'vscode', text: 'x' });

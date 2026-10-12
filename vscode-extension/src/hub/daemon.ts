@@ -109,8 +109,8 @@ export class HubDaemon {
       { paths, tmuxSockets: options.tmuxSockets, procRoot: options.procRoot },
       {
         windows: () => this.ofRole('vscode').flatMap((c) => (c.window ? [c.window] : [])),
-        runInWindow: (window, project, ids, target) =>
-          this.runInWindow(window, project, ids, target),
+        runInWindow: (window, project, ids, target, prompt) =>
+          this.runInWindow(window, project, ids, target, prompt),
         log: (line) => this.log(line),
       },
     );
@@ -269,6 +269,7 @@ export class HubDaemon {
     project: string,
     ids: readonly string[],
     target: string,
+    prompt?: string,
   ): Promise<{ ok: boolean; sentTo?: string; error?: string }> {
     const window = this.ofRole('vscode').find((c) => c.window?.id === windowId);
     if (!window) return Promise.resolve({ ok: false, error: 'That VS Code window is closed.' });
@@ -285,7 +286,14 @@ export class HubDaemon {
           resolve(reply);
         },
       });
-      this.sendToVsCode(window, { type: 'run.send', req, project, ids: [...ids], target });
+      this.sendToVsCode(window, {
+        type: 'run.send',
+        req,
+        project,
+        ids: [...ids],
+        target,
+        ...(prompt ? { prompt } : {}),
+      });
     });
   }
 

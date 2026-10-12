@@ -1323,7 +1323,7 @@ const realBrowser = await puppeteer.launch({
   defaultViewport: { width: 1200, height: 800 },
   args: ['--no-first-run'],
 });
-const realId = await realBrowser.installExtension(join(root, 'dist', 'chrome'));
+const realId = await realBrowser.installExtension(join(root, 'release'));
 // The settings page opens on install and would take focus from the page.
 await (
   await (await realBrowser.waitForTarget((t) => t.url().includes('options.html'))).page()
@@ -1699,6 +1699,41 @@ await test('links through the browser helper, without pairing', async () => {
         ?.click(),
     );
     await until('the capture back', async () => (await titlesIn()).length === 2);
+    // Copy puts the item on the clipboard, fetched from the helper slice by slice.
+    await helperBrowser
+      .defaultBrowserContext()
+      .overridePermissions(`chrome-extension://${id}`, ['clipboard-read', 'clipboard-write']);
+    const copiedNote = () =>
+      until('the copied note', () =>
+        panel.evaluate(() => document.querySelector('.sp-note')?.textContent === 'Copied.'),
+      );
+    await panel.evaluate(() => navigator.clipboard.writeText(''));
+    await cardWith('Element', '[aria-label="Copy"]');
+    await copiedNote();
+    const copiedText = await panel.evaluate(() => navigator.clipboard.readText());
+    assert(copiedText.includes('Element'), copiedText.slice(0, 200));
+    await cardWith('Screenshot', '[aria-label="Copy"]');
+    const copiedImage = await until('the copied screenshot', () =>
+      panel.evaluate(async () => {
+        const [item] = await navigator.clipboard.read();
+        return item?.types.includes('image/png') ? (await item.getType('image/png')).size : 0;
+      }),
+    );
+    assert(copiedImage > 1000, `copied image: ${copiedImage} bytes`);
+    // Group both into one card, then ungroup them.
+    for (const title of ['Element', 'Screenshot']) await cardWith(title, '.saved-card-select');
+    await panel.evaluate(() =>
+      [...document.querySelectorAll('.saved-selection button')]
+        .find((b) => b.textContent.includes('Group'))
+        ?.click(),
+    );
+    await until('one group card', () =>
+      panel.evaluate(() => document.querySelectorAll('.saved-group').length === 1),
+    );
+    await panel.evaluate(() =>
+      document.querySelector('.saved-group [aria-label^="Ungroup"]')?.click(),
+    );
+    await until('two cards again', async () => (await titlesIn()).length === 2);
 
     // Change project in the dialog: the capture moves (here to the Inbox).
     await page.bringToFront();

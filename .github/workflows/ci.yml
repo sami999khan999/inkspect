@@ -52,12 +52,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: vsix
-          path: vscode-extension/*.vsix
+          path: vscode-extension/release/*.vsix
       - name: Build the browser extension (Chrome and Firefox)
         run: npm run build:prod -w browser-extension
       - uses: actions/upload-artifact@v4
         with:
           name: browser-extension
           path: |
-            browser-extension/dist/chrome
-            browser-extension/dist/firefox
+            browser-extension/release
+            browser-extension/dist/firefox-extension-build

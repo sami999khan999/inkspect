@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
@@ -9,6 +8,7 @@ import { displayPath, localWorkspaceFolder } from '../features/screenshots';
 import { inboxFolder } from '../hub/paths';
 import {
   emptyTrash,
+  groupItems,
   itemFile,
   moveItems,
   readItem,
@@ -17,7 +17,9 @@ import {
   removeItems,
   restoreItems,
   STORE_FOLDER,
+  storeSignature,
   TRASH_MS,
+  ungroupItems,
   updateItem,
   writeItem,
 } from '../hub/store';
@@ -82,6 +84,9 @@ export interface ContextItem {
   sentTo: string[];
 }
 
+/** How often the list checks the store for changes a file watcher missed. */
+const POLL_MS = 3_000;
+
 const IMAGE_TYPES: Record<string, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
@@ -144,6 +149,8 @@ export class ContextTray implements vscode.Disposable {
   /** The last capture time given out: captures in the same millisecond keep their order. */
   private lastTime = 0;
   private reloadTimer?: ReturnType<typeof setTimeout>;
+  /** The store as it was when the list was read (see storeSignature). */
+  private signature = '';
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -206,6 +213,7 @@ export class ContextTray implements vscode.Disposable {
 
   /** Reads the list from the store again (it changed on disk, or the folder changed). */
   load(): void {
+    this.signature = storeSignature(this.root);
     const before = new Set(this.items.map((i) => i.id));
     this.items = readItems(this.root).map((meta) => this.fromMeta(meta));
     for (const item of this.items) {
@@ -214,24 +222,33 @@ export class ContextTray implements vscode.Disposable {
     this.onDidChangeEmitter.fire();
   }
 
-  /** Follows the store: the browser and other windows add to it too. */
+  /**
+   * Follows the store: the browser and other windows add to it too. The store writes by renaming
+   * whole item folders (into place, to the trash and back), so the watcher takes every change
+   * under `items/`; a check every few seconds catches what a watcher misses (folders outside the
+   * workspace, excluded from watching, or events lost).
+   */
   private watch(): void {
     for (const d of this.watcher ?? []) d.dispose();
     this.watcher = undefined;
-    if (typeof vscode.workspace.createFileSystemWatcher !== 'function') return;
-    const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(this.root), `${STORE_FOLDER}/items/*/item.json`),
-    );
     const reload = () => {
       clearTimeout(this.reloadTimer);
       this.reloadTimer = setTimeout(() => this.load(), 150);
     };
-    this.watcher = [
+    const poll = setInterval(() => {
+      if (storeSignature(this.root) !== this.signature) reload();
+    }, POLL_MS);
+    this.watcher = [{ dispose: () => clearInterval(poll) }];
+    if (typeof vscode.workspace.createFileSystemWatcher !== 'function') return;
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(this.root), `${STORE_FOLDER}/items/**`),
+    );
+    this.watcher.push(
       watcher,
       watcher.onDidCreate(reload),
       watcher.onDidChange(reload),
       watcher.onDidDelete(reload),
-    ];
+    );
   }
 
   /**
@@ -353,33 +370,13 @@ export class ContextTray implements vscode.Disposable {
    * them is. Returns the group, or undefined for fewer than two items.
    */
   group(ids: readonly string[]): string | undefined {
-    const members = this.items
-      .filter((i) => ids.includes(i.id))
-      .sort((a, b) => a.time - b.time || (a.id < b.id ? -1 : 1));
-    if (members.length < 2) return undefined;
-    const group = randomUUID();
-    const newest = Math.max(...members.map((m) => m.time));
-    members.forEach((member, index) =>
-      updateItem(this.root, member.id, (meta) => ({
-        ...meta,
-        group,
-        groupIndex: index,
-        time: newest,
-      })),
-    );
+    const group = groupItems(this.root, ids);
     this.load();
     return group;
   }
 
   ungroup(group: string): void {
-    for (const item of this.items) {
-      if (item.group !== group) continue;
-      updateItem(this.root, item.id, (meta) => ({
-        ...meta,
-        group: undefined,
-        groupIndex: undefined,
-      }));
-    }
+    ungroupItems(this.root, group);
     this.load();
   }
 

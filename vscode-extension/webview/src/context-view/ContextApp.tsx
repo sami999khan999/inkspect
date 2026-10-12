@@ -3,7 +3,7 @@ import { Button } from '@inkspect/shared/ui/Button';
 import { IconButton } from '@inkspect/shared/ui/IconButton';
 import { SavedList } from '@inkspect/shared/ui/SavedList';
 import { Select } from '@inkspect/shared/ui/Select';
-import { targetIcon } from '@inkspect/shared/sendModal';
+import { targetDetail, targetIcon } from '@inkspect/shared/sendModal';
 import {
   type AgentTarget,
   type ContextViewToHost,
@@ -157,7 +157,7 @@ function AgentPicker({ targets, value }: { targets: AgentTarget[]; value?: strin
         options={targets.map((t) => ({
           value: t.id,
           label: t.label,
-          detail: t.detail,
+          detail: targetDetail(t),
           icon: targetIcon(t),
           group: t.kind === 'chat' ? 'Other' : 'Running agents',
         }))}

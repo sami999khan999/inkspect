@@ -15,6 +15,7 @@ import { ITEM_ID } from '@inkspect/shared/hub';
 import {
   emptyTrash,
   ensureStore,
+  groupItems,
   itemFile,
   newItemId,
   readItem,
@@ -22,6 +23,7 @@ import {
   readItemText,
   removeItems,
   restoreItems,
+  ungroupItems,
   updateItem,
   writeItem,
 } from '../../src/hub/store';
@@ -143,5 +145,25 @@ describe('project store', () => {
     removeItems(root, [a.id]);
     emptyTrash(root);
     expect(restoreItems(root, [a.id])).toEqual([a.id]);
+  });
+
+  it('groups items where the newest one is, in their order, and ungroups them', () => {
+    const root = project();
+    const note = { kind: 'text' as const, source: 'browser' as const, text: 'x' };
+    const a = writeItem(root, { ...note, title: 'A', time: 1_000 });
+    const b = writeItem(root, { ...note, title: 'B', time: 3_000 });
+    const c = writeItem(root, { ...note, title: 'C', time: 2_000 });
+    expect(groupItems(root, [a.id])).toBeUndefined();
+    const group = groupItems(root, [b.id, a.id, 'missing'])!;
+    expect(group).toMatch(/^[\w.-]{1,64}$/);
+    expect([readItem(root, a.id), readItem(root, b.id)]).toMatchObject([
+      { group, groupIndex: 0, time: 3_000 },
+      { group, groupIndex: 1, time: 3_000 },
+    ]);
+    expect(readItem(root, c.id)?.group).toBeUndefined();
+    ungroupItems(root, group);
+    expect(readItems(root).every((i) => i.group === undefined && i.groupIndex === undefined)).toBe(
+      true,
+    );
   });
 });

@@ -34,6 +34,13 @@ const sizeOf = (el: HTMLElement | null) => ({
   height: el?.offsetHeight ?? 0,
 });
 
+/** The window's room for the toolbar: its layer, which (unlike `innerWidth`) leaves out the
+    page's scrollbars. */
+const roomOf = (el: HTMLElement | null) => ({
+  width: el?.parentElement?.clientWidth || innerWidth,
+  height: el?.parentElement?.clientHeight || innerHeight,
+});
+
 /** On whole device pixels: text placed between them is resampled, and looks blurry. */
 const snap = (value: number) => Math.round(value * devicePixelRatio) / devicePixelRatio;
 
@@ -64,8 +71,9 @@ export function useFloating(open: boolean, measure: RefObject<HTMLElement | null
   const clamp = useCallback(
     (p: Point): Point => {
       const { width, height } = sizeOf(measure.current);
-      const maxX = Math.max(MARGIN, innerWidth - width - MARGIN);
-      const maxY = Math.max(MARGIN, innerHeight - height - MARGIN);
+      const room = roomOf(ref.current);
+      const maxX = Math.max(MARGIN, room.width - width - MARGIN);
+      const maxY = Math.max(MARGIN, room.height - height - MARGIN);
       return {
         x: Math.min(maxX, Math.max(MARGIN, p.x)),
         y: Math.min(maxY, Math.max(MARGIN, p.y)),
@@ -144,7 +152,7 @@ export function useFloating(open: boolean, measure: RefObject<HTMLElement | null
       const start =
         p && placed.current
           ? { x: p.x!, y: p.y! }
-          : { x: (innerWidth - sizeOf(measure.current).width) / 2, y: START_TOP };
+          : { x: (roomOf(ref.current).width - sizeOf(measure.current).width) / 2, y: START_TOP };
       pos.current = clamp(start);
       target.current = { ...pos.current };
       velocity.current = { x: 0, y: 0 };
@@ -171,11 +179,16 @@ export function useFloating(open: boolean, measure: RefObject<HTMLElement | null
     const keepInside = () => {
       if (docked) return settle();
       if (grab.current) return;
-      const centered = { x: (innerWidth - sizeOf(measure.current).width) / 2, y: START_TOP };
+      const centered = {
+        x: (roomOf(ref.current).width - sizeOf(measure.current).width) / 2,
+        y: START_TOP,
+      };
       moveTo(clamp(placed.current ? target.current : centered));
     };
     const observer = new ResizeObserver(keepInside);
     if (measure.current) observer.observe(measure.current);
+    // The layer narrows when the page gets a scrollbar, which doesn't resize the window.
+    if (ref.current?.parentElement) observer.observe(ref.current.parentElement);
     addEventListener('resize', keepInside);
     return () => {
       observer.disconnect();
