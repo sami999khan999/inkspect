@@ -1,5 +1,6 @@
 import '@vscode/codicons/dist/codicon.css';
 import '@inkspect/shared/ui/ui.css';
+import { installGlassScroll } from '@inkspect/shared/glassScroll';
 import './styles.css';
 import './tools/tools.css';
 import { StrictMode } from 'react';
@@ -9,6 +10,7 @@ import { App } from './App';
 const container = document.getElementById('root');
 if (!container) throw new Error('Missing #root element');
 
+installGlassScroll(document);
 createRoot(container).render(
   <StrictMode>
     <App />

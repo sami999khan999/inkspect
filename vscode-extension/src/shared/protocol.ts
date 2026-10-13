@@ -475,13 +475,17 @@ export type WebviewToHost =
   | { type: 'annotations'; tabId: string; shapes: Shape[] }
   /** The scrolling section at a point (document CSS pixels), to anchor a new drawing to. */
   | { type: 'sectionAt'; tabId: string; requestId: string; x: number; y: number }
-  /** Screenshot for compositing drawings; `rect` in document CSS pixels for `region`. */
+  /**
+   * Screenshot for compositing drawings; `rect` in document CSS pixels for `region`, padded unless
+   * `exact` (an area the user dragged).
+   */
   | {
       type: 'annotationCapture';
       tabId: string;
       requestId: string;
       area: 'region' | 'viewport' | 'fullPage';
       rect?: Rect;
+      exact?: boolean;
     }
   | {
       type: 'extension';
@@ -733,6 +737,7 @@ const MESSAGE_FIELDS: Record<WebviewToHost['type'], Record<string, Check>> = {
     requestId: isString,
     area: oneOf('region', 'viewport', 'fullPage'),
     rect: optional(shape({ x: isNumber, y: isNumber, width: isNumber, height: isNumber })),
+    exact: optional(isBoolean),
   },
   saveImage: {
     tabId: isString,

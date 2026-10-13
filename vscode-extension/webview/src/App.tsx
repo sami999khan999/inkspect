@@ -82,7 +82,8 @@ const FAILURE =
 /** A tool that takes over the pointer on the page. */
 type Tool =
   | { kind: 'inspect'; purpose: InspectPurpose }
-  | { kind: 'region' }
+  /** With `drawing`: the drawing toolbar's dragged area, captured with the drawings. */
+  | { kind: 'region'; drawing?: boolean }
   | { kind: 'draw' }
   | { kind: 'measure' }
   | { kind: 'eyedropper' }
@@ -118,6 +119,7 @@ const CAPTURE_LABELS: Record<CaptureMode, string> = {
   clean: 'Screenshot (without drawings)',
   viewport: 'Screenshot with drawings',
   fullPage: 'Full-page screenshot with drawings',
+  region: 'Area screenshot with drawings',
 };
 
 interface EditorState {
@@ -335,20 +337,27 @@ export function App() {
 
   /** Asks the host for a clean screenshot of part of the page (to draw the shapes onto). */
   const requestCapture = useCallback(
-    (tabId: string, area: 'region' | 'viewport' | 'fullPage', rect?: Rect) =>
+    (tabId: string, area: 'region' | 'viewport' | 'fullPage', rect?: Rect, exact?: boolean) =>
       new Promise<CapturedImage>((resolve) => {
         const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         pendingCaptures.current.set(requestId, resolve);
-        postToHost({ type: 'annotationCapture', tabId, requestId, area, rect });
+        postToHost({ type: 'annotationCapture', tabId, requestId, area, rect, exact });
       }),
     [],
   );
 
-  /** Screenshots with the drawings composited on top (see CaptureMode). */
+  /**
+   * Screenshots with the drawings composited on top (see CaptureMode). `region` without `dragged`
+   * lets the user drag the area first (`dragged`: document CSS pixels).
+   */
   const captureDrawing = useCallback(
-    async (mode: CaptureMode, toAgent = false) => {
+    async (mode: CaptureMode, toAgent = false, dragged?: Rect) => {
       const { tabId, shapes: drawn } = drawingRef.current;
       if (!tabId) return;
+      if (mode === 'region' && !dragged) {
+        setTool({ kind: 'region', drawing: true });
+        return;
+      }
       // Where the drawings are now (those on scrolled sections move with them).
       const anchors =
         sectionsRef.current.tabId === tabId ? sectionsRef.current.anchors : NO_ANCHORS;
@@ -364,8 +373,8 @@ export function App() {
       const images: string[] = [];
       for (const group of groups) {
         const area = mode === 'viewport' ? 'viewport' : mode === 'fullPage' ? 'fullPage' : 'region';
-        const rect = area === 'region' ? union(group.map(shapeBounds)) : undefined;
-        const image = await requestCapture(tabId, area, rect);
+        const rect = dragged ?? (area === 'region' ? union(group.map(shapeBounds)) : undefined);
+        const image = await requestCapture(tabId, area, rect, !!dragged);
         if (image.error || !image.data || !image.rect) {
           showToast(`Screenshot failed: ${image.error ?? 'no image'}`);
           break;
@@ -1057,7 +1066,21 @@ export function App() {
                           onExit={() => changeTool(null)}
                         />
                       )}
-                      {tool?.kind === 'region' && (
+                      {tool?.kind === 'region' && tool.drawing && (
+                        <RegionSelect
+                          mapper={mapper}
+                          onCancel={() => changeTool({ kind: 'draw' })}
+                          onCapture={(rect) => {
+                            changeTool({ kind: 'draw' });
+                            void captureDrawing('region', false, {
+                              ...rect,
+                              x: rect.x + mapper.scroll.x,
+                              y: rect.y + mapper.scroll.y,
+                            });
+                          }}
+                        />
+                      )}
+                      {tool?.kind === 'region' && !tool.drawing && (
                         <RegionSelect
                           mapper={mapper}
                           onCancel={() => changeTool(null)}

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Glass overlay scrollbars:** scrolling parts of the UI (the send dialog, panels, menus, lists) no longer reserve space for a scrollbar. While you scroll, a thin glass thumb shows over the edge, like the glass-scroll package, and fades out about a second after the scrolling stops. Moving the pointer to the edge shows it too, to drag.
+- **Drag an area to screenshot while drawing:** the drawing toolbar's Screenshot menu has **Drag to select an area...** (Alt+R): drag over the page and that exact area (no padding) is captured with the drawings on it, then you are back to drawing.
+- **A more compact drawing toolbar:** narrower sliders and tighter groups, so the tools take less of the row.
+- **Roomier send dialog:** more space around and between its parts, a larger preview that shows a single capture whole, a two-line prompt box and taller agent rows.
 - **New agentmux thread only starts it:** in the send dialog, the new thread is started and listed, chosen; nothing is sent to it until you send.
 - **Send to… is grouped by agent:** each agentmux thread is a heading (its name and thread) with Send and Send and open in agentmux beneath it, and the menu stays inside a narrow panel that scrolls.
 - **Group only joins cards:** selecting a single group card no longer offers Group.
