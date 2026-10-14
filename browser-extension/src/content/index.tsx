@@ -1,6 +1,7 @@
 // Injected into a tab when the toolbar is first opened there. Renders the toolbar into a closed
 // shadow root, so the page's CSS can't reach it and it can't reach the page.
 import codiconCss from '@vscode/codicons/dist/codicon.css';
+import { installGlassScroll } from '@inkspect/shared/glassScroll';
 import sharedCss from '@inkspect/shared/ui/ui.css';
 import { createRoot } from 'react-dom/client';
 import { trackPressesIn } from '@inkspect/shared/ui/popover';
@@ -45,6 +46,7 @@ function mount(): (signal: number) => void {
   ].join('\n');
   const container = document.createElement('div');
   shadow.append(style, container);
+  installGlassScroll(shadow);
   document.documentElement.appendChild(host);
   void loadIconFont();
   const root = createRoot(container);

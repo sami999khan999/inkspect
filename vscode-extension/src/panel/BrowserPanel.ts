@@ -665,7 +665,13 @@ export class BrowserPanel implements vscode.Disposable {
       }
       case 'annotationCapture': {
         const tab = this.tab(message.tabId);
-        await this.captureForAnnotations(tab, message.requestId, message.area, message.rect);
+        await this.captureForAnnotations(
+          tab,
+          message.requestId,
+          message.area,
+          message.rect,
+          message.exact,
+        );
         return;
       }
       case 'saveImage': {
@@ -1582,13 +1588,14 @@ export class BrowserPanel implements vscode.Disposable {
 
   /**
    * A clean screenshot of part of the page for the webview to draw annotations on. Regions get
-   * `screenshots.annotationPadding` around them, kept inside the page.
+   * `screenshots.annotationPadding` around them (none when `exact`), kept inside the page.
    */
   private async captureForAnnotations(
     tab: Tab | undefined,
     requestId: string,
     area: 'region' | 'viewport' | 'fullPage',
     rect?: Rect,
+    exact = false,
   ): Promise<void> {
     const session = tab?.session;
     if (!session) {
@@ -1609,7 +1616,7 @@ export class BrowserPanel implements vscode.Disposable {
         };
       } else {
         if (!rect) throw new Error('No area to capture');
-        const padding = getConfig().annotationPadding;
+        const padding = exact ? 0 : getConfig().annotationPadding;
         const x = Math.max(0, rect.x - padding);
         const y = Math.max(0, rect.y - padding);
         const right = Math.min(

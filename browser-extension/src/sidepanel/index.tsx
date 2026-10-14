@@ -13,6 +13,7 @@ import {
 import { projectDetail, savedViewOf } from '@inkspect/shared/saved';
 import { sentText, targetDetail } from '@inkspect/shared/sendModal';
 import themeCss from '@inkspect/shared/ui/theme.css';
+import { installGlassScroll } from '@inkspect/shared/glassScroll';
 import uiCss from '@inkspect/shared/ui/ui.css';
 import { IconButton } from '@inkspect/shared/ui/IconButton';
 import { SavedList } from '@inkspect/shared/ui/SavedList';
@@ -360,4 +361,5 @@ style.textContent = [codiconCss, themeCss, uiCss, panelCss].join('\n');
 document.head.append(style);
 document.documentElement.classList.add('ink-theme');
 
+installGlassScroll(document);
 createRoot(document.getElementById('root')!).render(<SidePanel />);

@@ -238,6 +238,7 @@ export const CAPTURE_ACTIONS: Record<CaptureMode, string> = {
   clean: 'draw.captureClean',
   viewport: 'draw.captureViewport',
   fullPage: 'draw.captureFullPage',
+  region: 'draw.captureRegion',
 };
 
 /**
@@ -261,7 +262,9 @@ export function captureMenu(
     { separator: true },
     item('viewport', 'Visible area with drawings', 'screen-normal'),
     item('fullPage', 'Full page with drawings', 'file-media'),
+    item('region', 'Drag to select an area...', 'screen-full'),
   ];
 }
 
-export type CaptureMode = 'area' | 'groups' | 'clean' | 'viewport' | 'fullPage';
+/** `region`: the user drags the area to capture, drawings included. */
+export type CaptureMode = 'area' | 'groups' | 'clean' | 'viewport' | 'fullPage' | 'region';

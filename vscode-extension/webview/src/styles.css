@@ -1899,10 +1899,6 @@ body.vscode-high-contrast .list-row:hover {
   pointer-events: none;
 }
 
-.draw-toolbar .slider-track {
-  width: 64px;
-}
-
 /* Shortcut overlays: cheat sheet and quick actions ---------------------------------------------- */
 
 .shortcut-overlay {

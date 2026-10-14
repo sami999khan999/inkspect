@@ -25,6 +25,7 @@ export function TabStrip({ tabs, activeTabId, canReopenClosedTab, openMenu }: Ta
   return (
     <div
       className="tab-strip"
+      data-glass-scroll="off"
       role="tablist"
       aria-label="Tabs"
       onDragLeave={() => setDropIndex(null)}

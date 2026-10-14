@@ -410,6 +410,12 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     scope: 'draw',
     keys: ['alt+f'],
   },
+  {
+    id: 'draw.captureRegion',
+    label: 'Screenshot an area you drag, with drawings',
+    scope: 'draw',
+    keys: ['alt+r'],
+  },
   { id: 'draw.help', label: 'Show these shortcuts', scope: 'draw', keys: ['shift+/'] },
   { id: 'draw.exit', label: 'Stop drawing', scope: 'draw', keys: ['escape'] },
 
@@ -694,6 +700,7 @@ export const TOOLBAR_ACTION_IDS: ReadonlySet<string> = new Set([
   'draw.captureClean',
   'draw.captureViewport',
   'draw.captureFullPage',
+  'draw.captureRegion',
   'draw.exit',
   'shot.viewport',
   'shot.fullPage',

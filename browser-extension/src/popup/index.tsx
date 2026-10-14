@@ -2,6 +2,7 @@
 // toolbar on this page, the main keys, and the way to the full page (options.html).
 import codiconCss from '@vscode/codicons/dist/codicon.css';
 import themeCss from '@inkspect/shared/ui/theme.css';
+import { installGlassScroll } from '@inkspect/shared/glassScroll';
 import uiCss from '@inkspect/shared/ui/ui.css';
 import { effectiveShortcuts, type ShortcutMap } from '@inkspect/shared/shortcuts';
 import { Button } from '@inkspect/shared/ui/Button';
@@ -195,4 +196,5 @@ style.textContent = [codiconCss, themeCss, uiCss, linkGraphCss, pairCardCss, pop
 document.head.append(style);
 document.documentElement.classList.add('ink-theme');
 
+installGlassScroll(document);
 createRoot(document.getElementById('root')!).render(<Popup />);

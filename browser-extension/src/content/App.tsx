@@ -65,8 +65,11 @@ import { flushDrawings, loadDrawings, pageKeyOf, saveDrawings } from './pageDraw
 import { useFloating } from './useFloating';
 import { useSendFlow } from './useSendFlow';
 
+/** `region` with `drawing`: the drawing toolbar's dragged area, captured with the drawings. */
 type Tool =
-  { kind: 'inspect'; purpose: 'copy' | 'screenshot' } | { kind: 'draw' } | { kind: 'region' };
+  | { kind: 'inspect'; purpose: 'copy' | 'screenshot' }
+  | { kind: 'draw' }
+  | { kind: 'region'; drawing?: boolean };
 type Panel = 'emulation' | 'console' | 'link' | 'shortcuts';
 
 /** The actions the toolbar handles (see ../shortcuts.ts). */
@@ -105,6 +108,7 @@ const CAPTURE_LABELS: Record<CaptureMode, string> = {
   clean: 'Drawing area',
   viewport: 'Annotated viewport',
   fullPage: 'Annotated full page',
+  region: 'Annotated area',
 };
 
 interface AppProps {
@@ -605,8 +609,10 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     });
   }, []);
 
+  /** `region` without `area` lets the user drag one first (`area`: document CSS pixels). */
   const captureDrawing = useCallback(
-    async (mode: CaptureMode) => {
+    async (mode: CaptureMode, area?: Bounds) => {
+      if (mode === 'region' && !area) return setTool({ kind: 'region', drawing: true });
       // Where the drawings are on the page now (those on scrolled sections move with them).
       const anchors = measureAnchors(shapesRef.current);
       const all = placeShapes(shapesRef.current, anchors);
@@ -624,7 +630,9 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
             ? viewportArea()
             : mode === 'fullPage'
               ? fullPageArea()
-              : drawingArea(group, padding);
+              : mode === 'region'
+                ? area
+                : drawingArea(group, padding);
         if (!wanted) continue;
         try {
           const captured = await captureArea(wanted, hideUi);
@@ -814,6 +822,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       'draw.captureClean': () => void captureDrawing('clean'),
       'draw.captureViewport': () => void captureDrawing('viewport'),
       'draw.captureFullPage': () => void captureDrawing('fullPage'),
+      'draw.captureRegion': () => void captureDrawing('region'),
       'draw.captureMenu': () => openMenuAt('.draw-capture', drawingItems(), 'draw'),
       'draw.exit': () => setTool(null),
       'shot.viewport': () => void screenshot('viewport'),
@@ -935,7 +944,16 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           onAction={(action) => void onSelectionAction(action)}
         />
       )}
-      {tool?.kind === 'region' && (
+      {tool?.kind === 'region' && tool.drawing && (
+        <RegionSelect
+          onCancel={() => setTool({ kind: 'draw' })}
+          onDone={(rect) => {
+            setTool({ kind: 'draw' });
+            void captureDrawing('region', { ...rect, x: rect.x + scrollX, y: rect.y + scrollY });
+          }}
+        />
+      )}
+      {tool?.kind === 'region' && !tool.drawing && (
         <RegionSelect
           onCancel={() => setTool(null)}
           onDone={(rect) => {

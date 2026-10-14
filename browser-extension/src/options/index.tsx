@@ -3,6 +3,7 @@
 // and pairing, Shortcuts the editor, About the details.
 import codiconCss from '@vscode/codicons/dist/codicon.css';
 import themeCss from '@inkspect/shared/ui/theme.css';
+import { installGlassScroll } from '@inkspect/shared/glassScroll';
 import uiCss from '@inkspect/shared/ui/ui.css';
 import {
   effectiveShortcuts,
@@ -407,4 +408,5 @@ style.textContent = [codiconCss, themeCss, uiCss, linkGraphCss, pairCardCss, opt
 document.head.append(style);
 document.documentElement.classList.add('ink-theme');
 
+installGlassScroll(document);
 createRoot(document.getElementById('root')!).render(<Options />);
