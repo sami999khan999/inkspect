@@ -25,6 +25,11 @@ interface InspectorProps {
    * Without it the default keys apply.
    */
   actionOf?: (event: KeyboardEvent) => string | undefined;
+  /**
+   * Whether a key aimed at our own UI is still the picker's: true when the focus there is only a
+   * toolbar button a click left it on (the picker's own button), not a field, panel or menu.
+   */
+  pickerKeysInUi?: () => boolean;
   /** The current keys, for the hint (remapped keys show). */
   map: ShortcutMap;
 }
@@ -152,15 +157,16 @@ export function Inspector({
   onCommit,
   onExit,
   actionOf,
+  pickerKeysInUi,
   map,
 }: InspectorProps) {
   const [target, setTarget] = useState<Element | null>(null);
   const [, setTick] = useState(0);
   const targetRef = useRef<Element | null>(null);
-  const handlers = useRef({ onPick, onCommit, onExit, actionOf });
+  const handlers = useRef({ onPick, onCommit, onExit, actionOf, pickerKeysInUi });
 
   useEffect(() => {
-    handlers.current = { onPick, onCommit, onExit, actionOf };
+    handlers.current = { onPick, onCommit, onExit, actionOf, pickerKeysInUi };
   });
 
   useEffect(() => {
@@ -193,9 +199,10 @@ export function Inspector({
       const action = handlers.current.actionOf
         ? handlers.current.actionOf(event)
         : DEFAULT_KEYS[event.key];
-      // Keys typed in the toolbar are its own, except the exit key: focus stays on the picker's
-      // button after clicking it, and that key must still leave the picker.
-      if (ours(event) && action !== 'inspect.exit') return;
+      // Keys typed in the toolbar are its own, except the exit key and, while the focus is only
+      // on a toolbar button (clicking the picker's button leaves it there, and picks on the page
+      // don't move it), all of the picker's keys: Enter must capture, not press that button.
+      if (ours(event) && action !== 'inspect.exit' && !handlers.current.pickerKeysInUi?.()) return;
       const current = targetRef.current;
       if (action === 'inspect.exit') handlers.current.onExit();
       else if (action === 'inspect.parent' && current)

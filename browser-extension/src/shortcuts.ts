@@ -81,9 +81,11 @@ export function watchShortcuts(
   listener: (map: ShortcutMap, stored: StoredShortcuts) => void,
 ): () => void {
   const load = () =>
-    void readShortcuts().then((stored) =>
-      listener(effectiveShortcuts(stored.overrides, isMac), stored),
-    );
+    void readShortcuts()
+      .then((stored) => listener(effectiveShortcuts(stored.overrides, isMac), stored))
+      .catch(() => {
+        // Storage gone (the extension was reloaded): the keys stay as they are.
+      });
   const onChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
     if (area === 'sync' && changes[SHORTCUTS_KEY]) load();
   };

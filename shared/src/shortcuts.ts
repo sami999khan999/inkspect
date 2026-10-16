@@ -327,6 +327,8 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
   { id: 'mode.tweak', label: 'CSS tweak', scope: 'global', keys: ['shift+alt+v'] },
   { id: 'mode.record', label: 'Record the page', scope: 'global', keys: ['ctrl+alt+r'] },
   { id: 'mode.a11y', label: 'Accessibility check', scope: 'global', keys: ['shift+alt+h'] },
+  // Hides the toolbars for room; the mode stays on and its keys keep working.
+  { id: 'view.toolbar', label: 'Hide or show the toolbar', scope: 'global', keys: ['shift+alt+z'] },
 
   // Element picker.
   { id: 'inspect.parent', label: 'Select the parent element', scope: 'inspect', keys: ['up'] },
@@ -664,6 +666,7 @@ export const TOOLBAR_ACTION_IDS: ReadonlySet<string> = new Set([
   'mode.devtools',
   'page.bookmark',
   'open.shortcuts',
+  'view.toolbar',
   'inspect.parent',
   'inspect.child',
   'inspect.copy',

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Hide the toolbar for room (Alt+Shift+Z):** the bar and the drawing tools go away while the tool stays on: you keep drawing or picking, and their keys keep working. The same key, or the toolbar shortcut (Alt+Shift+K), brings it back. It can be remapped in Keyboard shortcuts.
+- **Fixed: picking and screenshots on plain-http pages.** Clicking an element, Capture (Enter) after a multi-select and screenshots did nothing on `http://` sites, with `crypto.randomUUID is not a function` in the console: browsers only offer it on secure pages. The toolbar now makes its ids another way there.
+- **Fixed: Enter didn't capture a multi-selection.** After you clicked the picker's button, the focus stayed on it, so Enter pressed that button (turning the picker off) instead of capturing. While the focus is only on a toolbar button, the picker's keys now win.
+- **Fixed: element details and the console on old sites.** Pages with old libraries such as Prototype.js (which add `toJSON` to arrays and replace `Array.from`) garbled what the page-side helper sent back, so picking and Capture failed. The helper now ignores those changes, and its `fetch` and XHR hooks never break the page's own requests over a URL they can't read.
 - **Glass overlay scrollbars:** scrolling parts of the UI (the send dialog, panels, menus, lists) no longer reserve space for a scrollbar. While you scroll, a thin glass thumb shows over the edge, like the glass-scroll package, and fades out about a second after the scrolling stops. Moving the pointer to the edge shows it too, to drag.
 - **Drag an area to screenshot while drawing:** the drawing toolbar's Screenshot menu has **Drag to select an area...** (Alt+R): drag over the page and that exact area is captured with the drawings on it, then you are back to drawing.
 - **The drawing tools fit one row:** on a laptop-sized window the tools, colors, sliders, Screenshot and Stop drawing share one row instead of leaving Screenshot alone on a third.

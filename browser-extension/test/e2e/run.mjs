@@ -113,9 +113,21 @@ document.querySelector('button').addEventListener('click', () => { document.titl
 window.logError = () => { console.log('%cStyled%c log', 'color:red;border-radius:2px', ''); console.error('boom from fixture'); fetch('/missing.json'); };
 </script></body></html>`;
 
+// An old site on plain http: no secure-context APIs (crypto.randomUUID, the async clipboard), and
+// a Prototype.js-style library that adds toJSON to Array.prototype and replaces Array.from.
+const oldPage = page.replace(
+  '<script>',
+  `<script>
+Array.prototype.toJSON = function () { return '[' + this.map(String).join(', ') + ']'; };
+Array.from = function (list) { return Array.prototype.slice.call(list); };
+</script><script>`,
+);
+
 const site = createServer((request, response) => {
   if (request.url === '/') response.writeHead(200, { 'content-type': 'text/html' }).end(page);
-  else response.writeHead(404).end('not found');
+  else if (request.url === '/old') {
+    response.writeHead(200, { 'content-type': 'text/html' }).end(oldPage);
+  } else response.writeHead(404).end('not found');
 });
 await new Promise((resolve) => site.listen(0, '127.0.0.1', resolve));
 const url = `http://127.0.0.1:${site.address().port}/`;
@@ -265,7 +277,8 @@ const browser = await puppeteer.launch({
   pipe: true,
   enableExtensions: true,
   defaultViewport: { width: 1200, height: 800 },
-  args: ['--no-first-run'],
+  // old.test is a plain-http site that isn't localhost, so not a secure context.
+  args: ['--no-first-run', '--host-resolver-rules=MAP old.test 127.0.0.1'],
 });
 const extensionId = await browser.installExtension(extension);
 const worker = await (
@@ -602,6 +615,31 @@ await test('viewport and full-page screenshots are copied as images', async () =
   }
 });
 
+/** The box (viewport pixels) of what is drawn on the drawing layer, or undefined. */
+const inkBox = () =>
+  inToolbar((shadow) => {
+    const canvas = shadow.querySelector('.drawing-layer canvas');
+    if (!canvas || !canvas.width) return undefined;
+    const { data, width, height } = canvas
+      .getContext('2d')
+      .getImageData(0, 0, canvas.width, canvas.height);
+    let [left, top, right, bottom] = [width, height, -1, -1];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (data[(y * width + x) * 4 + 3] > 0) {
+          left = Math.min(left, x);
+          right = Math.max(right, x);
+          top = Math.min(top, y);
+          bottom = Math.max(bottom, y);
+        }
+      }
+    }
+    const dpr = devicePixelRatio;
+    return right < 0
+      ? undefined
+      : { x: left / dpr, y: top / dpr, width: (right - left) / dpr, height: (bottom - top) / dpr };
+  });
+
 await test('drawing, then "screenshot drawing area" captures just the drawing', async () => {
   assert(await clickButton('Draw on the page'), 'no draw button');
   await until('drawing layer', () =>
@@ -636,34 +674,34 @@ await test('drawing, then "screenshot drawing area" captures just the drawing', 
     `area ${image.width}x${image.height}`,
   );
   await closeDialog('Drawing');
+  // Alt+Shift+Z hides the bars for room; drawing and its keys keep working, and it comes back.
+  const hideBar = async () => {
+    await tab.keyboard.down('Alt');
+    await tab.keyboard.down('Shift');
+    await tab.keyboard.press('KeyZ');
+    await tab.keyboard.up('Shift');
+    await tab.keyboard.up('Alt');
+  };
+  const barHidden = () =>
+    inToolbar((shadow) => {
+      const float = shadow.querySelector('.float');
+      return !!float && getComputedStyle(float).visibility === 'hidden';
+    });
+  await hideBar();
+  await until('the bar hidden', barHidden);
+  const before = await inkBox();
+  await tab.keyboard.press('KeyR');
+  await tab.mouse.move(500, 200);
+  await tab.mouse.down();
+  await tab.mouse.move(600, 260, { steps: 5 });
+  await tab.mouse.up();
+  const after = await inkBox();
+  assert(after && before && after.x + after.width > before.x + before.width, 'no shape drawn');
+  await hideBar();
+  await until('the bar shown again', async () => !(await barHidden()));
   // Drawing is still on; Esc leaves it.
   await tab.keyboard.press('Escape');
 });
-
-/** The box (viewport pixels) of what is drawn on the drawing layer, or undefined. */
-const inkBox = () =>
-  inToolbar((shadow) => {
-    const canvas = shadow.querySelector('.drawing-layer canvas');
-    if (!canvas || !canvas.width) return undefined;
-    const { data, width, height } = canvas
-      .getContext('2d')
-      .getImageData(0, 0, canvas.width, canvas.height);
-    let [left, top, right, bottom] = [width, height, -1, -1];
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        if (data[(y * width + x) * 4 + 3] > 0) {
-          left = Math.min(left, x);
-          right = Math.max(right, x);
-          top = Math.min(top, y);
-          bottom = Math.max(bottom, y);
-        }
-      }
-    }
-    const dpr = devicePixelRatio;
-    return right < 0
-      ? undefined
-      : { x: left / dpr, y: top / dpr, width: (right - left) / dpr, height: (bottom - top) / dpr };
-  });
 
 await test('drawings belong to their page, and scroll with the section they are on', async () => {
   // The previous test's drawing is on this page.
@@ -753,6 +791,116 @@ await test('console errors and failed requests are captured and copied for AI', 
   assert(failed.includes('404'), failed);
   await closeDialog('Failed requests');
   await clickButton('Close');
+});
+
+await test('on an old plain-http site, picking, multi-select, screenshots and the console work', async () => {
+  const oldUrl = `http://old.test:${site.address().port}/old`;
+  const old = await browser.newPage();
+  try {
+    await old.goto(oldUrl);
+    await old.bringToFront();
+    assert(!(await old.evaluate(() => isSecureContext)), 'old.test is a secure context');
+    const oldId = await worker.evaluate(
+      async (u) => (await chrome.tabs.query({ url: u }))[0]?.id,
+      oldUrl,
+    );
+    const errors = [];
+    old.on('pageerror', (error) => errors.push(String(error)));
+    const inOld = (fn, ...args) =>
+      old.evaluate(
+        (source, args) => {
+          const shadow = document.querySelector('inkspect-toolbar')?.shadowRoot;
+          return shadow
+            ? new Function('shadow', 'args', `return (${source})(shadow, ...args)`)(shadow, args)
+            : undefined;
+        },
+        fn.toString(),
+        args,
+      );
+    const click = (label) =>
+      inOld((shadow, label) => {
+        const button = [...shadow.querySelectorAll('button')].find((b) =>
+          (b.getAttribute('aria-label') ?? b.textContent ?? '').startsWith(label),
+        );
+        button?.click();
+        return !!button;
+      }, label);
+    const offer = async (text) => {
+      const shown = await until(`the send dialog for "${text}"`, async () => {
+        const t = await inOld((shadow) => shadow.querySelector('.ink-modal')?.textContent);
+        return t?.includes(text) ? t : undefined;
+      });
+      await old.keyboard.press('Escape');
+      await until(
+        'the send dialog closed',
+        async () => !(await inOld((shadow) => !!shadow.querySelector('.ink-modal'))),
+      );
+      return shown;
+    };
+    await worker.evaluate((id) => globalThis.__inkspectTest.toggleToolbar(id), oldId);
+    await until('toolbar', () => inOld((shadow) => shadow.querySelectorAll('.bar button').length));
+
+    // A real click on the picker's button, which leaves the focus on it.
+    const pickerButton = await inOld((shadow) => {
+      const b = [...shadow.querySelectorAll('button')].find((b) =>
+        (b.getAttribute('aria-label') ?? '').startsWith('Select an element'),
+      );
+      const r = b?.getBoundingClientRect();
+      return r && { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    assert(pickerButton, 'no inspect button');
+    await old.mouse.click(pickerButton.x, pickerButton.y);
+    await until('the picker', () => inOld((shadow) => !!shadow.querySelector('.inspect-hint')));
+    const button = await (await old.$('button.primary')).boundingBox();
+    const heading = await (await old.$('#login h2')).boundingBox();
+    const row = await (await old.$('p.row')).boundingBox();
+    const center = (box) => [box.x + box.width / 2, box.y + box.height / 2];
+
+    // Shift+click picks several; Enter captures them all (not press the focused picker button).
+    for (const box of [button, heading, row]) {
+      await old.mouse.move(...center(box));
+      await old.keyboard.down('Shift');
+      await old.mouse.click(...center(box));
+      await old.keyboard.up('Shift');
+    }
+    await until('3 selected', () =>
+      inOld((shadow) => shadow.querySelector('.selection-bar-badge')?.textContent === '3'),
+    );
+    await old.keyboard.press('Enter');
+    await offer('3 elements');
+
+    // A click picks one element, with its details read from the page.
+    await old.mouse.move(...center(button));
+    await old.mouse.click(...center(button));
+    await offer('Element');
+    await old.keyboard.press('Escape');
+
+    // A screenshot (no image clipboard here, but it is still saved and offered).
+    assert(await click('Screenshot'), 'no screenshot button');
+    await until('screenshot menu', () =>
+      inOld((shadow) => shadow.querySelectorAll('.menu-item').length),
+    );
+    await inOld((shadow) =>
+      [...shadow.querySelectorAll('.menu-item')]
+        .find((b) => b.textContent.includes('Visible area'))
+        ?.click(),
+    );
+    await offer('creenshot');
+
+    // The console's entries come through the page's patched JSON as lists.
+    await old.evaluate(() => console.error('boom from the old site'));
+    assert(await click('Console and network'), 'no console button');
+    await until('console entry', () =>
+      inOld((shadow) =>
+        shadow.querySelector('.log')?.textContent.includes('boom from the old site'),
+      ),
+    );
+    await click('Close');
+    assert(!errors.length, errors.join('\n'));
+  } finally {
+    await old.close();
+    await tab.bringToFront();
+  }
 });
 
 await test('an open toolbar comes back when the page reloads', async () => {

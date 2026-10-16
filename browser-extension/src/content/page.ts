@@ -1,11 +1,12 @@
 // Helpers for the content script: talking to the MAIN-world helper, clipboard, settings.
+import { randomId } from '@inkspect/shared/id';
 import type { CopyFormat, DetailField } from '@inkspect/shared/elementInfo';
 import { ALL_FIELDS } from '@inkspect/shared/elementInfo';
 import { PAGE_REQUEST_EVENT, PAGE_RESPONSE_EVENT, type PageRequest } from '../messages';
 
 /** Sends a request to the page-world helper; undefined if it doesn't answer in time. */
 export function pageRequest<T>(request: PageRequest, timeoutMs = 2000): Promise<T | undefined> {
-  const id = crypto.randomUUID();
+  const id = randomId();
   return new Promise((resolve) => {
     const onResponse = (event: Event) => {
       let data: { id?: string; result?: T };

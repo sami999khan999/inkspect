@@ -29,6 +29,7 @@ import type {
   SavedOffer,
   WindowState,
 } from '@shared/protocol';
+import { randomId } from '@inkspect/shared/id';
 import { SendModal } from '@inkspect/shared/ui/SendModal';
 import { BookmarkBar } from './components/BookmarkBar';
 import { BookmarkEditor } from './components/BookmarkEditor';
@@ -155,6 +156,8 @@ export function App() {
   const [pageChanges, setPageChanges] = useState<Partial<Record<InternalPage, number>>>({});
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [customDevices, setCustomDevices] = useState<DevicePreset[]>([]);
+  /** The tab strip and toolbars hidden for room (view.toolbar); modes and their keys keep working. */
+  const [barsHidden, setBarsHidden] = useState(false);
   const [pageArea, setPageArea] = useState({ width: 0, height: 0 });
   const pageAreaRef = useRef(pageArea);
   useEffect(() => {
@@ -390,7 +393,7 @@ export function App() {
         );
       }
       // Several screenshots at once: one group in Agent Context, sent together.
-      const groupId = images.length > 1 ? crypto.randomUUID() : undefined;
+      const groupId = images.length > 1 ? randomId() : undefined;
       for (const [index, base64] of images.entries()) {
         const label =
           groups.length > 1 ? `Drawing ${index + 1} of ${images.length}` : CAPTURE_LABELS[mode];
@@ -400,7 +403,7 @@ export function App() {
           base64,
           label,
           toAgent,
-          group: groupId && { id: groupId, index, count: images.length },
+          group: groupId ? { id: groupId, index, count: images.length } : undefined,
         });
       }
     },
@@ -790,6 +793,12 @@ export function App() {
   };
   // Built when a key is pressed (not during render): the handlers read refs and post messages.
   const handlers = (): ShortcutHandlers => ({
+    'view.toolbar': () => {
+      setBarsHidden(!barsHidden);
+      const key = shortcutLabel('view.toolbar');
+      if (!barsHidden)
+        showToast(key ? `Toolbar hidden. ${key} shows it again.` : 'Toolbar hidden.');
+    },
     ...buildHandlers({
       tab: pageTab,
       customDevices,
@@ -873,7 +882,7 @@ export function App() {
     <div
       className={`browser${fullscreen ? ' fullscreen' : ''}${activeTab?.private ? ' private' : ''}`}
     >
-      {!fullscreen && (
+      {!fullscreen && !barsHidden && (
         <>
           <TabStrip
             tabs={windowState.tabs}

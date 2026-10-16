@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed: cursor, context menu and fullscreen on old sites.** Pages with libraries that add `toJSON` to built-in prototypes (Prototype.js) garbled what the page script reports to the browser; it now ignores them.
+- **Hide the toolbars for room (Alt+Shift+Z):** the tab strip, address bar, drawing tools, device toolbar and bookmarks bar go away while the mode stays on and its keys keep working. The same key brings them back. It can be remapped in the Shortcuts view.
 - **Glass overlay scrollbars:** scrolling parts of the UI (the send dialog, panels, menus, lists) no longer reserve space for a scrollbar. While you scroll, a thin glass thumb shows over the edge, like the glass-scroll package, and fades out about a second after the scrolling stops. Moving the pointer to the edge shows it too, to drag.
 - **Drag an area to screenshot while drawing:** the drawing toolbar's Screenshot menu has **Drag to select an area...** (Alt+R): drag over the page and that exact area (no padding) is captured with the drawings on it, then you are back to drawing.
 - **A more compact drawing toolbar:** narrower sliders and tighter groups, so the tools take less of the row.

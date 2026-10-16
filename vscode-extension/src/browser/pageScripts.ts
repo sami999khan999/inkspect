@@ -20,7 +20,23 @@ export const PAGE_SCRIPT = `(() => {
   const installed = Symbol.for('vscode-browser.page');
   if (typeof send !== 'function' || globalThis[installed]) return;
   globalThis[installed] = true;
-  const post = (message) => { try { send(JSON.stringify(message)); } catch {} };
+  // JSON as the browser made it: old libraries (Prototype.js) add toJSON to Array.prototype and
+  // friends, which would turn lists and strings into other strings.
+  const stringify = JSON.stringify;
+  const PROTOS = [Array.prototype, String.prototype, Number.prototype, Boolean.prototype];
+  const post = (message) => {
+    const saved = [];
+    try {
+      for (const proto of PROTOS) {
+        const own = Object.getOwnPropertyDescriptor(proto, 'toJSON');
+        if (own && own.configurable && delete proto.toJSON) saved.push([proto, own]);
+      }
+      send(stringify(message));
+    } catch {
+    } finally {
+      for (const [proto, own] of saved) Object.defineProperty(proto, 'toJSON', own);
+    }
+  };
   const TEXT_INPUT = 'textarea, [contenteditable=""], [contenteditable="true"], input:not([type=button], [type=submit], [type=reset], [type=checkbox], [type=radio], [type=range], [type=color], [type=file], [type=image], [type=hidden])';
 
   const elementOf = (event) => {

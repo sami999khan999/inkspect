@@ -317,7 +317,12 @@ export function accessibleInfo(el: Element): { role?: string; name?: string } {
   if (!name && (tag === 'img' || tag === 'area')) name = clean(el.getAttribute('alt'));
   if (!name && 'labels' in el) {
     const labels = (el as HTMLInputElement).labels;
-    if (labels?.length) name = clean(Array.from(labels, (l) => l.textContent).join(' '));
+    if (labels?.length)
+      name = clean(
+        Array.from(labels)
+          .map((l) => l.textContent)
+          .join(' '),
+      );
   }
   if (!name && tag === 'input') {
     const input = el as HTMLInputElement;

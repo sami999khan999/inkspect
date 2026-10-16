@@ -37,6 +37,7 @@ import { IconButton } from '@inkspect/shared/ui/IconButton';
 import { Menu, type MenuItem, type MenuState } from '@inkspect/shared/ui/Menu';
 import { isInPopup, listenOutsidePress, pressedOpener } from '@inkspect/shared/ui/popover';
 import { SelectionBar, type SelectionAction } from '@inkspect/shared/ui/SelectionBar';
+import { randomId } from '@inkspect/shared/id';
 import { projectDetail } from '@inkspect/shared/saved';
 import { SendModal } from '@inkspect/shared/ui/SendModal';
 import { TARGET_ATTRIBUTE, toBackground, type BridgeStatus, type CaptureKind } from '../messages';
@@ -126,6 +127,8 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [selection, setSelection] = useState<Element[]>([]);
+  /** The bar (and its panels) hidden for room; the tool stays on and its keys keep working. */
+  const [barHidden, setBarHidden] = useState(false);
   const [link, setLink] = useState<BridgeStatus>({ state: 'offline' });
   const [hidden, setHidden] = useState(false);
   // The shared shortcuts (VS Code's, remappable on either side), and the menu that takes keys.
@@ -227,7 +230,13 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
     if (toggleSignal === lastSignal.current) return;
     lastSignal.current = toggleSignal;
     setOpen((was) => {
+      // A hidden bar comes back first.
+      if (was && barHidden) {
+        setBarHidden(false);
+        return true;
+      }
       if (was) {
+        setBarHidden(false);
         setTool(null);
         setPanel(null);
         setMenu(null);
@@ -236,7 +245,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       }
       return !was;
     });
-  }, [toggleSignal]);
+  }, [toggleSignal, barHidden]);
 
   // The background puts an open toolbar back after the page reloads.
   useEffect(() => {
@@ -441,7 +450,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       if (!list.length) return;
       const many = list.length > 1;
       const copied = await copyImage(list[0]!);
-      const group = many ? crypto.randomUUID() : undefined;
+      const group = many ? randomId() : undefined;
       await saveAndOffer(
         list.map((image, index) => ({
           kind: 'screenshot',
@@ -529,7 +538,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       const details = await Promise.all(elements.map(detailsOf));
       const one = details.length === 1;
       const ok = await copyText(formatDetails(details, s.copyFormat, s.fields));
-      const group = one ? undefined : crypto.randomUUID();
+      const group = one ? undefined : randomId();
       await saveAndOffer(
         details.map((d, index) => ({
           kind: 'element',
@@ -789,6 +798,14 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
   ];
   const drawingItems = () => captureMenu((mode) => void captureDrawing(mode), keyOf);
 
+  /** Hides the bar for room, saying how to bring it back; shows it again. */
+  const toggleBar = () => {
+    if (barHidden) return setBarHidden(false);
+    setBarHidden(true);
+    setMenu(null);
+    const key = keyOf('view.toolbar');
+    showToast(key ? `Toolbar hidden. ${key} shows it again.` : 'Toolbar hidden.');
+  };
   // Keys: the shared shortcuts, by what is open (the element picker handles its own).
   const keyHandlers = useRef<Record<string, () => void>>({});
   useEffect(() => {
@@ -808,6 +825,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       'mode.devtools': () => !viewing && setPanel((p) => (p === 'console' ? null : 'console')),
       'page.bookmark': bookmarkPage,
       'open.shortcuts': () => setPanel((p) => (p === 'shortcuts' ? null : 'shortcuts')),
+      'view.toolbar': toggleBar,
       ...drawTools,
       ...colors,
       'draw.thinner': () => setDrawStyle({ width: Math.max(1, width - (width > 6 ? 2 : 1)) }),
@@ -859,7 +877,16 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
       const typing =
         focused instanceof HTMLElement &&
         (focused.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(focused.tagName));
-      if (typing || tool?.kind === 'inspect' || tool?.kind === 'region') return;
+      if (typing) return;
+      // The picker and the region select take their own keys; hiding the bar still works there.
+      if (tool?.kind === 'inspect' || tool?.kind === 'region') {
+        if (actionForChord(shortcuts.map, ['global'], chordFromEvent(event))?.id !== 'view.toolbar')
+          return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        keyHandlers.current['view.toolbar']?.();
+        return;
+      }
       if (event.key === 'Escape' && (menu || (panel && tool?.kind !== 'draw'))) {
         if (menu) closeMenu();
         else setPanel(null);
@@ -934,6 +961,11 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
           actionOf={(event) =>
             actionForChord(shortcuts.map, ['inspect'], chordFromEvent(event))?.id
           }
+          pickerKeysInUi={() => {
+            const root = bar.current?.getRootNode();
+            const focused = root instanceof ShadowRoot ? root.activeElement : null;
+            return !focused || (focused.tagName === 'BUTTON' && !!focused.closest('.bar-row'));
+          }}
         />
       )}
       {tool?.kind === 'inspect' && !offer && selection.length > 0 && (
@@ -982,6 +1014,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
         ref={floatRef}
         className={[
           'float',
+          barHidden && 'bar-hidden',
           viewing && 'docked',
           alignRight && 'align-right',
           above && 'above',
@@ -1099,6 +1132,7 @@ export function App({ host, hideHost, toggleSignal }: AppProps) {
                 closeResponsive();
                 setTool(null);
                 setPanel(null);
+                setBarHidden(false);
                 setOpen(false);
               }}
             />

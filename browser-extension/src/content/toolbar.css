@@ -145,6 +145,12 @@
     scale var(--ink-fast) var(--ink-ease);
 }
 
+/* Hidden for room (Alt+Shift+Z): the tool stays on and its keys keep working. */
+.float.bar-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* Lifted while dragged. */
 /* Docked across the top while the responsive view is open (it can't be moved then). */
 .float.docked {

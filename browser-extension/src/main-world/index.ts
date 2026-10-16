@@ -18,6 +18,25 @@ import {
 
 type InkspectWindow = Window & { __inkspectMain?: boolean };
 
+/**
+ * `JSON.stringify` that ignores `toJSON` methods pages add to built-in prototypes. Old libraries
+ * (Prototype.js) define `Array.prototype.toJSON`, which turns every array into a string, so the
+ * console entries and element details would arrive as strings instead of lists.
+ */
+function stringify(value: unknown): string | undefined {
+  const saved: [object, PropertyDescriptor][] = [];
+  for (const proto of [Array.prototype, String.prototype, Number.prototype, Boolean.prototype]) {
+    const own = Object.getOwnPropertyDescriptor(proto, 'toJSON');
+    if (own?.configurable && delete (proto as { toJSON?: unknown }).toJSON)
+      saved.push([proto, own]);
+  }
+  try {
+    return JSON.stringify(value);
+  } finally {
+    for (const [proto, own] of saved) Object.defineProperty(proto, 'toJSON', own);
+  }
+}
+
 const MAX_ENTRIES = 500;
 
 function install(): void {
@@ -53,7 +72,7 @@ function install(): void {
     if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`;
     if (typeof value === 'string') return value;
     try {
-      return JSON.stringify(value) ?? String(value);
+      return stringify(value) ?? String(value);
     } catch {
       return String(value);
     }
@@ -131,17 +150,22 @@ function install(): void {
   const originalFetch = window.fetch;
   window.fetch = async function (...args: Parameters<typeof fetch>) {
     const [input, init] = args;
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const method = (
-      init?.method || (input instanceof Request ? input.method : 'GET')
-    ).toUpperCase();
+    // Never break the page's own request: anything we can't read is listed as best we can.
     const entry: NetworkEntry = {
       id: `f${nextId++}`,
-      method,
-      url,
+      method: 'GET',
+      url: '',
       type: 'fetch',
       time: Date.now(),
     };
+    try {
+      entry.url = input instanceof Request ? input.url : String(input);
+      entry.method = String(
+        init?.method || (input instanceof Request ? input.method : 'GET'),
+      ).toUpperCase();
+    } catch {
+      // Listed without them.
+    }
     push(network, entry);
     try {
       const response = await originalFetch.apply(this, args);
@@ -166,10 +190,17 @@ function install(): void {
     url: string | URL,
     ...rest: unknown[]
   ) {
+    // Never break the page's own request: a URL we can't read is listed as given.
+    let href = String(url);
+    try {
+      href = new URL(url, location.href).href;
+    } catch {
+      // Kept as given.
+    }
     entries.set(this, {
       id: `x${nextId++}`,
-      method: method.toUpperCase(),
-      url: new URL(url, location.href).href,
+      method: String(method).toUpperCase(),
+      url: href,
       type: 'xhr',
       time: Date.now(),
     });
@@ -217,7 +248,7 @@ function install(): void {
       result = { error: error instanceof Error ? error.message : String(error) };
     }
     window.dispatchEvent(
-      new CustomEvent(PAGE_RESPONSE_EVENT, { detail: JSON.stringify({ id, result }) }),
+      new CustomEvent(PAGE_RESPONSE_EVENT, { detail: stringify({ id, result }) }),
     );
   });
 }
